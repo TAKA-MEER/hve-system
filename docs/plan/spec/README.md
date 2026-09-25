@@ -53,6 +53,7 @@
 | **[Spec-open.md](Spec-open.md)** | **未確定事項・決定の記録・th-system との関係** | 更新中 |
 | [Spec-safety.md](Spec-safety.md) | 上下端と天井（検知手段・止め方） | 初版 |
 | [Spec-ui.md](Spec-ui.md) | 操作画面（速度スライダー・設定画面） | 初版 |
+| [mockup/index.html](mockup/index.html) | **操作画面の見た目。**ブラウザで開ける単一ファイル。Spec-ui.md と対 | 初版 |
 
 **領域ごとの詳細ファイルは、書く内容ができた時点で足す。**想定している分け方（確定ではない）:
 

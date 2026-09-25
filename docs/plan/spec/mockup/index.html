@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>hve 操作画面モックアップ</title>
+<style>
+/* ============================================================
+   hve-system 操作画面モックアップ
+   docs/plan/spec/Spec-ui.md に対応する見た目と操作感の確認用。実装ではない。
+   外部リソースを一切読み込まない（th-rpi-ap 配下にインターネットが無いため）。
+   ============================================================ */
+:root{
+  --bg:#0f1117; --panel:#1a1d24; --inset:#12141b;
+  --ctrl:#252830; --ctrl-hi:#343849; --ctrl-on:#2c4a74;
+  --bd:#2a2d35; --bd-hi:#3a3f4c;
+  --tx:#e6e8ec; --mut:#8b93a1; --dim:#5c6470;
+  --brand:#3f8ae0; --brand-lt:#7fb4ee;
+  --ok:#4caf50; --ok-tx:#8fd694;
+  --warn:#ffb74d; --warn-tx:#ffcc80;
+  --ng:#ef5350; --ng-tx:#ff9b98;
+  --mock:#8e5bd0;
+  --r:8px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit}
+
+/* ---------- ヘッダ ---------- */
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--bd)}
+.title{font-weight:700;margin-right:8px;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--inset);border:1px solid var(--bd);font-size:13px;white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok)}
+.badge.warn{border-color:var(--warn);color:var(--warn-tx)} .badge.warn .dot{background:var(--warn)}
+.badge.ng{border-color:var(--ng);color:var(--ng-tx)} .badge.ng .dot{background:var(--ng)}
+.badge.fake{border-color:var(--mock);color:#d7c2f3}
+.spacer{flex:1}
+.hbtn{padding:8px 14px;border-radius:var(--r);border:1px solid var(--bd-hi);background:var(--ctrl);cursor:pointer}
+.hbtn:hover{background:var(--ctrl-hi)}
+
+/* ---------- 本体 ---------- */
+main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:12px;padding:12px;min-height:calc(100% - 56px)}
+@media (max-width:900px),(orientation:portrait){main{grid-template-columns:1fr}}
+
+/* 映像 */
+.video{position:relative;background:#000;border-radius:var(--r);overflow:hidden;aspect-ratio:4/3;align-self:start;border:1px solid var(--bd)}
+.video svg.scene{position:absolute;inset:0;width:100%;height:100%}
+.guide{position:absolute;inset:0;pointer-events:none}
+.guide .h,.guide .v{position:absolute;background:rgba(127,180,238,.55)}
+.guide .h{left:0;right:0;top:50%;height:1px}
+.guide .v{top:0;bottom:0;left:50%;width:1px}
+.guide .box{position:absolute;left:25%;top:25%;width:50%;height:50%;border:1px dashed rgba(127,180,238,.45)}
+.osd{position:absolute;left:8px;top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.osd span{background:rgba(0,0,0,.55);padding:2px 8px;border-radius:4px;font-size:13px;font-variant-numeric:tabular-nums}
+.stopbar{position:absolute;left:0;right:0;bottom:0;padding:10px 14px;font-weight:700;background:rgba(0,0,0,.72);border-top:3px solid var(--warn);color:var(--warn-tx);display:none}
+.stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
+.stopbar.show{display:block}
+.nosig{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--mut);background:#050608;font-size:18px}
+.nosig.show{display:flex}
+
+/* 操作パネル */
+.panel{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:var(--r);padding:12px}
+.card h2{margin:0 0 10px;font-size:14px;color:var(--mut);font-weight:600;display:flex;justify-content:space-between}
+.lift{display:grid;grid-template-columns:1fr 64px;gap:12px}
+.hold{display:flex;align-items:center;justify-content:center;gap:8px;min-height:84px;border-radius:var(--r);border:1px solid var(--bd-hi);
+  background:var(--ctrl);font-size:20px;font-weight:700;cursor:pointer;touch-action:none}
+.hold:active,.hold.on{background:var(--ctrl-on);border-color:var(--brand)}
+.hold.blocked{opacity:.4;cursor:not-allowed}
+.liftbtns{display:flex;flex-direction:column;gap:8px}
+
+/* 高さのゲージ */
+.gauge{position:relative;border-radius:6px;background:var(--inset);border:1px solid var(--bd)}
+.gauge .fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(var(--brand),#1c3d66);border-radius:0 0 5px 5px}
+.gauge .top{position:absolute;left:-4px;right:-4px;height:0;border-top:2px dashed var(--ng)}
+.gauge .lbl{position:absolute;right:calc(100% + 4px);font-size:11px;color:var(--mut);white-space:nowrap;transform:translateY(-50%)}
+.readout{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin-top:10px;font-size:13px;font-variant-numeric:tabular-nums}
+.readout dt{color:var(--mut)} .readout dd{margin:0;text-align:right}
+
+.slider{display:grid;grid-template-columns:6.5em 1fr 5.5em;align-items:center;gap:8px;margin-top:10px;font-size:13px}
+.slider label{color:var(--mut)}
+.slider output{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--brand);height:32px}
+
+.pad{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,64px);gap:6px}
+.pad .hold{min-height:0;font-size:18px}
+.pad .c{display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;color:var(--mut);background:var(--inset);border-radius:var(--r);font-variant-numeric:tabular-nums}
+
+/* ---------- 設定画面 ---------- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto;z-index:10}
+.overlay.show{display:flex}
+.sheet{background:var(--panel);border:1px solid var(--bd-hi);border-radius:12px;max-width:720px;width:100%;padding:16px}
+.sheet h1{font-size:18px;margin:0 0 4px}
+.note{color:var(--mut);font-size:13px;margin:0 0 12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--bd);font-size:14px}
+th{color:var(--mut);font-weight:600}
+td input{width:100%;min-width:4.5em;padding:8px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
+td input.bad{border-color:var(--ng)}
+tbody td:first-child{white-space:nowrap}
+tr.errrow td{padding:0 6px;border-bottom:0}
+.err{color:var(--ng-tx);font-size:12px}
+.row-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.primary:disabled{opacity:.4;cursor:not-allowed}
+.prov{margin-top:16px;padding:10px 12px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:13px}
+.prov ul{margin:6px 0 0;padding-left:1.2em}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:8px 16px;border-radius:999px;font-weight:700;display:none;z-index:20}
+
+/* ---------- モックアップ専用（実装には無い） ---------- */
+.mockbar{margin:0 12px 12px;padding:10px 12px;border:1px dashed var(--mock);border-radius:var(--r);background:#1a1426}
+.mockbar b{color:#d7c2f3;font-size:13px}
+.mockbar .row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.mockbar button{padding:6px 10px;border-radius:6px;border:1px solid #5a3f80;background:#2a1f3d;font-size:13px;cursor:pointer}
+.mockbar button.on{background:#5a3f80}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="title">hve 昇降・カメラ</span>
+  <span class="badge" id="bLink"><span class="dot"></span><span>昇降部</span></span>
+  <span class="badge" id="bCeil"><span class="dot"></span><span>天井</span></span>
+  <span class="badge" id="bClients"><span>端末 1 台</span></span>
+  <span class="badge warn" id="bProv" title="仮値のまま動いているパラメータがあります"><span class="dot"></span><span>仮値で動作中</span></span>
+  <span class="badge fake" id="bFake" style="display:none">偽物のモード</span>
+  <span class="spacer"></span>
+  <button class="hbtn" id="openSettings">設定</button>
+</header>
+
+<main>
+  <!-- 映像 -->
+  <div class="video" id="video">
+    <svg class="scene" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-label="カメラ映像（モックアップでは絵）">
+      <g id="world">
+        <rect x="-2000" y="-4000" width="4640" height="8000" fill="#2b2f36"/>
+        <!-- 天井 -->
+        <rect x="-2000" y="-4000" width="4640" height="2600" fill="#3a3e46"/>
+        <rect x="-2000" y="-1400" width="4640" height="14" fill="#555b66"/>
+        <!-- 配電盤 -->
+        <rect x="80" y="-900" width="480" height="2000" fill="#b9bec6" stroke="#8a9099" stroke-width="4"/>
+        <rect x="100" y="-880" width="440" height="160" fill="#9aa1ab"/>
+        <text x="320" y="-790" fill="#39404a" font-size="34" text-anchor="middle" font-family="sans-serif">盤上部</text>
+        <g fill="#6d7580">
+          <rect x="130" y="-690" width="80" height="50"/><rect x="230" y="-690" width="80" height="50"/>
+          <rect x="330" y="-690" width="80" height="50"/><rect x="430" y="-690" width="80" height="50"/>
+        </g>
+        <g fill="#e0a52c"><circle cx="170" cy="-600" r="10"/><circle cx="270" cy="-600" r="10"/><circle cx="370" cy="-600" r="10"/></g>
+        <rect x="100" y="-560" width="440" height="6" fill="#8a9099"/>
+        <g fill="#7b838e">
+          <rect x="130" y="-500" width="380" height="30"/><rect x="130" y="-440" width="380" height="30"/>
+          <rect x="130" y="-380" width="380" height="30"/><rect x="130" y="-320" width="380" height="30"/>
+        </g>
+        <rect x="140" y="-200" width="360" height="300" fill="#a9afb8" stroke="#8a9099" stroke-width="3"/>
+        <text x="320" y="-40" fill="#5b636e" font-size="24" text-anchor="middle" font-family="sans-serif">盤面</text>
+      </g>
+    </svg>
+    <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
+    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0°</span><span id="osdY">ヨー 0°</span></div>
+    <div class="nosig" id="nosig">映像がありません</div>
+    <div class="stopbar" id="stopbar"></div>
+  </div>
+
+  <!-- 操作 -->
+  <div class="panel">
+    <section class="card">
+      <h2><span>昇降</span><span id="liftState">停止中</span></h2>
+      <div class="lift">
+        <div class="liftbtns">
+          <button class="hold" data-axis="lift_up">▲ 上昇</button>
+          <button class="hold" data-axis="lift_down">▼ 下降</button>
+        </div>
+        <div class="gauge" id="gauge" title="高さ">
+          <div class="fill" id="gFill"></div>
+          <div class="top" id="gTop"><span class="lbl">上端</span></div>
+        </div>
+      </div>
+      <div class="slider"><label for="sUp">上昇の速度</label><input type="range" id="sUp" data-key="lift_up"><output id="oUp"></output></div>
+      <div class="slider"><label for="sDown">下降の速度</label><input type="range" id="sDown" data-key="lift_down"><output id="oDown"></output></div>
+      <dl class="readout">
+        <dt>高さ</dt><dd id="rH">—</dd>
+        <dt>天井まで</dt><dd id="rC">—</dd>
+        <dt>下端</dt><dd id="rB">—</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2><span>カメラの向き</span><button class="hbtn" id="toggleGuide" style="padding:2px 10px;font-size:12px">ガイド線</button></h2>
+      <div class="pad">
+        <div></div><button class="hold" data-axis="pitch_up">▲</button><div></div>
+        <button class="hold" data-axis="yaw_left">◀</button>
+        <div class="c"><span id="cP">ピッチ 0°</span><span id="cY">ヨー 0°</span></div>
+        <button class="hold" data-axis="yaw_right">▶</button>
+        <div></div><button class="hold" data-axis="pitch_down">▼</button><div></div>
+      </div>
+      <div class="slider"><label for="sPitch">ピッチの速度</label><input type="range" id="sPitch" data-key="pitch"><output id="oPitch"></output></div>
+      <div class="slider"><label for="sYaw">ヨーの速度</label><input type="range" id="sYaw" data-key="yaw"><output id="oYaw"></output></div>
+    </section>
+  </div>
+</main>
+
+<div class="mockbar">
+  <b>モックアップ専用（実装の画面には無い）: 状況を再現する</b>
+  <div class="row" id="mockRow">
+    <button data-mock="normal" class="on">通常</button>
+    <button data-mock="ceilNear">天井が近い</button>
+    <button data-mock="ceilStale">天井の値が届かない</button>
+    <button data-mock="link">昇降部と切断</button>
+    <button data-mock="topUnset">上端が未設定</button>
+    <button data-mock="height">高さセンサ故障</button>
+    <button data-mock="novideo">映像なし</button>
+    <button data-mock="fake">偽物のモード表示</button>
+    <button data-mock="clients">端末 2 台</button>
+    <button data-mock="reload">画面を開き直す</button>
+  </div>
+</div>
+
+<!-- 設定画面 -->
+<div class="overlay" id="settings">
+  <div class="sheet" role="dialog" aria-labelledby="stTitle">
+    <h1 id="stTitle">設定</h1>
+    <p class="note">機器（カメラ部）に保存され、どの端末から開いても同じ設定になります。誰でも変更できます。<br>
+      スライダーの位置は保存されず、画面を開くたびに<b>初期値</b>から始まります。</p>
+    <table>
+      <thead><tr><th>速度</th><th>下限</th><th>上限</th><th>初期値</th><th>単位</th></tr></thead>
+      <tbody id="stBody"></tbody>
+    </table>
+    <div class="err" id="stErr"></div>
+    <div class="row-actions">
+      <button class="hbtn" id="stCancel">閉じる（保存しない）</button>
+      <button class="hbtn primary" id="stSave">保存</button>
+    </div>
+    <div class="prov">
+      <b>仮値で動作中のパラメータ</b>（実測で確定するまで。ここでは変更できない）
+      <ul>
+        <li>天井までの余裕: 500 mm</li>
+        <li>天井の値を「古い」とみなす時間: 600 ms</li>
+        <li>高さの値を「古い」とみなす時間: 600 ms</li>
+        <li>連続駆動の上限: 10 s</li>
+      </ul>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">保存しました</div>
+
+<script>
+(() => {
+  // ---- 設定（機器に保存されている想定） ----
+  const AXES = [
+    {key:'lift_up',   name:'上昇', unit:'%',     abs:[0,100]},
+    {key:'lift_down', name:'下降', unit:'%',     abs:[0,100]},
+    {key:'pitch',     name:'ピッチ', unit:'deg/s', abs:[0.1,60]},
+    {key:'yaw',       name:'ヨー',   unit:'deg/s', abs:[0.1,60]},
+  ];
+  let settings = {
+    lift_up:{min:10,max:60,init:30}, lift_down:{min:10,max:60,init:30},
+    pitch:{min:1,max:30,init:10},    yaw:{min:1,max:30,init:10},
+  };
+
+  // ---- 機体の状態（シミュレーション） ----
+  const S = {height:120, top:1500, ceilingAt:2200, pitch:0, yaw:0,
+             link:true, ceilStale:false, topUnset:false, heightBad:false, video:true,
+             active:null, speed:0, reason:'CMD_STOP', lastHold:0};
+  const CEIL_MARGIN = 500, PITCH_LIM = 45, YAW_LIM = 170;
+  const LIFT_MMPS_AT_100 = 120; // 絵を動かすための適当な値（仕様ではない）
+
+  const REASON = {
+    NONE:'', CMD_STOP:'',
+    CEILING_NEAR:['ng','天井が近いため上昇できません'],
+    CEILING_STALE:['ng','天井センサの値が届かないため上昇できません'],
+    HEIGHT_UNKNOWN:['ng','高さセンサが読めないため上昇できません'],
+    TOP_UNSET:['ng','上端が未設定のため上昇できません'],
+    TOP:['warn','上端に達しました'],
+    BOTTOM:['warn','下端です'],
+    LINK_LOST:['ng','昇降部と繋がっていません。昇降できません'],
+    HOLD_TIMEOUT:['warn','操作が途絶えたため停止しました'],
+    AXIS_LIMIT:['warn','可動範囲の端です'],
+  };
+
+  const $ = id => document.getElementById(id);
+  const sliders = {lift_up:$('sUp'), lift_down:$('sDown'), pitch:$('sPitch'), yaw:$('sYaw')};
+  const outs    = {lift_up:$('oUp'), lift_down:$('oDown'), pitch:$('oPitch'), yaw:$('oYaw')};
+
+  function applySliders(){ // 画面を開いたとき: 範囲＝下限〜上限、位置＝初期値
+    for (const a of AXES){
+      const s = sliders[a.key], c = settings[a.key];
+      s.min = c.min; s.max = c.max; s.step = a.unit==='%' ? 1 : 0.5; s.value = c.init;
+      outs[a.key].textContent = fmt(c.init, a.unit);
+    }
+  }
+  const fmt = (v,u) => (u==='%' ? Math.round(v) : (+v).toFixed(1)) + ' ' + u;
+  for (const a of AXES) sliders[a.key].addEventListener('input', e => outs[a.key].textContent = fmt(e.target.value, a.unit));
+
+  // ---- 押している間だけ動く ----
+  const speedOf = axis => +sliders[axis.startsWith('lift') ? axis : axis.split('_')[0]].value;
+  document.querySelectorAll('.hold').forEach(b => {
+    const down = e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); S.active = b.dataset.axis; S.lastHold = performance.now(); b.classList.add('on'); };
+    const up = () => { if (S.active === b.dataset.axis) S.active = null; b.classList.remove('on'); };
+    b.addEventListener('pointerdown', down);
+    ['pointerup','pointercancel','lostpointercapture'].forEach(t => b.addEventListener(t, up));
+    b.addEventListener('contextmenu', e => e.preventDefault());
+  });
+
+  // ---- 判定（DetailedDesign.md §4.1 の順） ----
+  function decide(axis){
+    const ceilGap = S.ceilingAt - S.height;
+    if (axis === 'lift_up'){
+      if (!S.link) return 'LINK_LOST';
+      if (S.ceilStale) return 'CEILING_STALE';
+      if (ceilGap <= CEIL_MARGIN) return 'CEILING_NEAR';
+      if (S.heightBad) return 'HEIGHT_UNKNOWN';
+      if (S.topUnset) return 'TOP_UNSET';
+      if (S.height >= S.top) return 'TOP';
+      return 'NONE';
+    }
+    if (axis === 'lift_down'){
+      if (!S.link) return 'LINK_LOST';
+      if (S.height <= 100) return 'BOTTOM';
+      return 'NONE';
+    }
+    if (axis === 'pitch_up'   && S.pitch >=  PITCH_LIM) return 'AXIS_LIMIT';
+    if (axis === 'pitch_down' && S.pitch <= -PITCH_LIM) return 'AXIS_LIMIT';
+    if (axis === 'yaw_right'  && S.yaw   >=  YAW_LIM)   return 'AXIS_LIMIT';
+    if (axis === 'yaw_left'   && S.yaw   <= -YAW_LIM)   return 'AXIS_LIMIT';
+    return 'NONE';
+  }
+
+  let last = performance.now();
+  function tick(now){
+    const dt = Math.min(0.2, (now - last) / 1000); last = now;
+    let reason = 'CMD_STOP';
+    if (S.active){
+      reason = decide(S.active);
+      if (reason === 'NONE'){
+        const v = speedOf(S.active);
+        switch (S.active){
+          case 'lift_up':    S.height += LIFT_MMPS_AT_100 * v/100 * dt * 8; break;
+          case 'lift_down':  S.height = Math.max(100, S.height - LIFT_MMPS_AT_100 * v/100 * dt * 8); break;
+          case 'pitch_up':   S.pitch = Math.min( PITCH_LIM, S.pitch + v*dt); break;
+          case 'pitch_down': S.pitch = Math.max(-PITCH_LIM, S.pitch - v*dt); break;
+          case 'yaw_right':  S.yaw   = Math.min( YAW_LIM,   S.yaw   + v*dt); break;
+          case 'yaw_left':   S.yaw   = Math.max(-YAW_LIM,   S.yaw   - v*dt); break;
+        }
+      }
+    }
+    S.reason = reason;
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  function render(){
+    const up = S.active === 'lift_up', dn = S.active === 'lift_down';
+    // ヘッダ
+    setBadge($('bLink'), S.link ? '' : 'ng', S.link ? '昇降部 接続' : '昇降部 切断');
+    const gap = Math.round(S.ceilingAt - S.height);
+    setBadge($('bCeil'), S.ceilStale ? 'ng' : (gap <= CEIL_MARGIN ? 'warn' : ''), S.ceilStale ? '天井 値なし' : `天井まで ${gap} mm`);
+    // 映像（高さ・ピッチ・ヨーで絵が動く）
+    // 画面中央に来る世界の y: 下端では盤面（y≈-50）、上がるほど盤上部（y≈-800）へ。ピッチ上向きでさらに上
+    const cy = -50 - (S.height - 100) * 0.62 - S.pitch * 9, tx = -S.yaw * 6;
+    $('world').setAttribute('transform', `translate(${tx},${240 - cy})`);
+    $('osdH').textContent = S.heightBad ? '高さ 読めない' : `高さ ${Math.round(S.height)} mm`;
+    $('osdP').textContent = `ピッチ ${S.pitch.toFixed(1)}°`;
+    $('osdY').textContent = `ヨー ${S.yaw.toFixed(1)}°`;
+    $('cP').textContent = `ピッチ ${S.pitch.toFixed(1)}°`;
+    $('cY').textContent = `ヨー ${S.yaw.toFixed(1)}°`;
+    // 停止理由
+    const r = REASON[S.reason];
+    const bar = $('stopbar');
+    if (r){ bar.className = 'stopbar show' + (r[0]==='ng' ? ' ng' : ''); bar.textContent = r[1]; }
+    else bar.className = 'stopbar';
+    // 昇降
+    $('liftState').textContent = (up||dn) && S.reason==='NONE' ? (up ? `上昇中 ${sliders.lift_up.value}%` : `下降中 ${sliders.lift_down.value}%`) : '停止中';
+    const upBlocked = decide('lift_up') !== 'NONE', dnBlocked = decide('lift_down') !== 'NONE';
+    document.querySelector('[data-axis=lift_up]').classList.toggle('blocked', upBlocked);
+    document.querySelector('[data-axis=lift_down]').classList.toggle('blocked', dnBlocked);
+    const maxH = 1800;
+    $('gFill').style.height = (S.heightBad ? 0 : Math.min(100, S.height / maxH * 100)) + '%';
+    $('gTop').style.display = S.topUnset ? 'none' : '';
+    $('gTop').style.bottom = (S.top / maxH * 100) + '%';
+    $('rH').textContent = S.heightBad ? '読めない' : `${Math.round(S.height)} mm`;
+    $('rC').textContent = S.ceilStale ? '値が届かない' : `${gap} mm`;
+    $('rB').textContent = S.height <= 100 ? '押されている' : '—';
+    $('nosig').classList.toggle('show', !S.video);
+  }
+  function setBadge(el, cls, text){ el.className = 'badge' + (cls ? ' ' + cls : ''); el.lastElementChild.textContent = text; }
+
+  // ---- 設定画面 ----
+  let draft;
+  function openSettings(){
+    draft = JSON.parse(JSON.stringify(settings));
+    $('stBody').innerHTML = AXES.map(a => `<tr data-key="${a.key}"><td>${a.name}</td>` +
+      ['min','max','init'].map(f => `<td><input type="number" inputmode="decimal" data-f="${f}" value="${draft[a.key][f]}"></td>`).join('') +
+      `<td>${a.unit}</td></tr><tr class="errrow" data-key="${a.key}"><td></td><td colspan="4" class="err"></td></tr>`).join('');
+    $('stBody').querySelectorAll('input').forEach(i => i.addEventListener('input', validate));
+    validate();
+    $('settings').classList.add('show');
+  }
+  function validate(){
+    let ok = true;
+    for (const a of AXES){
+      const row = $('stBody').querySelector(`tr[data-key=${a.key}]:not(.errrow)`);
+      const vals = {};
+      row.querySelectorAll('input').forEach(i => vals[i.dataset.f] = i.value === '' ? NaN : +i.value);
+      const errs = [];
+      if (Object.values(vals).some(Number.isNaN)) errs.push('数値を入れてください');
+      else {
+        if (vals.min < a.abs[0] || vals.max > a.abs[1]) errs.push(`${a.abs[0]}〜${a.abs[1]} ${a.unit} の範囲で入れてください`);
+        if (!(vals.min <= vals.init && vals.init <= vals.max)) errs.push('下限 ≦ 初期値 ≦ 上限 にしてください');
+      }
+      row.querySelectorAll('input').forEach(i => i.classList.toggle('bad', errs.length > 0));
+      $('stBody').querySelector(`tr.errrow[data-key=${a.key}] .err`).textContent = errs.join('。');
+      if (errs.length) ok = false; else draft[a.key] = vals;
+    }
+    $('stSave').disabled = !ok;
+    $('stErr').textContent = ok ? '' : '正しくない値があるため保存できません';
+    return ok;
+  }
+  $('openSettings').onclick = openSettings;
+  $('stCancel').onclick = () => $('settings').classList.remove('show');
+  $('stSave').onclick = () => {
+    if (!validate()) return;
+    settings = draft; applySliders();
+    $('settings').classList.remove('show');
+    const t = $('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500);
+  };
+
+  // ---- モックアップ専用: 状況の再現 ----
+  $('toggleGuide').onclick = () => { const g = $('guide'); g.style.display = g.style.display === 'none' ? '' : 'none'; };
+  $('mockRow').addEventListener('click', e => {
+    const m = e.target.dataset.mock; if (!m) return;
+    const toggles = {ceilStale:'ceilStale', topUnset:'topUnset', height:'heightBad'};
+    if (m === 'normal'){
+      Object.assign(S, {link:true, ceilStale:false, topUnset:false, heightBad:false, video:true, ceilingAt:2200});
+      $('bFake').style.display = 'none'; $('bClients').lastElementChild.textContent = '端末 1 台';
+      document.querySelectorAll('#mockRow button').forEach(b => b.classList.toggle('on', b.dataset.mock === 'normal'));
+      return;
+    }
+    if (m === 'reload'){ applySliders(); return; }
+    document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');
+    e.target.classList.toggle('on');
+    const on = e.target.classList.contains('on');
+    if (toggles[m]) S[toggles[m]] = on;
+    if (m === 'link') S.link = !on;
+    if (m === 'novideo') S.video = !on;
+    if (m === 'ceilNear') S.ceilingAt = on ? S.height + 450 : 2200;
+    if (m === 'fake') $('bFake').style.display = on ? '' : 'none';
+    if (m === 'clients') $('bClients').lastElementChild.textContent = on ? '端末 2 台' : '端末 1 台';
+  });
+  applySliders();
+  // 確認用: ?h=<高さ>&ceil=near|stale&hold=<軸> で状態を作って開ける
+  const q = new URLSearchParams(location.search);
+  if (q.has('h')) S.height = +q.get('h');
+  if (q.get('ceil') === 'near') S.ceilingAt = S.height + 450;
+  if (q.get('ceil') === 'stale') S.ceilStale = true;
+  if (q.has('hold')) S.active = q.get('hold');
+  if (q.has('settings')) openSettings();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
