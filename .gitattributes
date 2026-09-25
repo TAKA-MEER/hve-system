@@ -1,0 +1,8 @@
+# すべてのテキストファイルは LF で統一（Windows checkout でも CRLF に変換しない）
+* text=auto eol=lf
+
+# バイナリファイル
+*.png binary
+*.jpg binary
+*.pdf binary
+*.stl binary
