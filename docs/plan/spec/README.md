@@ -37,7 +37,7 @@
 | --- | --- |
 | 対象・用語・目標・範囲 | [Spec.md](Spec.md) |
 | **何が決まっていないか** | [Spec-open.md](Spec-open.md) §2 |
-| th-system 側がこちらに求めていること（写し） | [Spec-open.md](Spec-open.md) §1 |
+| th-system との関係（独立・通信しない） | [Spec.md](Spec.md) §4 ／ [Spec-open.md](Spec-open.md) §1 |
 | 先行試作から分かっていること | [Spec-open.md](Spec-open.md) §3 ／ [source/README.md](../source/README.md) |
 | ノード名・ピン・作業パケット | [詳細設計書](../detailed/README.md) |
 | 実装の順番・進捗 | [ImplementationPlan.md](../ImplementationPlan.md) |
@@ -50,17 +50,17 @@
 | ファイル | 内容 | 状態 |
 | --- | --- | --- |
 | **[Spec.md](Spec.md)** | **本体。**対象・用語・目標・設計思想・全体構成・目次 | 骨格 |
-| **[Spec-open.md](Spec-open.md)** | **th-system からの要求の写し・未確定事項・決定の記録** | 初版 |
+| **[Spec-open.md](Spec-open.md)** | **未確定事項・決定の記録・th-system との関係** | 更新中 |
 
 **領域ごとの詳細ファイルは、書く内容ができた時点で足す。**想定している分け方（確定ではない）:
 
 | 候補 | 内容 |
 | --- | --- |
-| `Spec-lift.md` | 昇降（高さ）の振る舞い・範囲・速度・停止精度 |
-| `Spec-camera.md` | カメラの向き（ピッチ・ヨー）・撮影・映像の受け渡し |
-| `Spec-safety.md` | 安全（上限・下限・通信断・転倒・走行中の昇降禁止） |
-| `Spec-interface.md` | th-system との結合（到着・昇降完了・撮影完了・中断） |
-| `Spec-ops.md` | 起動・操作・終了の手順と操作画面 |
+| `Spec-lift.md` | 昇降（高さ）の振る舞い・範囲・速度・止め方 |
+| `Spec-camera.md` | カメラ部（ヨー・ピッチ・映像・電源） |
+| `Spec-safety.md` | 安全（上限・下限・通信断・本システム自身の非常停止） |
+| `Spec-ui.md` | 操作画面 |
+| `Spec-ops.md` | 起動・操作・終了の手順 |
 | `Spec-params.md` | パラメータ一覧・逆算の連鎖 |
 
 ファイルを足したらこの表を「ファイル構成」の表へ移す。
@@ -74,4 +74,4 @@
 | --- | --- |
 | 全体を掴みたい | [Spec.md](Spec.md) だけ |
 | **何が決まっていないか知りたい** | [Spec-open.md](Spec-open.md) §2 |
-| th-system との関係を知りたい | [Spec-open.md](Spec-open.md) §1 → th-system [Spec-onsite.md](../../../../th-system/docs/plan/spec/Spec-onsite.md) §7 |
+| th-system との関係を知りたい | [Spec.md](Spec.md) §4 → [Spec-open.md](Spec-open.md) §1 |

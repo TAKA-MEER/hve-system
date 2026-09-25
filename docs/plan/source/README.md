@@ -8,8 +8,8 @@ spec に統合する前の材料。**仕様の正ではない。**spec に取り
 
 | 試作 | 場所 | 中身 |
 | --- | --- | --- |
-| 昇降モータ制御 | `../elevator-motor-control/設計書.md` ／ `src/` | ESP32 + MD10CR3（DIR+PWM）。ブラウザから WebSocket で上昇・下降・停止。デッドマン 600 ms・連続駆動上限 10 s（暫定）。リミットスイッチ無し |
-| 無線カメラ | `../esp32cam-test/src/main.cpp` | Freenove ESP32-WROVER CAM（OV2640）。ポート 80 で閲覧ページ、81 で MJPEG 配信 |
+| 昇降モータ制御（**昇降機の仮動作用プログラム**） | `../elevator-motor-control/設計書.md` ／ `src/` | ESP32 + MD10 系（DIR+PWM）。ブラウザから WebSocket で上昇・下降・停止。デッドマン 600 ms・連続駆動上限 10 s（暫定）。リミットスイッチ無し |
+| 無線カメラ（**不採用**） | `../esp32cam-test/src/main.cpp` | Freenove ESP32-WROVER CAM（OV2640）。ポート 80 で閲覧ページ、81 で MJPEG 配信。カメラ部はラズパイ 4 ＋ Web カメラに決まったので経緯としてのみ残す |
 
 パスはリポジトリ直下（`hve-system/`）基準。
 

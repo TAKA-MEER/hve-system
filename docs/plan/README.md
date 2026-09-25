@@ -16,6 +16,7 @@
 | [`source/`](source/README.md) | spec に統合する前の原典・先行試作の設計書への参照 | 参照専用 |
 | [`ImplementationPlan.md`](ImplementationPlan.md) | 実装の進め方と進み具合 | 進め方（§2）のみ確定 |
 | [`EXCEPTION-LEDGER.md`](EXCEPTION-LEDGER.md) | デモ特例で省略・バイパスした事項の台帳 | 空 |
+| [`operation-ideas.md`](operation-ideas.md) | 盤前の操作を補う案（検討メモ） | 案出し |
 
 新しく読むならまず `spec/README.md`。
 

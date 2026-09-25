@@ -12,8 +12,8 @@
 
 | 完全設計書の ID | 詳細設計で要ること |
 | --- | --- |
-| `H-A1`〜`H-A6` | 決まり次第、[DetailedDesign.md](DetailedDesign.md) §2 と [-names.md](DetailedDesign-names.md) §0 を書く |
-| `H-X1` | 走行禁止の信号の名前・発行者・受け手（th-system 側の変更が要るなら差分案をユーザーに渡す） |
+| `H-A1`〜`H-A5`（決定済み） | [DetailedDesign.md](DetailedDesign.md) §2 と [-names.md](DetailedDesign-names.md) §0 を書く。**`H-A7`（画面をどの機器が出すか）が決まるまで通信の設計は書けない** |
+| `H-A8` | 映像の解像度・フレームレートの上限値と、th-system と同時に動かす確認の手順 |
 
 ## 3. レビュー指摘管理表
 

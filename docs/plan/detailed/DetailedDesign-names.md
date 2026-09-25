@@ -11,12 +11,12 @@
 
 ## 0. 命名規則
 
-未定。ROS2 を使う場合は th-system [DetailedDesign-names.md](../../../../th-system/docs/plan/detailed/DetailedDesign-names.md) §0 に揃える
-（パッケージ接頭辞だけを本システム用に決める）。
+未定（`H-A7` の後）。
 
-## 1. th-system 側の名前（参照のみ・こちらでは発明しない）
+## 1. th-system 側の名前（参照のみ）
 
-th-system 側で既に存在する、結合に関わる名前。**正は th-system の文書とコード。**
+**th-system とは通信しない**（[Spec.md](../spec/Spec.md) §4 `HD-1`）ので、実装でこれらを使うことは無い。
+th-system 側の文書を読むときの手がかりとしてだけ残す。**正は th-system の文書とコード。**
 
 | 名前 | 何か | 出典 |
 | --- | --- | --- |
