@@ -11,7 +11,7 @@
 
 ## 0. 命名規則
 
-未定（`H-A7` の後）。
+未記入（[DetailedDesign.md](DetailedDesign.md) §2 の後）。
 
 ## 1. th-system 側の名前（参照のみ）
 
