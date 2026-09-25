@@ -91,3 +91,4 @@ th-system で踏んだもののうち、同じ道具（herdr ＋ opencode・Plat
 - **既に opencode が動いているペインに `herdr agent start` を打たない。**`start` はシェルプロンプト待ちを期待するため、動作中のセッションに文字列を打ち込んで壊す。`herdr agent rename` だけで登録する。
 - **`pip3 install platformio` をホストの `python3 -m pytest` と同じ環境に入れると、依存の `anyio` が pytest プラグインとして自動登録され、`ModuleNotFoundError: No module named '_pytest.scope'` でテストが全滅する**（この環境の `pytest` は 6.2.5）。`python3 -m pytest -p no:anyio ...` で回避できる（th-system 2026-09-05）。
 - **`pkill -f <パターン>` は自分のシェルを殺すことがある**（パターンが自分のコマンドラインにマッチする）。PID 指定で止める。
+- **この PC には PlatformIO Core が複数入っている**（`pio run` のたびに「Obsolete PIO Core v6.1.19 is used」と出る）。ビルドは通るので無視してよい。ファームの platform は `espressif32@7.0.1` に固定する（2026-09-25 に先行試作がこの版でビルドできることを確認。`ledcSetup` 等の API が版で変わる）。
