@@ -191,7 +191,7 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 | --- | --- | --- |
 | ~~0~~ | ~~範囲と構成・画面・停止手段・設定（`H-S1`・`H-A1`〜`H-A7`・`H-X1`〜`H-X4`・`H-X7`・`H-U*`）~~ | 2026-09-25 決定（[Spec-open.md](spec/Spec-open.md) §4） |
 | ~~0.5~~ | ~~詳細設計の初版~~ | `1ad32b2` |
-| 1 | **ユーザー判断: 提案 `P-1`〜`P-4`**（[DetailedDesign-open.md](detailed/DetailedDesign-open.md) §1） | 未着手 |
+| 1 | **ユーザー判断: 提案 `P-1`・`P-2`・`P-4`**（`P-3` は 2026-09-25 決定）（[DetailedDesign-open.md](detailed/DetailedDesign-open.md) §1） | 未着手 |
 | 2 | `WP-BASE-01` ／ **`WP-MEAS-01`（先行試作で今すぐ測れる）** ／ 部品の型番の確定（`D-5`） | 未着手 |
 | 3 | `WP-LIFT-01` ／ `WP-CAM-01` ／ `WP-VIDEO-01` | 未着手 |
 | 4 | `WP-CAM-02` ／ `WP-LIFT-02` | 未着手 |

@@ -78,7 +78,7 @@
 ```
 
 `reason` は画面に出す停止理由（カメラ部の判断 `HOLD_TIMEOUT` / `LINK_LOST` / 天井の理由 / 昇降部の `reason` のうち最も上流のもの）。
-`provisional` は仮値のまま動いているパラメータ名（`DD-3`）。`clients` は繋いでいる画面の数（提案 `P-3`）。
+`provisional` は仮値のまま動いているパラメータ名（`DD-3`）。`clients` は繋いでいる画面の数（spec [Spec-ui.md](../spec/Spec-ui.md) §1.6）。
 
 ## 3. 設定 API（カメラ部）
 
