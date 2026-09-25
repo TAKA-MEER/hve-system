@@ -3,7 +3,7 @@
 [完全設計書](../spec/README.md)（`docs/plan/spec/`）を入力とし、**実装できる形に落とした設計書。**
 
 **本体は [DetailedDesign.md](DetailedDesign.md)。**
-**2026-09-25 時点で骨格のみ。**完全設計書の構成の問い（[Spec-open.md](../spec/Spec-open.md) §2.2）が決まってから書く。
+**2026-09-25 初版。**ユーザー判断待ちの提案が [-open.md](DetailedDesign-open.md) §1 にある。
 
 ---
 
@@ -22,7 +22,7 @@
 
 | 完全設計書に書くこと | 詳細設計書に書くこと |
 | --- | --- |
-| 「昇降機が上がっている間は走行させない」 | どの信号を誰が出し、th-system のどこで受けて速度を 0 にするか |
+| 「天井の値が読めない・古いときは上昇しない」 | 天井の許可を移動指令に載せ、昇降部のウォッチドッグで止める（[DetailedDesign.md](DetailedDesign.md) §3） |
 | 「通信が途絶えたら一定時間内に止まる」 | ウォッチドッグの時間・監視する周期・実装する場所 |
 | 「上限・下限を越えて動かない」 | リミットスイッチのピン・論理・判定する関数 |
 
@@ -32,12 +32,14 @@
 
 | ファイル | 内容 | 状態 |
 | --- | --- | --- |
-| **[DetailedDesign.md](DetailedDesign.md)** | **本体。**設計方針・全体構成・作業パケットの一覧・目次 | 骨格 |
-| [DetailedDesign-names.md](DetailedDesign-names.md) | **名前辞書。**この文書に無い名前を実装で作ってはいけない | 空 |
-| [DetailedDesign-open.md](DetailedDesign-open.md) | 未確定・申し送り・レビュー指摘管理表 | 初版 |
+| **[DetailedDesign.md](DetailedDesign.md)** | **本体。**設計方針・全体構成・天井の判定の仕組み・部分ごとの設計・段階 | 初版 |
+| [DetailedDesign-names.md](DetailedDesign-names.md) | **名前辞書・仮値の一覧。**この文書に無い名前を実装で作ってはいけない | 初版 |
+| [DetailedDesign-protocol.md](DetailedDesign-protocol.md) | 通信・周期・メッセージ・設定 API | 初版 |
+| [DetailedDesign-hardware.md](DetailedDesign-hardware.md) | 機器・ピン（多くが仮）・電源・未確認の部品 | 初版 |
+| [DetailedDesign-packets.md](DetailedDesign-packets.md) | **作業パケットと受け入れ条件** | 初版 |
+| [DetailedDesign-open.md](DetailedDesign-open.md) | **ユーザー判断待ちの提案**・未確定・申し送り・レビュー指摘管理表 | 初版 |
 
-領域ごとのファイル（`DetailedDesign-<領域>.md`）と作業パケットの実体（`DetailedDesign-wp<段階>.md`）は、
-完全設計書の対応する章ができてから足す。
+200 行を超えたら分割する（`docs/plan/README.md`）。
 
 ---
 
@@ -58,7 +60,7 @@ th-system と同じ約束を置く。**詳細設計はこの 3 つを満たす�
 
 ## 4. 完全設計書が更新されたとき
 
-1. [-open.md](DetailedDesign-open.md) §2 の申し送り表を見直す（直った項目は行を消す）
+1. [-open.md](DetailedDesign-open.md) §3 の申し送り表を見直す（直った項目は行を消す）
 2. 変更に対応する詳細設計の節と、影響する作業パケットの受け入れ条件を直す
 3. **完全設計書を詳細設計書に合わせて書き換えることはしない**
 
@@ -70,5 +72,5 @@ th-system と同じ約束を置く。**詳細設計はこの 3 つを満たす�
 | --- | --- | --- | --- |
 | 1 回目 | 基盤ファイル完成時 | 安全・整合 ／ 実装可能性 | 未実施 |
 
-指摘は [-open.md](DetailedDesign-open.md) §3 に記録し、
+指摘は [-open.md](DetailedDesign-open.md) §4 に記録し、
 **「対応済み」か「対応しない＋理由」に落とし切るまで完了としない。**
