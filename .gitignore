@@ -1,4 +1,4 @@
-# Python
+# Python（camera/ のラズパイ側アプリ）
 __pycache__/
 *.pyc
 *.pyo
@@ -9,15 +9,32 @@ htmlcov/
 .venv/
 venv/
 
-# ESP32 / PlatformIO
+# ESP32 / PlatformIO（firmware/lift/）
 .pio/
+compile_commands.json
 # WiFi の SSID・パスワード（secrets.h.example をテンプレートとしてコミットする）
 **/include/secrets.h
 
-# Web UI (Vite/React 等を採る場合)
+# 画面の試験（Playwright 等）・Node の道具を使う場合
 node_modules/
 dist/
 .vite/
+test-results/
+playwright-report/
+
+# 実行時に機器・手元で作られるもの（コミットしない）
+# 設定の保存先の既定は ~/hve_data/settings.json（リポジトリ外）。手元で相対パスにしたときの保険
+hve_data/
+*.log
+.env
+
+# 測定（WP-MEAS-*）の録画。大きいのでコミットしない。結果は docs/試験項目.md に書く
+recordings/
+*.mp4
+*.avi
+*.mkv
+*.mjpeg
+*.h264
 
 # エディタ / OS
 *.swp
@@ -27,8 +44,9 @@ Thumbs.db
 desktop.ini
 .vscode/
 
-# Claude Code のローカル設定（環境依存のため共有しない）
+# Claude Code のローカル設定・再開用メモ（環境依存のため共有しない）
 .claude/settings.local.json
+.claude/RESUME.md
 
 # herdr 用の実装ブリーフ置き場（共有しない）
 .briefs/
