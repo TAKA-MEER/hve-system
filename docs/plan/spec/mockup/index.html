@@ -51,8 +51,8 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 }
 
 /* 映像: 枠いっぱいに広げる（実装では <img> を object-fit:contain で置く） */
-.video{position:relative;min-height:0;background:#000;border-radius:var(--r);overflow:hidden;border:1px solid var(--bd)}
-.video svg.scene{position:absolute;inset:0;width:100%;height:100%}
+.video{position:relative;min-height:0;background:#000;border-radius:var(--r);overflow:clip;border:1px solid var(--bd)}
+.video svg.scene{position:absolute;inset:0;width:100%;height:100%;transform-origin:50% 50%}
 .guide{position:absolute;inset:0;pointer-events:none}
 .guide .h,.guide .v{position:absolute;background:rgba(127,180,238,.55)}
 .guide .h{left:0;right:0;top:50%;height:1px}
@@ -64,6 +64,10 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
 .stopbar.show{display:block}
 .guidebtn{position:absolute;right:6px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
+.zoom{position:absolute;right:6px;top:36px;display:flex;flex-direction:column;gap:4px;z-index:1}
+.zoombtn{width:40px;height:36px;padding:0;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:16px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums}
+.zoombtn.lvl{font-size:12px}
+.zoombtn:disabled{opacity:.35;cursor:not-allowed}
 .nosig{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--mut);background:#050608;font-size:16px}
 .nosig.show{display:flex}
 
@@ -180,6 +184,11 @@ td input.bad{border-color:var(--ng)}
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
     <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0°</span><span id="osdY">ヨー 0°</span></div>
     <button class="guidebtn" id="toggleGuide" title="ガイド線の表示を切り替える">ガイド線</button>
+    <div class="zoom" aria-label="デジタルズーム">
+      <button class="zoombtn" id="zIn" title="拡大">＋</button>
+      <button class="zoombtn lvl" id="zLvl" title="1 倍に戻す">1.0×</button>
+      <button class="zoombtn" id="zOut" title="縮小">−</button>
+    </div>
     <div class="nosig" id="nosig">映像がありません</div>
     <div class="stopbar" id="stopbar"></div>
   </div>
@@ -425,6 +434,20 @@ td input.bad{border-color:var(--ng)}
     const t = $('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500);
   };
 
+  // ---- デジタルズーム（表示だけを拡大。判定には影響しない。Spec-ui.md §1.5） ----
+  const ZOOM_MAX = 4, ZOOM_STEP = 0.5;
+  let zoom = 1;
+  function setZoom(z){
+    zoom = Math.min(ZOOM_MAX, Math.max(1, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
+    document.querySelector('.video svg.scene').style.transform = `scale(${zoom})`;
+    $('zLvl').textContent = zoom.toFixed(1) + '×';
+    $('zIn').disabled = zoom >= ZOOM_MAX; $('zOut').disabled = zoom <= 1;
+  }
+  $('zIn').onclick = () => setZoom(zoom + ZOOM_STEP);
+  $('zOut').onclick = () => setZoom(zoom - ZOOM_STEP);
+  $('zLvl').onclick = () => setZoom(1);
+  setZoom(1); // 画面を開いたときは 1 倍から
+
   // ---- ガイド線 ----
   $('toggleGuide').onclick = () => { const g = $('guide'); g.style.display = g.style.display === 'none' ? '' : 'none'; };
 
@@ -454,13 +477,14 @@ td input.bad{border-color:var(--ng)}
   });
 
   applySliders();
-  // 確認用: ?h=<高さ>&ceil=near|stale&hold=<軸>&settings=1&mock=1 で状態を作って開ける
+  // 確認用: ?h=<高さ>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&mock=1 で状態を作って開ける
   const q = new URLSearchParams(location.search);
   if (q.has('h')) S.height = +q.get('h');
   if (q.get('ceil') === 'near') S.ceilingAt = S.height + 450;
   if (q.get('ceil') === 'stale') S.ceilStale = true;
   if (q.has('hold')) S.active = q.get('hold');
   if (q.has('settings')) openSettings();
+  if (q.has('zoom')) setZoom(+q.get('zoom'));
   if (q.has('mock')) { placeMock(); $('mockPop').classList.add('show'); }
   requestAnimationFrame(tick);
 })();

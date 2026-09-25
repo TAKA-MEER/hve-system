@@ -89,6 +89,7 @@
 | `axis_speed_abs_max_dps` | カメラ部 | 60 | **仮**（部品未確定） |
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`） |
 | `yaw_limit_deg` | カメラ部 | 170 | **仮**（提案 `P-4`） |
+| `zoom_max` / `zoom_step` | 画面 | 4 / 0.5 | **仮**（`H-U5`） |
 | `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
 | 設定の既定値 | カメラ部 | [-protocol.md](DetailedDesign-protocol.md) §3 の例の値 | **仮** |
 | 映像 | `hve-ustreamer.service` | 640×480・10 fps・JPEG 品質 60 | **仮**（`H-A8`） |
