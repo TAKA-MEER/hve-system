@@ -27,10 +27,11 @@
 | `firmware/lift/include/secrets.h.example` | SSID・パスワードの雛形（`secrets.h` は gitignore 済み） |
 | `firmware/lift/test/test_lift_core/` | Unity の試験（`env:native`） |
 | `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,pigpio_hw,fake_hw,fake_lift}.py` |
+| `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
 | `camera/web/` | `index.html`・`settings.html`・`app.js`・`settings.js`・`style.css` |
 | `camera/config/params.toml` | パラメータ（§5 のカメラ部の行） |
 | `camera/tests/` | pytest |
-| `camera/systemd/` | `hve-camera.service`・`hve-ustreamer.service` |
+| `camera/systemd/` | `hve-camera.service`・`hve-video.service` |
 | `tools/` | 実機の確認用スクリプト（`lift_probe.py` 等） |
 
 ## 2. 機器・ホスト名
@@ -89,10 +90,12 @@
 | `axis_speed_abs_max_dps` | カメラ部 | 60 | **仮**（部品未確定） |
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`） |
 | `yaw_limit_deg` | カメラ部 | 170 | **仮**（提案 `P-4`） |
-| `zoom_max` / `zoom_step` | 画面 | 4 / 0.5 | **仮**（`H-U5`） |
+| `zoom_max` / `zoom_step` | カメラ部 | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
 | `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
 | 設定の既定値 | カメラ部 | [-protocol.md](DetailedDesign-protocol.md) §3 の例の値 | **仮** |
-| 映像 | `hve-ustreamer.service` | 640×480・10 fps・JPEG 品質 60 | **仮**（`H-A8`） |
+| `video_capture_width` / `video_capture_height` | `hve_video` | 1920 / 1080 | **仮**（カメラの型番未定。[-hardware.md](DetailedDesign-hardware.md) §2） |
+| `video_out_height` | `hve_video` | 480（幅は取り込みの縦横比に合わせる） | **仮**（`H-A8`） |
+| `video_fps` / `video_jpeg_quality` | `hve_video` | 10 / 60 | **仮**（`H-A8`） |
 
 ## 6. th-system 側の名前（参照のみ）
 

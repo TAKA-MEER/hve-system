@@ -32,7 +32,8 @@ python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（
 | `WP-LIFT-02` | 1 | ESP32 の実物（HAL・`main.cpp`・WS）。`tools/lift_probe.py` | LIFT-01 | 要 |
 | `WP-CAM-01` | 2 | カメラ部の純ロジック（天井・設定・軸） | BASE-01 | 不要 |
 | `WP-CAM-02` | 2 | 制御ループ・昇降部との接続・アプリ・**偽物のモード** | CAM-01 | 不要 |
-| `WP-CAM-03` | 2 | 実物のサーボ・ステッピング・超音波・ustreamer・systemd | CAM-02 | 要 |
+| `WP-VIDEO-01` | 2 | 映像の配信プロセス（取り込み・中央の切り出し・縮小・MJPEG・倍率の受け付け） | BASE-01 | 不要（偽の画像列） |
+| `WP-CAM-03` | 2 | 実物のサーボ・ステッピング・超音波・カメラ・systemd | CAM-02・VIDEO-01 | 要 |
 | `WP-UI-01` | 3 | 操作画面と設定画面 | CAM-02 | 不要（偽物のモード） |
 | `WP-MEAS-02` | 4 | 映像の遅延（`H-V6`） | CAM-03 | 要 |
 | `WP-MEAS-03` | 4 | **th-system と同時に動かして無線を圧迫しないか**（`H-A8`） | CAM-03 | 要（th-system も） |
@@ -85,15 +86,22 @@ python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（
   5. 設定の上限を越える `speed` を丸めずに送る
 - 加えて: `python3 -m hve_camera --fake` が起動し、`curl http://localhost/api/settings` が設定を返す（ポートは起動引数で変えられること）
 
+### `WP-VIDEO-01` 映像の配信
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.3・[-protocol.md](DetailedDesign-protocol.md) §1・spec [Spec-ui.md](../spec/Spec-ui.md) §1.5
+- 作るもの: `camera/hve_video/` の全部
+- 受け入れ: pytest が成功し、変異が赤になる: 切り出しを中央からずらす／縦横比を崩す／倍率の丸め（1〜`zoom_max`）を消す／倍率によって**出力の大きさ**が変わる／`/zoom` を `127.0.0.1` 以外からも受ける。
+  加えて: 偽の画像列で `python3 -m hve_video --fake` を起動し、`curl -s -m 2 http://localhost:8080/stream | head -c 200` に `multipart/x-mixed-replace` の区切りが出る
+
 ### `WP-CAM-03` カメラ部の実物
 
 - 読む節: [-hardware.md](DetailedDesign-hardware.md) §2・§3・[DetailedDesign.md](DetailedDesign.md) §4.2（依存の入れ方）
 - 作るもの: `hw/pigpio_hw.py`・`systemd/*.service`（:80 で待つため `AmbientCapabilities=CAP_NET_BIND_SERVICE`。root で動かさない）・ラズパイの準備手順（`docs/使い方.md` を作る）
-- 受け入れ: ラズパイで `systemctl status hve-camera hve-ustreamer` が active。実機で: ピッチ・ヨーが deg/s で動き範囲で止まる／天井の超音波を手で塞ぐと上昇できない／超音波の線を抜くと `CEILING_STALE`
+- 受け入れ: ラズパイで `systemctl status hve-camera hve-video` が active。実機で: ピッチ・ヨーが deg/s で動き範囲で止まる／天井の超音波を手で塞ぐと上昇できない／超音波の線を抜くと `CEILING_STALE`
 
 ### `WP-UI-01` 画面
 
-- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md)・[-protocol.md](DetailedDesign-protocol.md) §2.1・§2.4・§3
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md)・[-protocol.md](DetailedDesign-protocol.md) §2.1・§2.4・§3（ズームは `zoom` を送るだけ。**ブラウザ側で拡大しない**）
 - 作るもの: `web/` の全部。映像の上に上昇・下降・ピッチ・ヨーのボタン（押している間だけ）と速度スライダー 4 本、デジタルズーム（spec [Spec-ui.md](../spec/Spec-ui.md) §1.5）、状態（高さ・天井・停止理由・仮値・偽物のモード）、設定画面
 - 受け入れ: `--fake` で起動し、管理担当がブラウザで確かめる: スライダーの範囲と初期位置が設定どおり／開き直すと初期値に戻る／設定の不正値が保存されない／ボタンを押したままタブを閉じると止まる／停止理由が出る／ズームしても映像以外（ボタン・ガイド線・停止理由）の大きさと位置が変わらない。**外部への読み込みが無い**（`grep -rE 'https?://' camera/web` が空）。**スクロールが出ない**（spec [Spec-ui.md](../spec/Spec-ui.md) §0.1）: `docs/plan/spec/mockup/check_noscroll.js` を実装の画面向けに状態の作り方だけ差し替えて（URL 引数の代わりに `--fake` の `/api/fake` で状態を作る）全サイズで通す
 

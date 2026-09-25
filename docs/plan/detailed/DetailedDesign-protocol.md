@@ -13,7 +13,8 @@
 | カメラ部 → ブラウザ | WS `/ws` | `state` | `state_period_ms` | ブラウザ: `ui_state_timeout_ms` 届かなければ「接続切れ」表示 |
 | カメラ部 → 昇降部 | WS（ESP32 の `:80/ws`） | `cmd` | **常に `lift_cmd_period_ms` ごと**（止まっている間も `stop` を送る＝生存確認） | 昇降部: 最後の `cmd` から `LIFT_CMD_TIMEOUT_MS` 超で停止 |
 | 昇降部 → カメラ部 | 同上 | `state` | `LIFT_STATE_PERIOD_MS` | カメラ部: `lift_state_timeout_ms` 届かなければ `LINK_LOST` |
-| ブラウザ → カメラ部 | HTTP `:8080` | 映像 | ustreamer 任せ | — |
+| カメラ部 → ブラウザ | HTTP `:8080`（`hve_video`） | 映像（MJPEG） | `video_fps` | — |
+| `hve_camera` → `hve_video` | HTTP `127.0.0.1:8080/zoom`（`POST {"level":2.5}`） | 倍率 | 変わったとき・`hve_video` の再起動を検知したとき | 外からは受けない |
 
 **正常な切断は待たずに止める。**ブラウザの WS が閉じたらカメラ部はその場で `release` 扱い、
 カメラ部との WS が閉じたら昇降部はその場で停止（先行試作と同じ）。
@@ -28,11 +29,13 @@
 ```json
 {"t":"hold","axis":"lift_up","speed":40}
 {"t":"release"}
+{"t":"zoom","level":2.5}
 ```
 
 | フィールド | 値 |
 | --- | --- |
 | `axis` | `lift_up` / `lift_down` / `pitch_up` / `pitch_down` / `yaw_left` / `yaw_right`。**一度に動かすのは 1 軸だけ**（最後に届いた `hold` の軸） |
+| `level`（`zoom`） | 倍率。カメラ部が 1〜`zoom_max` に丸め、`zoom_step` の倍数にそろえる。**全画面で共通** |
 | `speed` | スライダーの値。単位は軸による（`lift_*` は %・`pitch_*` / `yaw_*` は deg/s）。カメラ部が設定の下限〜上限に丸める |
 
 ### 2.2 カメラ部 → 昇降部
@@ -70,7 +73,7 @@
 {"t":"state",
  "lift":{"link":"ok","dir":"stop","duty":0,"reason":"CMD_STOP","bottom":true,"height_mm":102,"height_ok":true,"top_mm":null},
  "ceiling":{"mm":1450,"age_ms":80,"ok":true,"reason":"NONE"},
- "pitch_deg":0.0,"yaw_deg":0.0,"active_axis":null,"reason":"NONE",
+ "pitch_deg":0.0,"yaw_deg":0.0,"zoom":1.0,"active_axis":null,"reason":"NONE",
  "provisional":["ceiling_margin_mm","ceiling_stale_ms"],"fake":false,"clients":1}
 ```
 

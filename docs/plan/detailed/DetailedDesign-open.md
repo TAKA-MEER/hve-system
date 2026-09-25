@@ -24,8 +24,7 @@
 | `D-2` | 映像の解像度・フレームレートの上限 | 仮 640×480・10 fps。`WP-MEAS-03` で th-system と同時に動かして決める |
 | `D-3` | 昇降部の ESP32 の電源をどこから取るか | [-hardware.md](DetailedDesign-hardware.md) §3 |
 | `D-4` | ステッピングモータをモバイルバッテリで回せるか | 同上 |
-| `D-5` | 部品の型番（超音波・ステッピングとドライバ・サーボ） | [-hardware.md](DetailedDesign-hardware.md) §4 |
-| `D-6` | デジタルズームの画質が足りないとき | 案 1: 配信の解像度を上げる（帯域が増える。`D-2` と引き換え）。案 2: カメラ部で**高解像度から切り出して**送る（帯域は同じで画質が上がるが、ustreamer では切り出しを動的に変えられず、自前の配信が要る）。**まずブラウザ側の拡大で作り、`WP-MEAS-02` で盤上部の文字が読めるかを見て決める** |
+| `D-5` | 部品の型番（超音波・ステッピングとドライバ・サーボ・**Web カメラ**） | [-hardware.md](DetailedDesign-hardware.md) §4 |
 
 ## 3. 完全設計書からの申し送り
 
@@ -33,7 +32,7 @@
 | --- | --- |
 | `H-V8` | 実測（`WP-MEAS-01`・`-04`）で [-names.md](DetailedDesign-names.md) §5 の仮値を置き換える |
 | `H-A8` | `WP-MEAS-03` |
-| `H-V6` | `WP-MEAS-02`。遅延が大きければ寸動（[operation-ideas.md](../operation-ideas.md) 案 3）を spec に上げる |
+| `H-V6` | `WP-MEAS-02`（**ズーム込み**。取り込みの解像度ごとのラズパイの負荷と遅延も測る）。遅延が大きければ寸動（[operation-ideas.md](../operation-ideas.md) 案 3）を spec に上げる |
 
 ## 4. レビュー指摘管理表
 

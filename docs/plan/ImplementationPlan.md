@@ -170,6 +170,7 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 | `WP-LIFT-02` | 1 | 未着手 |
 | `WP-CAM-01` | 2 | 未着手 |
 | `WP-CAM-02` | 2 | 未着手 |
+| `WP-VIDEO-01` | 2 | 未着手 |
 | `WP-CAM-03` | 2 | 未着手 |
 | `WP-UI-01` | 3 | 未着手 |
 | `WP-MEAS-02`〜`05` | 4 | 未着手 |
@@ -192,7 +193,7 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 | ~~0.5~~ | ~~詳細設計の初版~~ | `1ad32b2` |
 | 1 | **ユーザー判断: 提案 `P-1`〜`P-4`**（[DetailedDesign-open.md](detailed/DetailedDesign-open.md) §1） | 未着手 |
 | 2 | `WP-BASE-01` ／ **`WP-MEAS-01`（先行試作で今すぐ測れる）** ／ 部品の型番の確定（`D-5`） | 未着手 |
-| 3 | `WP-LIFT-01` ／ `WP-CAM-01` | 未着手 |
+| 3 | `WP-LIFT-01` ／ `WP-CAM-01` ／ `WP-VIDEO-01` | 未着手 |
 | 4 | `WP-CAM-02` ／ `WP-LIFT-02` | 未着手 |
 | 5 | `WP-UI-01` ／ `WP-CAM-03` | 未着手 |
 | 6 | `WP-MEAS-02`〜`05` | 未着手 |

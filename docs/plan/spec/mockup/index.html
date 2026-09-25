@@ -434,7 +434,8 @@ td input.bad{border-color:var(--ng)}
     const t = $('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500);
   };
 
-  // ---- デジタルズーム（表示だけを拡大。判定には影響しない。Spec-ui.md §1.5） ----
+  // ---- デジタルズーム（判定には影響しない。Spec-ui.md §1.5） ----
+  // 実装ではカメラ部が高解像度の映像から中央を切り出して送る。モックアップは見え方だけ再現するため絵を拡大している
   const ZOOM_MAX = 4, ZOOM_STEP = 0.5;
   let zoom = 1;
   function setZoom(z){
