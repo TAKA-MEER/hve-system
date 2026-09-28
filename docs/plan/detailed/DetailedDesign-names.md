@@ -35,6 +35,13 @@
 | `camera/systemd/` | `hve-camera.service`・`hve-video.service` |
 | `tools/` | 実機の確認用スクリプト（`lift_probe.py` 等） |
 
+`WP-BASE-01` で足した関数（§0 の命名規則に従う）:
+
+| 関数 | 置き場 | 何か |
+| --- | --- | --- |
+| `lift_core_version` | `firmware/lift/lib/lift_core/lift_core_version.h` | 文字列を返すだけの土台。`Arduino.h` を include しない。後のパケットでここに判定を書く |
+| `load_params` | `camera/hve_camera/params.py` | `camera/config/params.toml` を読んで dict で返す。`tomllib` が無ければ `tomli` を使う |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
