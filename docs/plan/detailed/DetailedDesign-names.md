@@ -35,12 +35,20 @@
 | `camera/systemd/` | `hve-camera.service`・`hve-video.service` |
 | `tools/` | 実機の確認用スクリプト（`lift_probe.py` 等） |
 
-`WP-BASE-01` で足した関数（§0 の命名規則に従う）:
+関数・型（`WP-BASE-01`・`WP-CAM-01` で足したもの。§0 の命名規則に従う。型は UpperCamel）:
 
-| 関数 | 置き場 | 何か |
+| 名前 | 置き場 | 何か |
 | --- | --- | --- |
 | `lift_core_version` | `firmware/lift/lib/lift_core/lift_core_version.h` | 文字列を返すだけの土台。`Arduino.h` を include しない。後のパケットでここに判定を書く |
 | `load_params` | `camera/hve_camera/params.py` | `camera/config/params.toml` を読んで dict で返す。`tomllib` が無ければ `tomli` を使う |
+| `CeilingReading` | `camera/hve_camera/ceiling.py` | 天井の読み値。状態・距離 mm・時刻 ms を持つ。**状態は `MEASURED`（測れた）・`NO_ECHO`（反射なし）・`READ_ERROR`（I2C の読み取り失敗）の 3 つで、別々の値として受け取る**（`READ_ERROR` と `NO_ECHO` を取り違えると天井へ突っ込む） |
+| `ceiling_permission` | `camera/hve_camera/ceiling.py` | 読み値・現在時刻・パラメータから、天井の許可 `(ok, 理由)` を返す純関数 |
+| `validate_settings` | `camera/hve_camera/settings.py` | 設定の検証（[-protocol.md](DetailedDesign-protocol.md) §3）。通らなかった理由の一覧を返す |
+| `load_settings` | `camera/hve_camera/settings.py` | 設定の読み込み。`(設定, 既定値で動いているか)` を返す |
+| `save_settings` | `camera/hve_camera/settings.py` | 検証を通る設定だけを原子的に保存する |
+| `pitch_step` | `camera/hve_camera/axes.py` | ピッチの目標角を deg/s で積分し可動範囲に収める。`(角度, 理由)` を返す |
+| `yaw_step_rate` | `camera/hve_camera/axes.py` | ヨーの deg/s と向きから `(1 秒あたりの半ステップ数, 向き)` を返す |
+| `clamp_speed` | `camera/hve_camera/axes.py` | 速度を設定の `min`〜`max` に丸める |
 
 ## 2. 機器・ホスト名
 
