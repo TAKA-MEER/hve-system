@@ -42,6 +42,19 @@
 | `lift_core_version` | `firmware/lift/lib/lift_core/lift_core_version.h` | 文字列を返すだけの土台。`Arduino.h` を include しない。後のパケットでここに判定を書く |
 | `load_params` | `camera/hve_camera/params.py` | `camera/config/params.toml` を読んで dict で返す。`tomllib` が無ければ `tomli` を使う |
 
+`WP-VIDEO-01` で足した関数・クラス（§0 の命名規則に従う）。**パラメータは `load_params` と同じ `params.toml` を読む**（`hve_video` 側で読み込み直さない）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `crop_rect` | `camera/hve_video/crop.py` | `crop_rect(取り込みの幅, 高さ, 倍率, zoom_max, zoom_step)` → 切り出す矩形 `(x, y, w, h)`。倍率を 1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる。中央・取り込みと同じ縦横比 |
+| `FakeSource` | `camera/hve_video/sources.py` | 偽の画像列（numpy で作る。中央に目印があり、フレームごとに変わる） |
+| `V4L2Source` | `camera/hve_video/sources.py` | 実物の V4L2 カメラ。OpenCV の `VideoCapture`。MJPEG を要求し `video_capture_width`／`video_capture_height` を求める |
+| `open_source` | `camera/hve_video/sources.py` | `open_source(fake, 取り込みの幅, 取り込みの高さ)`。`fake` なら `FakeSource`、でなければ `V4L2Source` を作る |
+| `VideoPipeline` | `camera/hve_video/pipeline.py` | 取り込み → 切り出し → 出力の大きさへ縮小 → JPEG。倍率を持つ。**出力の大きさは倍率によらず一定** |
+| `create_app` | `camera/hve_video/server.py` | `create_app(pipeline, video_fps)` → aiohttp のアプリ（`GET /stream`・`POST /zoom`） |
+| `is_local_peer` | `camera/hve_video/server.py` | 接続元が `127.0.0.1` かどうか。`/zoom` の 403 の判定に使う |
+| `main` | `camera/hve_video/__main__.py` | `python3 -m hve_video [--fake] [--port N]` の入口 |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
