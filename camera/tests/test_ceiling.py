@@ -106,6 +106,20 @@ def test_zero_mm_is_near_not_stale():
     assert ceiling_permission(measured(0, at_ms=0), 0, PARAMS) == (False, "CEILING_NEAR")
 
 
+def test_the_minimum_range_is_judged_apart_from_the_margin():
+    """#3a（近すぎて測れない）と #3（余裕より近い）は別の規則。
+
+    既定の値（150 / 500）では「150 未満」は必ず「500 以下」でもあるので、
+    上の 2 行だけではどちらの規則が効いているのかを見分けられない。
+    `srf02_min_range_mm` を `ceiling_margin_mm` より大きくした設定で区別する。
+    """
+    params = dict(PARAMS, srf02_min_range_mm=900, ceiling_margin_mm=500)
+    # 余裕（500）は過ぎるが最小測定距離（900）より近い → #3a で止める
+    assert ceiling_permission(measured(700, at_ms=0), 0, params) == (False, "CEILING_NEAR")
+    # 最小測定距離を越えれば通る
+    assert ceiling_permission(measured(901, at_ms=0), 0, params) == (True, "NONE")
+
+
 # --- 4 行目: 余裕以下 -------------------------------------------------------------------------
 
 
