@@ -18,7 +18,7 @@ axis_speed_abs_max_dps = 60      # 28BYJ-48 の実用の上限（約 60〜90 deg
 # 28BYJ-48 の半ステップで一周するステップ数
 yaw_steps_per_rev = 4096         # 資料により 4076 とも。実測で確定
 # SRF02 の I2C アドレス（7 bit）
-srf02_i2c_addr = 112             # 0x70。SRF02 の工場出荷値
+srf02_i2c_addr = 0x70            # 7 bit。SRF02 の工場出荷値（8 bit 表記で 0xE0）
 # SRF02 の測定できる距離。扱いは spec Spec-safety.md §2 #3a・#3b
 srf02_min_range_mm = 150         # SRF02 のデータシート
 srf02_max_range_mm = 6000        # SRF02 のデータシート
