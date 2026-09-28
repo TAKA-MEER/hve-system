@@ -23,9 +23,10 @@
 | --- | --- |
 | `firmware/lift/platformio.ini` | `env:esp32dev`（実機）・`env:native`（ホスト試験） |
 | `firmware/lift/lib/lift_core/` | `hal.h`・`lift_decide.{h,cpp}`・`lift_controller.{h,cpp}`・`cmd_codec.{h,cpp}`。**`Arduino.h` を include しない** |
+| `firmware/lift/lib/hal_core/` | `hal_core.{h,cpp}`。`hal_esp32` のうち**ハードウェアに触らない計算だけ**（定数は §5・関数は §1）。**`Arduino.h` を include しない**ので `env:native` で試験できる |
 | `firmware/lift/src/` | `main.cpp`・`config.h`・`hal_esp32.{h,cpp}` |
 | `firmware/lift/include/secrets.h.example` | SSID・パスワードの雛形（`secrets.h` は gitignore 済み） |
-| `firmware/lift/test/test_lift_core/`・`test_lift_decide/`・`test_lift_controller/`・`test_cmd_codec/` | Unity の試験（`env:native`。1 ディレクトリ 1 試験で、それぞれ `test_main.cpp` を持つ） |
+| `firmware/lift/test/test_lift_core/`・`test_lift_decide/`・`test_lift_controller/`・`test_cmd_codec/`・`test_hal_core/` | Unity の試験（`env:native`。1 ディレクトリ 1 試験で、それぞれ `test_main.cpp` を持つ） |
 | `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,rpi_hw,fake_hw,fake_lift}.py` |
 | `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
 | `camera/web/` | `index.html`・`settings.html`・`app.js`・`settings.js`・`style.css` |
@@ -34,6 +35,7 @@
 | `camera/tests/` | pytest |
 | `camera/systemd/` | `hve-camera.service`・`hve-video.service` |
 | `tools/` | 実機の確認用スクリプト（`lift_probe.py` 等） |
+| `tools/tests/` | pytest（`tools/lift_probe.py` のキーの解釈と `cmd` の組み立ての試験。`camera/tests/` と同じ `.venv` で回す） |
 
 関数・型（`WP-BASE-01`・`WP-CAM-01` で足したもの。§0 の命名規則に従う。型は UpperCamel）:
 
@@ -80,6 +82,21 @@
 | `LiftController` | `firmware/lift/lib/lift_core/lift_controller.{h,cpp}` | 指令の受付・ウォッチドッグ・`lift_decide()` の結果をモータへ出す |
 | `cmd_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 指令の JSON → `LiftCmd`。壊れた入力は「上昇させない」側にして `false` |
 | `state_encode` / `state_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 状態の JSON ⇔ `LiftState`。`fw` は `lift_core_version()` から入れる |
+
+`WP-LIFT-02` で足した関数・型（§0 の命名規則に従う。**`lift_core` は変えていない**）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `sonar_echo_to_mm` | `firmware/lift/lib/hal_core/hal_core.{h,cpp}` | 純関数。HC-SR04 の ECHO のパルス幅（µs）を mm にして有効性を返す。**測定範囲の外は `false` を返し `*out_mm` には書かない**（呼び出し側に無効な値を渡さない） |
+| `bottom_pressed_from_level` | `firmware/lift/lib/hal_core/hal_core.{h,cpp}` | 純関数。ピンのレベル（`HIGH` = 1 / `LOW` = 0）から下端スイッチが押されているかを返す。`BOTTOM_PRESSED_LEVEL` のときだけ `true` |
+| `motor_duty_to_pwm` | `firmware/lift/lib/hal_core/hal_core.{h,cpp}` | 純関数。デューティ [%] を LEDC に書く値（0〜`(1 << resolution) - 1`）にする。停止（0%）は必ず 0 になる |
+| `LiftEsp32Hal` | `firmware/lift/src/hal_esp32.{h,cpp}` | `LiftHal` の実物。MD10C（LEDC）・下端スイッチ・HC-SR04（ECHO は割り込みで測る）。`begin()` でピンを整え、**モータを停止から始める**。`poll(now_ms)` は `loop()` から測定を出すために呼ぶ |
+| `key_action` | `tools/lift_probe.py` | 純関数。キーを `KEY_ACTIONS` の操作名に変える。知らないキーは `None` |
+| `clamp_duty` | `tools/lift_probe.py` | 純関数。デューティを 0〜100 に丸める（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
+| `apply_action` | `tools/lift_probe.py` | 純関数。操作名を `state` へ適用した新しい `state` を返す（元は変えない） |
+| `build_cmd` | `tools/lift_probe.py` | 純関数。`state` から送る `cmd` の JSON オブジェクトを作る。**`dir` が `up` / `down` でなくても `ceil_ok` を必ず載せる**（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
+| `format_state` | `tools/lift_probe.py` | 純関数。受け取った `state` を 1 行の文字列にする（試験と画面出力で使う） |
+| `main` | `tools/lift_probe.py` | `python3 tools/lift_probe.py ws://<ESP32>/ws` の入口 |
 
 ## 2. 機器・ホスト名
 
@@ -130,6 +147,22 @@
 | `LIFT_STATE_PERIOD_MS` | 昇降部 `config.h` | 100 | **仮** |
 | `SONAR_PERIOD_MS` | 両方 | 100 | **仮** |
 | `PWM_FREQ_HZ` / `PWM_RESOLUTION` | 昇降部 `config.h` | 5000 / 8 | 先行試作 |
+| `PWM_CH` | 昇降部 `config.h` | 0 | 先行試作（LEDC チャネル 0） |
+| `SONAR_ECHO_TIMEOUT_US` | `hal_core/hal_core.h` | 30000 | **仮**（**割り込み**で ECHO の時間切れを判定する時間。4 m 往復の約 23 ms より長く、HC-SR04 の 1 回 60 ms の周期より短い。実機で確認する） |
+| `SONAR_MIN_RANGE_MM` | `hal_core/hal_core.h` | 20 | HC-SR04 のデータシート（約 2 cm。**これより近い値は「高さが読めない」**） |
+| `SONAR_MAX_RANGE_MM` | `hal_core/hal_core.h` | 4000 | HC-SR04 のデータシート（約 4 m。**これより遠い値・時間切れも「高さが読めない」**） |
+| `BOTTOM_PRESSED_LEVEL` | `hal_core/hal_core.h` | 1（`HIGH`） | [-hardware.md](DetailedDesign-hardware.md) §1（**常時閉（NC）配線**。押すと開いて HIGH。断線も HIGH なので「押されている」側に倒れる）。`0` にすると押されたら LOW の配線になる |
+| `MOTOR_DIR_PIN` / `MOTOR_PWM_PIN` | 昇降部 `config.h` | 14 / 32 | [-hardware.md](DetailedDesign-hardware.md) §1（先行試作と同じ） |
+| `MOTOR_DIR_UP_LEVEL` | 昇降部 `config.h` | `true` | **仮**（DIR=HIGH で上昇かは**実機未確認**。`false` にすると逆向きになる） |
+| `BOTTOM_PIN` | 昇降部 `config.h` | 27 | **仮**（[-hardware.md](DetailedDesign-hardware.md) §1。`INPUT_PULLUP`） |
+| `SONAR_TRIG_PIN` / `SONAR_ECHO_PIN` | 昇降部 `config.h` | 25 / 26 | **仮**（同上。**ECHO は分圧して 3.3 V にしてから入れる**） |
+| `LIFT_MDNS_NAME` | 昇降部 `config.h` | `hve-lift` | §2 |
+| `LIFT_HTTP_PORT` / `LIFT_WS_PATH` | 昇降部 `config.h` | 80 / `/ws` | [-protocol.md](DetailedDesign-protocol.md) §1 |
+| `LIFT_STATE_TEXT_MAX` | 昇降部 `config.h` | 256 | **仮**（`state` の JSON は 200 バイト未満。`state_encode` のバッファ） |
+| `lift_probe_period_ms` | `tools/lift_probe.py` | 100 | **仮**（下の `lift_cmd_period_ms` と同じ。停止中も `stop` を送り続ける） |
+| `lift_probe_duty_pct` | `tools/lift_probe.py` | 40 | **仮**（[-protocol.md](DetailedDesign-protocol.md) §2.2 の例の値） |
+| `lift_probe_duty_step_pct` | `tools/lift_probe.py` | 5 | **仮**（`+` / `-` での増減） |
+| `lift_probe_keys` | `tools/lift_probe.py`（`KEY_ACTIONS`） | `u`=上昇 / `d`=下降 / `s`=停止 / `c`=`ceil_ok` の反転 / `+``=`=デューティを 5 増やす / `-`=5 減らす / `x`=送信を止める・再開する / `q`=終了 | 昇降部の操作は将来画面が担うので、ここは**開発用の**最小限の集合 |
 | `ceiling_margin_mm` | カメラ部 `params.toml` | 500 | **仮**（`H-V8`） |
 | `ceiling_stale_ms` | カメラ部 | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
 | `hold_timeout_ms` | カメラ部 | 400 | **仮** |
