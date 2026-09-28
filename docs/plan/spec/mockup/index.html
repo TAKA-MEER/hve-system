@@ -151,6 +151,7 @@ td input.bad{border-color:var(--ng)}
   <span class="badge" id="bCeil"><span class="dot"></span><span>天井</span></span>
   <span class="badge" id="bClients"><span>端末 1</span></span>
   <span class="badge warn" id="bProv" title="仮値のまま動いているパラメータがあります"><span class="dot"></span><span>仮値</span></span>
+  <span class="badge warn" id="bTop" style="display:none" title="上端の閾値が未設定のため上端で止まりません"><span class="dot"></span><span>上端 未設定（開発中）</span></span>
   <span class="badge fake" id="bFake" style="display:none"><span>偽物のモード</span></span>
   <span class="spacer"></span>
   <button class="mockfab" id="mockFab" title="モックアップ専用（実装の画面には無い）">モック</button>
@@ -182,7 +183,7 @@ td input.bad{border-color:var(--ng)}
       </g>
     </svg>
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
-    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0°</span><span id="osdY">ヨー 0°</span></div>
+    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0°</span></div>
     <button class="guidebtn" id="toggleGuide" title="ガイド線の表示を切り替える">ガイド線</button>
     <div class="zoom" aria-label="デジタルズーム">
       <button class="zoombtn" id="zIn" title="拡大">＋</button>
@@ -216,7 +217,7 @@ td input.bad{border-color:var(--ng)}
       <div class="pad">
         <div></div><button class="hold" data-axis="pitch_up">▲</button><div></div>
         <button class="hold" data-axis="yaw_left">◀</button>
-        <div class="c" title="ピッチ・ヨー"><span id="cP">↕ 0°</span><span id="cY">↔ 0°</span></div>
+        <div class="c" title="ピッチ（ヨーの向きは扱わない）"><span id="cP">↕ 0°</span></div>
         <button class="hold" data-axis="yaw_right">▶</button>
         <div></div><button class="hold" data-axis="pitch_down">▼</button><div></div>
       </div>
@@ -258,6 +259,7 @@ td input.bad{border-color:var(--ng)}
     <button data-mock="ceilOut">天井 範囲外</button>
     <button data-mock="link">昇降部と切断</button>
     <button data-mock="topUnset">上端が未設定</button>
+    <button data-mock="maxrun">連続駆動の上限</button>
     <button data-mock="height">高さセンサ故障</button>
     <button data-mock="novideo">映像なし</button>
     <button data-mock="fake">偽物のモード表示</button>
@@ -283,15 +285,15 @@ td input.bad{border-color:var(--ng)}
   // ---- 機体の状態（シミュレーション） ----
   const S = {height:120, top:1500, ceilingAt:2200, pitch:0, yaw:0,
              link:true, ceilStale:false, ceilOut:false, topUnset:false, heightBad:false, video:true,
-             active:null, reason:'CMD_STOP'};
-  const CEIL_MARGIN = 500, PITCH_LIM = 45, YAW_LIM = 170, BOTTOM = 100;
+             active:null, reason:'CMD_STOP', runAxis:null, runT:0};
+  const CEIL_MARGIN = 500, PITCH_LIM = 45, BOTTOM = 100, MAX_RUN_S = 10;
   const LIFT_MM_PER_PCT_S = 9.6; // 絵を動かすための適当な値（仕様ではない）
 
   const REASON = {
     CEILING_NEAR:['ng','天井が近いため上昇できません'],
     CEILING_STALE:['ng','天井センサの値が届かないため上昇できません'],
     HEIGHT_UNKNOWN:['ng','高さセンサが読めないため上昇できません'],
-    TOP_UNSET:['ng','上端が未設定のため上昇できません'],
+    MAX_RUN:['warn','同じ方向へ動き続けた時間が上限（10 秒）を超えたため停止しました。反対方向へは動かせます'],
     TOP:['warn','上端に達しました'],
     BOTTOM:['warn','下端です'],
     LINK_LOST:['ng','昇降部と繋がっていません。昇降できません'],
@@ -330,19 +332,18 @@ td input.bad{border-color:var(--ng)}
       if (S.ceilStale) return 'CEILING_STALE';
       if (!S.ceilOut && S.ceilingAt - S.height <= CEIL_MARGIN) return 'CEILING_NEAR';
       if (S.heightBad) return 'HEIGHT_UNKNOWN';
-      if (S.topUnset) return 'TOP_UNSET';
-      if (S.height >= S.top) return 'TOP';
+      if (!S.topUnset && S.height >= S.top) return 'TOP';   // 未設定なら上端では止めない（開発中の動作確認）
+      if (S.runAxis === 'lift_up' && S.runT > MAX_RUN_S) return 'MAX_RUN';
       return 'NONE';
     }
     if (axis === 'lift_down'){
       if (!S.link) return 'LINK_LOST';
       if (S.height <= BOTTOM) return 'BOTTOM';
+      if (S.runAxis === 'lift_down' && S.runT > MAX_RUN_S) return 'MAX_RUN';
       return 'NONE';
     }
     if (axis === 'pitch_up'   && S.pitch >=  PITCH_LIM) return 'AXIS_LIMIT';
     if (axis === 'pitch_down' && S.pitch <= -PITCH_LIM) return 'AXIS_LIMIT';
-    if (axis === 'yaw_right'  && S.yaw   >=  YAW_LIM)   return 'AXIS_LIMIT';
-    if (axis === 'yaw_left'   && S.yaw   <= -YAW_LIM)   return 'AXIS_LIMIT';
     return 'NONE';
   }
 
@@ -350,6 +351,10 @@ td input.bad{border-color:var(--ng)}
   function tick(now){
     const dt = Math.min(0.2, (now - last) / 1000); last = now;
     let reason = 'CMD_STOP';
+    if (S.active && S.active.startsWith('lift')){
+      if (S.runAxis !== S.active){ S.runAxis = S.active; S.runT = 0; }
+      if (decide(S.active) === 'NONE') S.runT += dt;
+    } else { S.runAxis = null; S.runT = 0; }
     if (S.active){
       reason = decide(S.active);
       if (reason === 'NONE'){
@@ -359,8 +364,8 @@ td input.bad{border-color:var(--ng)}
           case 'lift_down':  S.height = Math.max(BOTTOM, S.height - LIFT_MM_PER_PCT_S * v * dt); break;
           case 'pitch_up':   S.pitch = Math.min( PITCH_LIM, S.pitch + v*dt); break;
           case 'pitch_down': S.pitch = Math.max(-PITCH_LIM, S.pitch - v*dt); break;
-          case 'yaw_right':  S.yaw   = Math.min( YAW_LIM,   S.yaw   + v*dt); break;
-          case 'yaw_left':   S.yaw   = Math.max(-YAW_LIM,   S.yaw   - v*dt); break;
+          case 'yaw_right':  S.yaw = ((S.yaw + v*dt + 540) % 360) - 180; break;  // 360° 回し続けられる
+          case 'yaw_left':   S.yaw = ((S.yaw - v*dt + 540) % 360) - 180; break;
         }
       }
     }
@@ -381,7 +386,6 @@ td input.bad{border-color:var(--ng)}
     $('world').setAttribute('transform', `translate(${tx},${240 - cy})`);
     $('osdH').textContent = S.heightBad ? '高さ 読めない' : `高さ ${Math.round(S.height)} mm`;
     $('osdP').textContent = `ピッチ ${S.pitch.toFixed(1)}°`;  $('cP').textContent = `↕ ${Math.round(S.pitch)}°`;
-    $('osdY').textContent = `ヨー ${S.yaw.toFixed(1)}°`;      $('cY').textContent = `↔ ${Math.round(S.yaw)}°`;
     const r = REASON[S.reason], bar = $('stopbar');
     if (r){ bar.className = 'stopbar show' + (r[0]==='ng' ? ' ng' : ''); bar.textContent = r[1]; }
     else bar.className = 'stopbar';
@@ -393,6 +397,7 @@ td input.bad{border-color:var(--ng)}
     const maxH = 1800;
     $('gFill').style.height = (S.heightBad ? 0 : Math.min(100, S.height / maxH * 100)) + '%';
     $('gTop').style.display = S.topUnset ? 'none' : '';
+    $('bTop').style.display = S.topUnset ? '' : 'none';
     $('gTop').style.bottom = (S.top / maxH * 100) + '%';
     $('nosig').classList.toggle('show', !S.video);
   }
@@ -466,6 +471,7 @@ td input.bad{border-color:var(--ng)}
       return;
     }
     if (m === 'reload'){ applySliders(); return; }
+    if (m === 'maxrun'){ S.runAxis = 'lift_up'; S.runT = MAX_RUN_S + 1; S.active = 'lift_up'; setTimeout(() => { S.active = null; }, 1500); return; }
     document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');
     e.target.classList.toggle('on');
     const on = e.target.classList.contains('on');

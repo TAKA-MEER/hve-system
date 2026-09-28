@@ -52,15 +52,14 @@
 | `CMD_TIMEOUT` | 昇降部 | 指令が途絶えた |
 | `CEILING` | 昇降部 | `ceil_ok` が `true` でない |
 | `HEIGHT_UNKNOWN` | 昇降部 | 高さが読めない・古い |
-| `TOP_UNSET` | 昇降部 | 上端の閾値が未設定（提案 `P-2`） |
 | `TOP` | 昇降部 | 上端に達した |
 | `BOTTOM` | 昇降部 | 下端スイッチが押されている |
-| `MAX_RUN` | 昇降部 | 連続駆動の上限（提案 `P-1`） |
+| `MAX_RUN` | 昇降部 | 連続駆動の上限（spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4b） |
 | `CEILING_NEAR` | カメラ部 | 天井が近い |
 | `CEILING_STALE` | カメラ部 | 天井の値が読めない・古い |
 | `HOLD_TIMEOUT` | カメラ部 | 画面からの操作が途絶えた |
 | `LINK_LOST` | カメラ部 | 昇降部と繋がっていない |
-| `AXIS_LIMIT` | カメラ部 | ピッチ・ヨーが可動範囲の端 |
+| `AXIS_LIMIT` | カメラ部 | ピッチが可動範囲の端（ヨーには範囲が無い） |
 | `OUT_OF_RANGE` | カメラ部（天井の理由のみ。**停止理由ではない**） | 天井の距離計に反射が返らない。上昇は許す |
 
 ## 4. メッセージ
@@ -75,8 +74,8 @@
 | --- | --- | --- | --- |
 | `LIFT_CMD_TIMEOUT_MS` | 昇降部 `config.h` | 600 | 先行試作・th-system のウォッチドッグの実績 |
 | `HEIGHT_STALE_MS` | 昇降部 | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
-| `LIFT_TOP_MM` | 昇降部 | 未設定（`-1`） | `WP-MEAS-01` で決める（提案 `P-2`） |
-| `LIFT_MAX_RUN_MS` | 昇降部 | 10000 | **仮**・先行試作の値（提案 `P-1`） |
+| `LIFT_TOP_MM` | 昇降部 | 未設定（`-1`）。**未設定の間は上端で止めない** | `WP-MEAS-01` で決める（spec [Spec-safety.md](../spec/Spec-safety.md) §2 #2a） |
+| `LIFT_MAX_RUN_MS` | 昇降部 | 10000 | **仮**・先行試作の値。全行程の実測の約 1.5 倍に置き換える（spec #4b） |
 | `LIFT_DUTY_ABS_MAX_PCT` | 昇降部 | 100 | MD10C の上限 |
 | `LIFT_STATE_PERIOD_MS` | 昇降部 | 100 | **仮** |
 | `SONAR_PERIOD_MS` | 両方 | 100 | **仮** |
@@ -93,8 +92,7 @@
 | `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
 | `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3a・#3b |
 | `srf02_ranging_wait_ms` | カメラ部 | 70 | SRF02 のデータシート（測定に約 66 ms） |
-| `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`） |
-| `yaw_limit_deg` | カメラ部 | 170 | **仮**（提案 `P-4`） |
+| `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`。SG90 自体は約 ±90°） |
 | `zoom_max` / `zoom_step` | カメラ部 | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
 | `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
 | 設定の既定値 | カメラ部 | [-protocol.md](DetailedDesign-protocol.md) §3 の例の値 | **仮** |

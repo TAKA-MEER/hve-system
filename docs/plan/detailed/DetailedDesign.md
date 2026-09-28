@@ -78,10 +78,9 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4「天井の値が読めな�
 | 2 | 指令が `stop` | 停止 | `CMD_STOP` |
 | 3 | 上昇 かつ `ceil_ok != true` | 停止 | `CEILING` |
 | 4 | 上昇 かつ 高さが読めない・`HEIGHT_STALE_MS` 超 | 停止 | `HEIGHT_UNKNOWN` |
-| 5 | 上昇 かつ 上端の閾値が未設定 | 停止 | `TOP_UNSET`（提案 `P-2`） |
-| 6 | 上昇 かつ 高さ ≧ 上端の閾値 | 停止 | `TOP` |
+| 6 | 上昇 かつ **上端の閾値が設定済み** かつ 高さ ≧ 上端の閾値 | 停止 | `TOP`（未設定なら判定しない。`state.top_mm` が `null` になり、画面が「上端が未設定（開発中）」と出す。spec #2a） |
 | 7 | 下降 かつ 下端スイッチが押されている | 停止 | `BOTTOM` |
-| 8 | 同じ方向へ `LIFT_MAX_RUN_MS` 超 連続 | 停止 | `MAX_RUN`（提案 `P-1`） |
+| 8 | 同じ方向へ `LIFT_MAX_RUN_MS` 超 連続 | 停止 | `MAX_RUN`（spec #4b） |
 | 9 | それ以外 | 指令どおり。デューティは `0`〜`LIFT_DUTY_ABS_MAX_PCT` に丸める | `NONE` |
 
 ### 4.2 カメラ部（`camera/`）
@@ -90,7 +89,7 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4「天井の値が読めな�
 | --- | --- | --- |
 | `ceiling.py` | `ceiling_permission(読み値, 今, 閾値, 古さ)` → `(ok, 理由)` | ○ |
 | `settings.py` | 設定の検証（下限 ≦ 初期値 ≦ 上限・絶対範囲）と原子的な保存 | ○ |
-| `axes.py` | ピッチ・ヨーの目標角を deg/s で積分し、可動範囲で止める | ○ |
+| `axes.py` | ピッチの目標角を deg/s で積分し、可動範囲で止める。**ヨーは角度を持たず、deg/s をステップの速さに換えるだけ**（範囲の制限なし。spec [Spec-ui.md](../spec/Spec-ui.md) §1.4） | ○ |
 | `control.py` | 操作（押している間）の鮮度判定・どの軸を動かすか・**昇降部への指令を 100 ms ごとに組み立てて送る**・状態の集約 | ○（偽 HAL・偽昇降部） |
 | `lift_link.py` | 昇降部への WS クライアント。切れたら再接続し、その間は `LINK_LOST` | ○（偽 ESP32 サーバ） |
 | `app.py` | 画面・設定 API・ブラウザとの WS | ○（aiohttp の試験クライアント） |
