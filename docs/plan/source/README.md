@@ -13,6 +13,13 @@ spec に統合する前の材料。**仕様の正ではない。**spec に取り
 
 パスはリポジトリ直下（`hve-system/`）基準。
 
+## 1.5 外部の資料
+
+| 資料 | 場所 | 使い方 |
+| --- | --- | --- |
+| 沼津高専 MIRS「RaspberryPi シールド基板の製作」（MIRSMG5D-ELEC-0003） | https://www2.denshi.numazu-ct.ac.jp/mirsdoc2/mirsmg5d/elec/num0003a/ | **カメラ部の基板の元**（[DetailedDesign-hardware.md](../detailed/DetailedDesign-hardware.md) §2.1） |
+| 沼津高専 MIRS「RaspberryPi へのデバイス接続」（MIRSMG5D-SYST-0005） | https://www2.denshi.numazu-ct.ac.jp/mirsdoc2/mirsmg5d/syst/num0005b/ | SRF02 と I2C-LVL01 の接続 |
+
 ## 2. th-system 側の関連記述
 
 | 記述 | 場所 |

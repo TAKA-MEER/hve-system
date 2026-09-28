@@ -10,7 +10,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 
 **2026-09-25 時点で設計段階。コードはまだ無い。**開発体制は th-system と同じにしてある
 （文書の役割分担・herdr ＋ opencode による実装・受け入れ検査・git 運用）。
-**構成**: 昇降部（ESP32 ＋ MD10C）と無線カメラ部（ラズパイ 4・Web カメラ・ヨー＝ステッピング・ピッチ＝サーボ・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/spec/Spec.md) §5）。
+**構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/detailed/DetailedDesign-hardware.md)）。
 
 ## 作業開始前のルール
 

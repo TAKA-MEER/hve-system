@@ -97,7 +97,7 @@ python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（
 
 - 読む節: [-hardware.md](DetailedDesign-hardware.md) §2・§3・[DetailedDesign.md](DetailedDesign.md) §4.2（依存の入れ方）
 - 作るもの: `hw/pigpio_hw.py`・`systemd/*.service`（:80 で待つため `AmbientCapabilities=CAP_NET_BIND_SERVICE`。root で動かさない）・ラズパイの準備手順（`docs/使い方.md` を作る）
-- 受け入れ: ラズパイで `systemctl status hve-camera hve-video` が active。実機で: ピッチ・ヨーが deg/s で動き範囲で止まる／天井の超音波を手で塞ぐと上昇できない／超音波の線を抜くと `CEILING_STALE`
+- 受け入れ: ラズパイで `systemctl status hve-camera hve-video` が active。実機で: ピッチ・ヨーが deg/s で動き範囲で止まる／天井の超音波（SRF02）を手で塞ぐと上昇できない／SRF02 の線を抜くと `CEILING_STALE`／ヨーを止めている間は ULN2003 の LED が消えている（コイルの電流が切れている）
 
 ### `WP-UI-01` 画面
 

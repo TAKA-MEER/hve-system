@@ -22,8 +22,7 @@
 | **`D-1`** | **機器のアドレスの決め方** | 固定 IP は th-system の網（192.168.5.x。ラズパイ .1・PC .50 固定）の中で空きを決める必要があり、**th-system と干渉しうる**ので勝手に決めない。当面は DHCP ＋ mDNS（`hve-lift.local`・`hve-cam.local`）。ただし **Android は mDNS を引けない**（先行試作 `設計書.md` §3）ので、操作端末が Android なら AP 側の DHCP 予約が要る |
 | `D-2` | 映像の解像度・フレームレートの上限 | 仮 640×480・10 fps。`WP-MEAS-03` で th-system と同時に動かして決める |
 | `D-3` | 昇降部の ESP32 の電源をどこから取るか | [-hardware.md](DetailedDesign-hardware.md) §3 |
-| `D-4` | ステッピングモータをモバイルバッテリで回せるか | 同上 |
-| `D-5` | 部品の型番（超音波・ステッピングとドライバ・サーボ・**Web カメラ**） | [-hardware.md](DetailedDesign-hardware.md) §4 |
+| `D-5` | Web カメラの型番（他の部品は 2026-09-28 に決定） | [-hardware.md](DetailedDesign-hardware.md) §4 |
 
 ## 3. 完全設計書からの申し送り
 

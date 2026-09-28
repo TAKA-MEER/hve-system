@@ -87,7 +87,11 @@
 | `lift_state_timeout_ms` | カメラ部 | 600 | **仮** |
 | `state_period_ms` | カメラ部 | 100 | **仮** |
 | `ui_hold_period_ms` / `ui_state_timeout_ms` | 画面 | 100 / 1000 | **仮** |
-| `axis_speed_abs_max_dps` | カメラ部 | 60 | **仮**（部品未確定） |
+| `axis_speed_abs_max_dps` | カメラ部 | 60 | 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。**実測で確定** |
+| `yaw_steps_per_rev` | カメラ部 | 4096 | 28BYJ-48 の半ステップ（資料により 4076 とも。**実測で確定**） |
+| `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
+| `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは `H-X8` |
+| `srf02_ranging_wait_ms` | カメラ部 | 70 | SRF02 のデータシート（測定に約 66 ms） |
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`） |
 | `yaw_limit_deg` | カメラ部 | 170 | **仮**（提案 `P-4`） |
 | `zoom_max` / `zoom_step` | カメラ部 | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
