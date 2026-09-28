@@ -43,3 +43,6 @@ constexpr const char* LIFT_MDNS_NAME = "hve-lift";  // names.md §2
 
 // state_encode のバッファ。**仮**（state の JSON は 200 バイト未満）
 constexpr size_t LIFT_STATE_TEXT_MAX = 256;
+
+// WiFi の状態を見る周期。**仮**（無線が落ちていたら張り直すだけなので短くなくてよい）
+constexpr uint32_t LIFT_WIFI_POLL_MS = 5000;

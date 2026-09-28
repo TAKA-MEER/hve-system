@@ -159,6 +159,7 @@
 | `LIFT_MDNS_NAME` | 昇降部 `config.h` | `hve-lift` | §2 |
 | `LIFT_HTTP_PORT` / `LIFT_WS_PATH` | 昇降部 `config.h` | 80 / `/ws` | [-protocol.md](DetailedDesign-protocol.md) §1 |
 | `LIFT_STATE_TEXT_MAX` | 昇降部 `config.h` | 256 | **仮**（`state` の JSON は 200 バイト未満。`state_encode` のバッファ） |
+| `LIFT_WIFI_POLL_MS` | 昇降部 `config.h` | 5000 | **仮**（無線が落ちていたら張り直すだけなので短くなくてよい） |
 | `lift_probe_period_ms` | `tools/lift_probe.py` | 100 | **仮**（下の `lift_cmd_period_ms` と同じ。停止中も `stop` を送り続ける） |
 | `lift_probe_duty_pct` | `tools/lift_probe.py` | 40 | **仮**（[-protocol.md](DetailedDesign-protocol.md) §2.2 の例の値） |
 | `lift_probe_duty_step_pct` | `tools/lift_probe.py` | 5 | **仮**（`+` / `-` での増減） |
