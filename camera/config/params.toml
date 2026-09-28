@@ -1,7 +1,7 @@
 # カメラ部ラズパイのパラメータ。名前と値は DetailedDesign-names.md §5 の「カメラ部」の行のとおり。
 # `仮` は根拠の無い仮置き。実測（WP-MEAS-*）で置き換えたら `仮` を外し、出どころを書き直す。
 
-# 天井の余裕。spec Spec-safety.md §2
+# 天井の余裕
 ceiling_margin_mm = 500         # 仮（H-V8）
 # 天井の読み値が古いとみなす時間
 ceiling_stale_ms = 600           # 仮（spec Spec-safety.md §2）
