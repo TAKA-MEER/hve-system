@@ -137,12 +137,15 @@ class ControlLoop:
         self._speed = 0.0
         self._hold_at_ms = None
 
-    def set_zoom(self, level: Any) -> float:
-        """倍率を丸めて持ち、**変わったときだけ** `hve_video` へ渡す。実際の倍率を返す。"""
+    async def set_zoom(self, level: Any) -> float:
+        """倍率を丸めて持ち、**変わったときだけ** `hve_video` へ渡す。実際の倍率を返す。
+
+        送るのを待ってから戻る。**送れなくても例外は投げない**（`VideoZoom` 側で受け止める）。
+        """
         value = clamp_zoom(level, self._params)
         if value != self._zoom:
             self._zoom = value
-            self._video_zoom.send_zoom(value)
+            await self._video_zoom.send_zoom(value)
         return value
 
     # --- 制御ループ 1 回 --------------------------------------------------------------------------

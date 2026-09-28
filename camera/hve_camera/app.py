@@ -190,19 +190,19 @@ class CameraApp:
         self._clients[ws] = None
 
         # 画面が新しく繋がったら倍率を 1 に戻し、全画面に配る（spec §1.5）
-        self.control.set_zoom(1.0)
+        await self.control.set_zoom(1.0)
         await self.broadcast_state()
 
         try:
             async for message in ws:
                 if message.type is not aiohttp.WSMsgType.TEXT:
                     continue
-                self._on_message(ws, message.data)
+                await self._on_message(ws, message.data)
         finally:
             self._drop_client(ws)
         return ws
 
-    def _on_message(self, ws: web.WebSocketResponse, raw: str) -> None:
+    async def _on_message(self, ws: web.WebSocketResponse, raw: str) -> None:
         """`hold` / `release` / `zoom` を受ける。**読めないものは無視する。**"""
         try:
             data = json.loads(raw)
@@ -225,7 +225,7 @@ class CameraApp:
                 self.control.release()
             return
         if kind == "zoom":
-            self.control.set_zoom(data.get("level"))
+            await self.control.set_zoom(data.get("level"))
             return
         log.warning("知らない種類のメッセージなので無視した: %r", kind)
 
@@ -289,20 +289,37 @@ class CameraApp:
 
         if "ceiling" in data:
             errors += self._apply_fake_ceiling(data["ceiling"])
-        if "height_mm" in data:
-            value = data["height_mm"]
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                errors.append("height_mm: 数値でない")
+        if "height_mm" in data or "bottom" in data:
+            # 昇降部の偽物（`hw/fake_lift.py`）だけが这些を受け取る。実物には無いので、
+            # うっかり付けた時に 500 にしないよう理由として返す。
+            lift = self._fake_lift()
+            if lift is None:
+                if "height_mm" in data:
+                    errors.append("height_mm: 昇降部が偽物でない")
+                if "bottom" in data:
+                    errors.append("bottom: 昇降部が偽物でない")
             else:
-                self._lift.set_height_mm(float(value))
-        if "bottom" in data:
-            value = data["bottom"]
-            if not isinstance(value, bool):
-                errors.append("bottom: 真偽値でない")
-            else:
-                self._lift.set_bottom(value)
+                if "height_mm" in data:
+                    value = data["height_mm"]
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        errors.append("height_mm: 数値でない")
+                    else:
+                        lift.set_height_mm(float(value))
+                if "bottom" in data:
+                    value = data["bottom"]
+                    if not isinstance(value, bool):
+                        errors.append("bottom: 真偽値でない")
+                    else:
+                        lift.set_bottom(value)
 
         return errors
+
+    def _fake_lift(self) -> Any:
+        """偽の昇降部ならそれを返す。**偽物でなければ `None`。**"""
+        lift = self._lift
+        if hasattr(lift, "set_height_mm") and hasattr(lift, "set_bottom"):
+            return lift
+        return None
 
     def _apply_fake_ceiling(self, value: Any) -> list[str]:
         """天井の偽の値。**指定しなかったものは動かさない。**"""
