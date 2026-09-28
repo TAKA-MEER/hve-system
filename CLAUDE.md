@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 th-system（`../th-system`）の完全設計書が「範囲外（別担当）」としている
 **カメラ昇降のピッチ・ヨー・高さ**を担当する（th-system `Spec.md` §1・`Spec-onsite.md` §7.1）。
 
-**2026-09-25 時点で設計段階。コードはまだ無い。**開発体制は th-system と同じにしてある
+**2026-09-28 時点で、実装は `WP-BASE-01`（リポジトリの骨格と試験の土台）まで。**開発体制は th-system と同じにしてある
 （文書の役割分担・herdr ＋ opencode による実装・受け入れ検査・git 運用）。
 **構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/detailed/DetailedDesign-hardware.md)）。
 
@@ -76,11 +76,22 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 - `docs/使い方.md` に「今日は何を試すか」を書かない。それは `docs/試験項目.md` の役割。
 - `docs/試験項目.md` に動かし方を書かない。`docs/使い方.md` の該当節へリンクする。
 
+## ビルドとテスト
+
+**リポジトリ直下**から。昇降部は PlatformIO、カメラ部はリポジトリ内の `.venv` で回す（`python3 -m pytest` は使わない。理由は「環境の癖」）。
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r camera/requirements-dev.txt   # 初回
+pio test -d firmware/lift -e native
+pio run  -d firmware/lift -e esp32dev
+.venv/bin/python -m pytest camera/tests
+```
+
 ## このファイル自体の保守ルール
 
 - 作業中に判明したこのプロジェクト固有の環境の癖・落とし穴（コマンドの意外な挙動、ツールの制約など）は、ユーザーに確認せず「環境の癖」セクションに追記してよい。
 - **CLAUDE.md を更新するたびに、ファイル全体を読み直し、陳腐化した記述・重複・冗長な説明がないか見直すこと。** コンテキストを圧迫しないよう、価値の下がった記述は削除するか簡潔にまとめる。肥大化を優先して情報を積み増すだけにしない。
-- 設計段階の今は「ビルドとテスト」「アーキテクチャ」の節が無い。**実装が始まったら（ESP32 ファーム・ラズパイ側・画面のビルドと試験の手順）足す。**
+- 「アーキテクチャ」の節は無い。**`docs/architecture.md`（現状どうなっているか）を実物の実装と入れてから足す。**（「ビルドとテスト」の節は `WP-BASE-01` で足した）
 
 ## 環境の癖・注意点
 

@@ -1,0 +1,34 @@
+# カメラ部ラズパイのパラメータ。名前と値は DetailedDesign-names.md §5 の「カメラ部」の行のとおり。
+# `仮` は根拠の無い仮置き。実測（WP-MEAS-*）で置き換えたら `仮` を外し、出どころを書き直す。
+
+# 天井の余裕
+ceiling_margin_mm = 500         # 仮（H-V8）
+# 天井の読み値が古いとみなす時間
+ceiling_stale_ms = 600           # 仮（spec Spec-safety.md §2）
+# 画面からの操作が途絶えてから「押していない」扱いになるまでの時間
+hold_timeout_ms = 400            # 仮
+# 昇降部への指令を送る周期（止まっている間も stop を送る）
+lift_cmd_period_ms = 100         # 仮
+# 昇降部からの state が途絶えてから LINK_LOST になるまでの時間
+lift_state_timeout_ms = 600     # 仮
+# 画面へ state を送る周期
+state_period_ms = 100            # 仮
+# ヨー・ピッチの速度の絶対上限
+axis_speed_abs_max_dps = 60      # 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。実測で確定
+# 28BYJ-48 の半ステップで一周するステップ数
+yaw_steps_per_rev = 4096         # 資料により 4076 とも。実測で確定
+# SRF02 の I2C アドレス（7 bit）
+srf02_i2c_addr = 112             # 0x70。SRF02 の工場出荷値
+# SRF02 の測定できる距離。扱いは spec Spec-safety.md §2 #3a・#3b
+srf02_min_range_mm = 150         # SRF02 のデータシート
+srf02_max_range_mm = 6000        # SRF02 のデータシート
+# 測定の発信から結果を読むまでの待ち時間
+srf02_ranging_wait_ms = 70       # SRF02 のデータシート（測定に約 66 ms）
+# ピッチの可動範囲
+pitch_min_deg = -45              # 仮（H-V5・H-X5。SG90 自体は約 ±90°）
+pitch_max_deg = 45               # 仮（H-V5・H-X5。SG90 自体は約 ±90°）
+# デジタルズーム
+zoom_max = 4                     # spec Spec-ui.md §1.5（2026-09-25 決定）
+zoom_step = 0.5                  # spec Spec-ui.md §1.5（2026-09-25 決定）
+# 設定の保存先
+settings_path = "~/hve_data/settings.json"
