@@ -93,7 +93,8 @@
 | `CameraApp` | `camera/hve_camera/app.py` | 画面・設定 API・ブラウザとの WS を持つアプリ |
 | `create_app` | `camera/hve_camera/app.py` | `CameraApp` を作って aiohttp の `Application` を返す（**起動と試験が同じ物を使う**） |
 | `control_step` / `broadcast_state` | `camera/hve_camera/app.py` | 制御ループ 1 回／`state` を全画面へ配る。**立ち上げたタスクも試験も同じ関数を使う** |
-| `VideoZoom` | `camera/hve_camera/app.py` | 倍率を `hve_video` へ送る。偽物に差し替えられる。**`hve_video` が居なくてもアプリは止まらない**（逢わなかった倍率は次に送る） |
+| `VideoZoom` | `camera/hve_camera/app.py` | 倍率を `hve_video` へ送る。偽物に差し替えられる。**`hve_video` が居なくてもアプリは止まらない**（逢わなかった倍率は次に送る）。`close` でセッションを閉じる |
+| `send_zoom` | `camera/hve_camera/app.py` | `VideoZoom` の送り口。倍率を受け取って `POST http://127.0.0.1:<video_port>/zoom`。**失敗しても例外を投げない**（次の `send_zoom` で送り直す。送れたかどうかを返す） |
 | `main` | `camera/hve_camera/__main__.py` | `python3 -m hve_camera [--fake] [--port N]` の入口 |
 
 ## 2. 機器・ホスト名
@@ -138,6 +139,14 @@
 
 **指定しなかったものは動かない。**`ceiling` の `status`・`mm` は画面へ配る `state` の `ceiling`（[-protocol.md](DetailedDesign-protocol.md) §2.4）と、
 `height_mm`・`bottom` は昇降部の `state`（同 §2.3）と同じ名前・同じ意味。
+
+`GET` / `PUT /api/settings`（同 §3）の返り値。**検証に通らなければ 400 と理由の一覧**を返し、**保存しない**:
+
+| フィールド | 値 |
+| --- | --- |
+| `settings` | 現在の設定（4 軸の `min` / `max` / `init`） |
+| `using_defaults` | 設定ファイルが無い・壊れている・検証を通らないので**既定値で動いている**か（`true` の間だけ画面に出す） |
+| `errors` | **`400` のときだけ**入る。通らなかった理由の一覧（`validate_settings` の戻り値そのまま） |
 
 ## 5. パラメータと仮値
 
