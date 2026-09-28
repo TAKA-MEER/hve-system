@@ -29,6 +29,24 @@ EXPECTED = {
     "video_fps": 10,
     "video_jpeg_quality": 60,
     "settings_path": "~/hve_data/settings.json",
+    # names §5「偽物 API の `provisional`」（WP-CAM-02 で追加）
+    "lift_ws_url": "ws://hve-lift.local/ws",
+    "video_port": 8080,
+    "provisional": [
+        "ceiling_margin_mm",
+        "ceiling_stale_ms",
+        "hold_timeout_ms",
+        "lift_cmd_period_ms",
+        "lift_state_timeout_ms",
+        "state_period_ms",
+        "pitch_min_deg",
+        "pitch_max_deg",
+        "video_capture_width",
+        "video_capture_height",
+        "video_out_height",
+        "video_fps",
+        "video_jpeg_quality",
+    ],
 }
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.toml"
