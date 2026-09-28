@@ -148,7 +148,7 @@
 | `SONAR_PERIOD_MS` | 両方 | 100 | **仮** |
 | `PWM_FREQ_HZ` / `PWM_RESOLUTION` | 昇降部 `config.h` | 5000 / 8 | 先行試作 |
 | `PWM_CH` | 昇降部 `config.h` | 0 | 先行試作（LEDC チャネル 0） |
-| `SONAR_ECHO_TIMEOUT_US` | `hal_core/hal_core.h` | 30000 | **仮**（**割り込み**で ECHO の時間切れを判定する時間。4 m 往復の約 23 ms より長く、HC-SR04 の 1 回 60 ms の周期より短い。実機で確認する） |
+| `SONAR_ECHO_TIMEOUT_US` | `hal_core/hal_core.h` | 30000 | **仮**（**割り込み**で ECHO の時間切れを判定する時間。4 m 往復の約 23.5 ms より長く、HC-SR04 の 1 回 60 ms の周期より短い。実機で確認する） |
 | `SONAR_MIN_RANGE_MM` | `hal_core/hal_core.h` | 20 | HC-SR04 のデータシート（約 2 cm。**これより近い値は「高さが読めない」**） |
 | `SONAR_MAX_RANGE_MM` | `hal_core/hal_core.h` | 4000 | HC-SR04 のデータシート（約 4 m。**これより遠い値・時間切れも「高さが読めない」**） |
 | `BOTTOM_PRESSED_LEVEL` | `hal_core/hal_core.h` | 1（`HIGH`） | [-hardware.md](DetailedDesign-hardware.md) §1（**常時閉（NC）配線**。押すと開いて HIGH。断線も HIGH なので「押されている」側に倒れる）。`0` にすると押されたら LOW の配線になる |
