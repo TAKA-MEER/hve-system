@@ -131,7 +131,7 @@ def test_within_the_margin_is_near():
 
 
 def test_exactly_the_margin_is_near():
-    """境界。`ceiling_margin_mm` ちょうどでも上昇を許さない（ブリーフ §2 の表の `≦`）。"""
+    """境界。`ceiling_margin_mm` ちょうどでも上昇を許さない（spec Spec-safety.md §2 #3）。"""
     assert ceiling_permission(measured(MARGIN_MM, at_ms=0), 0, PARAMS) == (
         False,
         "CEILING_NEAR",
