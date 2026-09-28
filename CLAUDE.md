@@ -82,9 +82,11 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r camera/requirements-dev.txt   # 初回
+.venv/bin/pip install -e camera        # `python3 -m hve_camera` で動かすため（camera/pyproject.toml）
 pio test -d firmware/lift -e native
 pio run  -d firmware/lift -e esp32dev
 .venv/bin/python -m pytest camera/tests
+.venv/bin/python -m hve_camera --fake --port 18000    # 偽物のモード（立ち上げるだけ）
 ```
 
 ## このファイル自体の保守ルール
@@ -102,6 +104,7 @@ th-system で踏んだもののうち、同じ道具（herdr ＋ opencode・Plat
 - **opencode の質問画面（選択肢つきの確認）は、ペインが低いと入力欄が画面外に出て、`herdr agent prompt` の文字が入らない**（2026-09-28）。`herdr pane zoom <pane> --on` で広げ、`herdr pane read --source visible` で入力欄を確かめてから `herdr pane send-text` → `herdr pane send-keys <pane> Enter` で答える。終わったら `--off` で戻す。
 - **既に opencode が動いているペインに `herdr agent start` を打たない。**`start` はシェルプロンプト待ちを期待するため、動作中のセッションに文字列を打ち込んで壊す。`herdr agent rename` だけで登録する。
 - **`pip3 install platformio` をホストの `python3 -m pytest` と同じ環境に入れると、依存の `anyio` が pytest プラグインとして自動登録され、`ModuleNotFoundError: No module named '_pytest.scope'` でテストが全滅する**（この環境の `pytest` は 6.2.5）。`python3 -m pytest -p no:anyio ...` で回避できる（th-system 2026-09-05）。
+- **リポジトリ直下から `.venv/bin/python -m hve_camera` を動かすには `camera/` を編集可能で入れておく**（`pip install -e camera`）。入れないと `No module named hve_camera` になる（`pytest.ini` の `pythonpath = camera` は pytest だけにも効く）。2026-09-29 WP-CAM-02。
 - **`pkill -f <パターン>` は自分のシェルを殺すことがある**（パターンが自分のコマンドラインにマッチする）。PID 指定で止める。
 - **カメラ部のラズパイは Raspberry Pi OS Lite（64-bit）Trixie。pigpio は使えない**（公式リポジトリに無い）。GPIO は カーネル PWM・`lgpio`（OS 同梱。pip に Python 3.13 向けが無い）・`smbus2` で扱う。仮想環境は `--system-site-packages` 付きで作る（[DetailedDesign.md](docs/plan/detailed/DetailedDesign.md) §4.4）。
 - **ホストの Python は 3.10 で `tomllib` が無い。カメラ部の試験はリポジトリ内の `.venv/` で回す**（§4.5）。システムの `python3 -m pytest` を使うと上の anyio の問題を踏む。
