@@ -30,5 +30,13 @@ pitch_max_deg = 45               # 仮（H-V5・H-X5。SG90 自体は約 ±90°�
 # デジタルズーム
 zoom_max = 4                     # spec Spec-ui.md §1.5（2026-09-25 決定）
 zoom_step = 0.5                  # spec Spec-ui.md §1.5（2026-09-25 決定）
+# 取り込みの大きさ（hve_video）。カメラの型番が未定
+video_capture_width = 1920       # 仮（カメラの型番未定。DetailedDesign-hardware.md §2）
+video_capture_height = 1080      # 仮（カメラの型番未定。DetailedDesign-hardware.md §2）
+# 出力の高さ（幅は取り込みの縦横比に合わせる。倍率によらず一定）
+video_out_height = 480           # 仮（H-A8）
+# 配信のフレームレートと JPEG の品質
+video_fps = 10                   # 仮（H-A8）
+video_jpeg_quality = 60          # 仮（H-A8）
 # 設定の保存先
 settings_path = "~/hve_data/settings.json"
