@@ -25,7 +25,7 @@
 | `firmware/lift/lib/lift_core/` | `hal.h`・`lift_decide.{h,cpp}`・`lift_controller.{h,cpp}`・`cmd_codec.{h,cpp}`。**`Arduino.h` を include しない** |
 | `firmware/lift/src/` | `main.cpp`・`config.h`・`hal_esp32.{h,cpp}` |
 | `firmware/lift/include/secrets.h.example` | SSID・パスワードの雛形（`secrets.h` は gitignore 済み） |
-| `firmware/lift/test/test_lift_core/` | Unity の試験（`env:native`） |
+| `firmware/lift/test/test_lift_core/`・`test_lift_decide/`・`test_lift_controller/`・`test_cmd_codec/` | Unity の試験（`env:native`。1 ディレクトリ 1 試験で、それぞれ `test_main.cpp` を持つ） |
 | `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,rpi_hw,fake_hw,fake_lift}.py` |
 | `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
 | `camera/web/` | `index.html`・`settings.html`・`app.js`・`settings.js`・`style.css` |
@@ -41,6 +41,24 @@
 | --- | --- | --- |
 | `lift_core_version` | `firmware/lift/lib/lift_core/lift_core_version.h` | 文字列を返すだけの土台。`Arduino.h` を include しない。後のパケットでここに判定を書く |
 | `load_params` | `camera/hve_camera/params.py` | `camera/config/params.toml` を読んで dict で返す。`tomllib` が無ければ `tomli` を使う |
+
+`WP-LIFT-01` で足した関数・型（§0 の命名規則に従う）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `lift_decide` | `firmware/lift/lib/lift_core/lift_decide.{h,cpp}` | 純関数。[DetailedDesign.md](DetailedDesign.md) §4.1 の表の順に、方向・デューティ・停止理由を決める |
+| `StopReason` | `firmware/lift/lib/lift_core/lift_decide.h` | 停止理由の列挙。名前は §3 の名前そのもの |
+| `LiftDir` | `firmware/lift/lib/lift_core/lift_decide.h` | 方向の列挙。値は [-protocol.md](DetailedDesign-protocol.md) §2.2 の `up` / `down` / `stop` |
+| `LiftCmd` | `firmware/lift/lib/lift_core/lift_decide.h` | 指令の構造体（`dir` / `duty` / `ceil_ok`）。`seq` は判定に使わないので持たない |
+| `LiftState` | `firmware/lift/lib/lift_core/lift_decide.h` | 状態の構造体（[-protocol.md](DetailedDesign-protocol.md) §2.3 のフィールド） |
+| `LiftDecideInput` / `LiftDecideResult` | `firmware/lift/lib/lift_core/lift_decide.h` | `lift_decide()` の入力と出力 |
+| `has_cmd` | `firmware/lift/lib/lift_core/lift_decide.h` | `LiftDecideInput` の要素。**指令を一度も受けていない**ことを表す（起動直後は `CMD_TIMEOUT` 扱い） |
+| `run_ms` | `firmware/lift/lib/lift_core/lift_decide.h` | `LiftDecideInput` の要素。現在の指令方向について**実際にモータを回した**時間 |
+| `height_at_ms` | `firmware/lift/lib/lift_core/lift_decide.h` | 高さの読み値を得た時刻。`height_ok`（有効か）と組で鮮度を測る |
+| `LiftHal` | `firmware/lift/lib/lift_core/hal.h` | ハードウェアの抽象。モータ・下端スイッチ・高さ（値・有効性・時刻） |
+| `LiftController` | `firmware/lift/lib/lift_core/lift_controller.{h,cpp}` | 指令の受付・ウォッチドッグ・`lift_decide()` の結果をモータへ出す |
+| `cmd_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 指令の JSON → `LiftCmd`。壊れた入力は「上昇させない」側にして `false` |
+| `state_encode` / `state_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 状態の JSON ⇔ `LiftState`。`fw` は `lift_core_version()` から入れる |
 
 ## 2. 機器・ホスト名
 
@@ -78,16 +96,19 @@
 
 **`仮` は根拠の無い仮置き。**実測（`WP-MEAS-*`）で置き換えたら `仮` を外し、出どころを書く。
 
+**昇降部の判定に使う定数は `config.h` ではなく `firmware/lift/lib/lift_core/lift_decide.h` に置く**
+（`Arduino.h` を include しない `lift_core` のなかでホスト試験するため。2026-09-28 `WP-LIFT-01` で直した）。
+
 | 名前 | 置き場 | 値 | 出どころ |
 | --- | --- | --- | --- |
-| `LIFT_CMD_TIMEOUT_MS` | 昇降部 `config.h` | 600 | 先行試作・th-system のウォッチドッグの実績 |
-| `HEIGHT_STALE_MS` | 昇降部 | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
-| `LIFT_TOP_MM` | 昇降部 | 未設定（`-1`）。**未設定の間は上端で止めない** | `WP-MEAS-01` で決める（spec [Spec-safety.md](../spec/Spec-safety.md) §2 #2a） |
-| `LIFT_MAX_RUN_MS` | 昇降部 | 10000 | **仮**・先行試作の値。全行程の実測の約 1.5 倍に置き換える（spec #4b） |
-| `LIFT_DUTY_ABS_MAX_PCT` | 昇降部 | 100 | MD10C の上限 |
-| `LIFT_STATE_PERIOD_MS` | 昇降部 | 100 | **仮** |
+| `LIFT_CMD_TIMEOUT_MS` | `lift_core/lift_decide.h` | 600 | 先行試作・th-system のウォッチドッグの実績 |
+| `HEIGHT_STALE_MS` | `lift_core/lift_decide.h` | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
+| `LIFT_TOP_MM` | `lift_core/lift_decide.h`（既定値。設定値は `LiftController` の引数） | 未設定（`-1`）。**未設定の間は上端で止めない** | `WP-MEAS-01` で決める（spec [Spec-safety.md](../spec/Spec-safety.md) §2 #2a） |
+| `LIFT_MAX_RUN_MS` | `lift_core/lift_decide.h` | 10000 | **仮**・先行試作の値。全行程の実測の約 1.5 倍に置き換える（spec #4b） |
+| `LIFT_DUTY_ABS_MAX_PCT` | `lift_core/lift_decide.h` | 100 | MD10C の上限 |
+| `LIFT_STATE_PERIOD_MS` | 昇降部 `config.h` | 100 | **仮** |
 | `SONAR_PERIOD_MS` | 両方 | 100 | **仮** |
-| `PWM_FREQ_HZ` / `PWM_RESOLUTION` | 昇降部 | 5000 / 8 | 先行試作 |
+| `PWM_FREQ_HZ` / `PWM_RESOLUTION` | 昇降部 `config.h` | 5000 / 8 | 先行試作 |
 | `ceiling_margin_mm` | カメラ部 `params.toml` | 500 | **仮**（`H-V8`） |
 | `ceiling_stale_ms` | カメラ部 | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
 | `hold_timeout_ms` | カメラ部 | 400 | **仮** |
