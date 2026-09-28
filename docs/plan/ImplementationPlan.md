@@ -179,7 +179,7 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 
 | 段階 | コマンド・確認 |
 | --- | --- |
-| 0〜3（実機不要） | `pio test -d firmware/lift -e native` ／ `python3 -m pytest -p no:anyio camera/tests` ／ `python3 -m hve_camera --fake` で画面を開く ＋ **パケットごとの変異チェック** |
+| 0〜3（実機不要） | `pio test -d firmware/lift -e native` ／ `.venv/bin/python -m pytest camera/tests` ／ `python3 -m hve_camera --fake` で画面を開く ＋ **パケットごとの変異チェック** |
 | 1・2（実機） | [DetailedDesign-packets.md](detailed/DetailedDesign-packets.md) の各パケットの「実機で管理担当が確かめる」 |
 | 4 | 測定結果を `docs/試験項目.md` に記録し、仮値を置き換える |
 

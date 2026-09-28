@@ -19,7 +19,7 @@
 ```bash
 pio test -d firmware/lift -e native                   # 昇降部のホスト試験
 pio run  -d firmware/lift -e esp32dev                 # 昇降部のビルド
-python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（-p no:anyio は CLAUDE.md「環境の癖」）
+.venv/bin/python -m pytest camera/tests              # カメラ部の試験（.venv の作り方は DetailedDesign.md §4.5）
 ```
 
 ## 1. 一覧
@@ -47,8 +47,9 @@ python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（
 ### `WP-BASE-01` 骨格
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §2・[-names.md](DetailedDesign-names.md) §1
-- 作るもの: §1 のファイル構成の空の骨格。`env:native` に空でない試験 1 件、pytest に 1 件。`CLAUDE.md` に「ビルドとテスト」節（上の共通コマンド）
-- 受け入れ: 共通コマンド 3 つが成功する
+- 作るもの: §1 のファイル構成の空の骨格。`env:native` に空でない試験 1 件、pytest に 1 件。`camera/requirements.txt`・`requirements-dev.txt`（版を固定）。`params.py` の `tomllib`／`tomli` の切り替え。`CLAUDE.md` に「ビルドとテスト」節（上の共通コマンドと `.venv` の作り方）
+- 読む節に追加: [DetailedDesign.md](DetailedDesign.md) §4.4・§4.5
+- 受け入れ: `.venv` を消して作り直してから、共通コマンド 3 つが成功する
 
 ### `WP-LIFT-01` 昇降部の判定
 
@@ -97,9 +98,9 @@ python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（
 
 ### `WP-CAM-03` カメラ部の実物
 
-- 読む節: [-hardware.md](DetailedDesign-hardware.md) §2・§3・[DetailedDesign.md](DetailedDesign.md) §4.2（依存の入れ方）
-- 作るもの: `hw/pigpio_hw.py`・`systemd/*.service`（:80 で待つため `AmbientCapabilities=CAP_NET_BIND_SERVICE`。root で動かさない）・ラズパイの準備手順（`docs/使い方.md` を作る）
-- 受け入れ: ラズパイで `systemctl status hve-camera hve-video` が active。実機で: ピッチが deg/s で動き範囲で止まる／ヨーが deg/s で 360° 以上回り続けられる／天井の超音波（SRF02）を手で塞ぐと上昇できない／SRF02 の線を抜くと `CEILING_STALE`／ヨーを止めている間は ULN2003 の LED が消えている（コイルの電流が切れている）
+- 読む節: [-hardware.md](DetailedDesign-hardware.md) §2・§3・[DetailedDesign.md](DetailedDesign.md) §4.2・§4.4
+- 作るもの: `hw/rpi_hw.py`・Trixie の準備手順（`config.txt` の PWM・I2C、グループ、`--system-site-packages` の仮想環境）・`systemd/*.service`（:80 で待つため `AmbientCapabilities=CAP_NET_BIND_SERVICE`。root で動かさない）・ラズパイの準備手順（`docs/使い方.md` を作る）
+- 受け入れ: ラズパイで `systemctl status hve-camera hve-video` が active。実機で: ピッチが deg/s で動き範囲で止まり、止めている間サーボが震えない／ヨーが deg/s で 360° 以上回り続けられる／天井の超音波（SRF02）を手で塞ぐと上昇できない／SRF02 の線を抜くと `CEILING_STALE`／ヨーを止めている間は ULN2003 の LED が消えている（コイルの電流が切れている）
 
 ### `WP-UI-01` 画面
 

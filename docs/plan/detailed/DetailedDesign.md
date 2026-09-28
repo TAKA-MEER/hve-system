@@ -27,7 +27,7 @@
   │  WS    :80/ws 操作（押している間）・状態 ├─ カメラ部ラズパイ  hve_camera（Python）
   │  HTTP  :8080  映像（MJPEG）            ┘                    hve_video（別プロセス）
   ▼                                          ├ ヨー: 28BYJ-48   ┐
-カメラ部ラズパイ ─────────────────────────────├ ピッチ: SG90      ├ pigpio
+カメラ部ラズパイ ─────────────────────────────├ ピッチ: SG90      ├ カーネル PWM／lgpio／smbus2
                                              ├ 天井: SRF02(I2C) ┘
         WS クライアント  ──(th-rpi-ap)──→  昇降部 ESP32  hve_lift（:80/ws）
                                              ├ MD10C → パワーウィンドウモータ
@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | 昇降部ファーム | PlatformIO ＋ Arduino（ESP32）。**`espressif32@7.0.1` に固定** | 先行試作と同じ。2026-09-25 にこの版で試作のビルドが通ることを確認した。`ledcSetup` 等の API が版で変わるため固定する |
 | 昇降部 ⇔ カメラ部 | WebSocket（ESP32 がサーバ、ラズパイがクライアント）＋ JSON | 先行試作の通信をそのまま使える。仕様は [-protocol.md](DetailedDesign-protocol.md) |
-| カメラ部アプリ | Python 3（Raspberry Pi OS 同梱）＋ `aiohttp` ＋ `pigpio` | 画面配信・WS サーバ・WS クライアントを 1 つの依存で賄える。サーボ・ステッピング・超音波のタイミングは `pigpio`（デーモンがハードウェアで刻む） |
+| カメラ部アプリ | Python 3.13（**Raspberry Pi OS Lite 64-bit・Trixie** 同梱）＋ `aiohttp`。GPIO まわりは §4.4 | 画面配信・WS サーバ・WS クライアントを 1 つの依存で賄える。GPIO まわりは OS の標準機能と OS 同梱のライブラリで賄う（§4.4） |
 | 映像 | **自前の配信プロセス `hve_video`**（Python ＋ OpenCV。MJPEG） | デジタルズームの切り出しを途中で変えるため、既製の配信ソフトは使えない。**制御アプリと別プロセス**にする（下記 §4.3） |
 | 画面 | 素の HTML ＋ JavaScript（ビルド無し） | Node の道具を持ち込まない。ラズパイが静的ファイルとして配る |
 | デジタルズーム | **`hve_video` が高解像度で取り込み、中央を倍率に応じて切り出し、配信の大きさへ縮めて送る** | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5。帯域は倍率によらず一定 |
@@ -93,7 +93,7 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4「天井の値が読めな�
 | `control.py` | 操作（押している間）の鮮度判定・どの軸を動かすか・**昇降部への指令を 100 ms ごとに組み立てて送る**・状態の集約 | ○（偽 HAL・偽昇降部） |
 | `lift_link.py` | 昇降部への WS クライアント。切れたら再接続し、その間は `LINK_LOST` | ○（偽 ESP32 サーバ） |
 | `app.py` | 画面・設定 API・ブラウザとの WS | ○（aiohttp の試験クライアント） |
-| `hw/pigpio_hw.py` | 実物の SG90・28BYJ-48（ULN2003）・SRF02（I2C。`pigpio` の I2C 機能を使い、依存を増やさない） | × |
+| `hw/rpi_hw.py` | 実物の SG90（カーネルのハードウェア PWM）・28BYJ-48（`lgpio`）・SRF02（`smbus2`） | × |
 | `hw/fake_hw.py` ／ `hw/fake_lift.py` | **偽物のモード**（`--fake`）。機器ゼロで画面と判定を動かす | — |
 
 ### 4.3 映像（`camera/hve_video/`）
@@ -115,9 +115,38 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4「天井の値が読めな�
 **実装エージェントも管理担当も、機器なしで画面と判定の経路を確かめられる。**
 偽物のモードで通した結果を、実機の結果と取り違えないこと（画面に常時「偽物のモード」と出す）。
 
-**依存の入れ方（インターネット無し）**: 要るのは `aiohttp`・`pigpio`・OpenCV（`python3-opencv`）。カメラ部のラズパイは**配備前にインターネットのある無線で準備する**のが最も簡単
-（th-system のラズパイと違い、`th-rpi-ap` に繋ぐ前に他の網へ繋げられる）。できないときは th-system
-`docs/network.md`「ラズパイ: pi_serial_relay の導入」と同じく、開発機で wheel ／ `.deb` を落として持ち込む。
+### 4.4 カメラ部の OS と依存（2026-09-28 ユーザー決定: Trixie）
+
+**OS は Raspberry Pi OS Lite（64-bit）の Trixie。**画面（デスクトップ）は入れない。**pigpio は使わない**
+（Bookworm 以降の公式リポジトリに無く、Trixie ではビルドにも問題が報告されている）。
+
+| 用途 | 使うもの | 入れ方 | 備考 |
+| --- | --- | --- | --- |
+| SG90 の PWM | **カーネルのハードウェア PWM** | `/boot/firmware/config.txt` に `dtoverlay=pwm,pin=18,func=2` | `/sys/class/pwm/` から周期とパルス幅を書く。ソフトの PWM と違い震えない |
+| 28BYJ-48 の相の切り替え | `lgpio` | **OS に最初から入っている**（pip の配布物は Python 3.13 向けが無い） | 専用のスレッドで刻む。**間隔の揺れで脱調・振動しないかを実機で確かめ**、だめなら速度の上限を下げる |
+| SRF02（I2C） | `smbus2` | pip（純 Python） | I2C を有効にする（`raspi-config` または `dtparam=i2c_arm=on`） |
+| 画面・WS・設定 API | `aiohttp` | pip | |
+| 映像 | OpenCV・numpy | apt（`python3-opencv`）の見込み。**準備のときに Trixie で入るか確かめる** | |
+| パラメータ | `tomllib` | Python 3.13 に付属 | |
+
+**仮想環境は `--system-site-packages` 付きで作る**（OS 同梱の `lgpio`・apt の OpenCV を使うため）。
+Trixie の Python は OS 管理下で、仮想環境の外へ pip で入れられない。
+
+**権限**: 動かすユーザーを `gpio`・`i2c` グループに入れる。`/sys/class/pwm/` を書けるかは準備のときに確かめる（書けなければ udev の規則を足す）。
+
+**依存の入れ方（インターネット無し）**: カメラ部のラズパイは**配備前にインターネットのある無線で準備する**のが最も簡単
+（th-system のラズパイと違い、`th-rpi-ap` に繋ぐ前に他の網へ繋げられる）。できないときは開発機で wheel ／ `.deb` を落として持ち込む。
+
+### 4.5 開発機（ホスト）の試験環境
+
+ホストの Python は 3.10 で、標準の pytest（6.2.5）はそのままでは起動しない（`CLAUDE.md`「環境の癖」）。**リポジトリ内の仮想環境 `.venv/`**（除外済み）を使う。
+
+| 項目 | 決まりごと |
+| --- | --- |
+| 作り方 | `python3 -m venv .venv && .venv/bin/pip install -r camera/requirements-dev.txt` |
+| 中身 | 新しい pytest・`aiohttp`・`opencv-python-headless`・`numpy`・`smbus2`・`tomli`。版は `requirements-dev.txt` で固定 |
+| `tomllib` | ホストの 3.10 には無いので、`params.py` は `tomllib` が無ければ `tomli` を使う |
+| `lgpio` | ホストには入れない。実物のハードウェアの層（`hw/rpi_hw.py`）はホストでは import しない（試験は偽物のハードウェアで行う） |
 
 ## 5. 段階と作業パケット
 

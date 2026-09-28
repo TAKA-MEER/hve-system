@@ -26,10 +26,11 @@
 | `firmware/lift/src/` | `main.cpp`・`config.h`・`hal_esp32.{h,cpp}` |
 | `firmware/lift/include/secrets.h.example` | SSID・パスワードの雛形（`secrets.h` は gitignore 済み） |
 | `firmware/lift/test/test_lift_core/` | Unity の試験（`env:native`） |
-| `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,pigpio_hw,fake_hw,fake_lift}.py` |
+| `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,rpi_hw,fake_hw,fake_lift}.py` |
 | `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
 | `camera/web/` | `index.html`・`settings.html`・`app.js`・`settings.js`・`style.css` |
 | `camera/config/params.toml` | パラメータ（§5 のカメラ部の行） |
+| `camera/requirements.txt` ／ `camera/requirements-dev.txt` | ラズパイで pip で入れるもの（`aiohttp`・`smbus2`） ／ ホストの試験用（[DetailedDesign.md](DetailedDesign.md) §4.5） |
 | `camera/tests/` | pytest |
 | `camera/systemd/` | `hve-camera.service`・`hve-video.service` |
 | `tools/` | 実機の確認用スクリプト（`lift_probe.py` 等） |

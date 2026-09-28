@@ -111,4 +111,5 @@ th-system 側の関連項目と、この決定による扱い:
 | 2026-09-28 | `P-1` | 同じ方向への連続駆動に上限を設ける。上限は全行程の所要時間の約 1.5 倍、実測までは 10 秒 | [Spec-safety.md](Spec-safety.md) §2 #4b |
 | 2026-09-28 | `P-2` | 上端の閾値が未設定のときは**開発中の動作確認とみなして上昇を許す**（画面に常に出す） | [Spec-safety.md](Spec-safety.md) §2 #2a |
 | 2026-09-28 | `P-4` | **ヨーは 360° 回し続けられる。ヨーの向きはシステムで扱わない**（可動範囲の制限・角度の表示なし） | [Spec-ui.md](Spec-ui.md) §1.4 |
+| 2026-09-28 | — | カメラ部の OS は **Raspberry Pi OS Lite（64-bit）Trixie**。pigpio は使わない | [DetailedDesign.md](../detailed/DetailedDesign.md) §4.4 |
 | 2026-09-25 | `H-S3` | 盤前の低速並進は担当しない（走行は th-system のもので、互いに干渉しない決定に含まれる） | [Spec.md](Spec.md) §1 |
