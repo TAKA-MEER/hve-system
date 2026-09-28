@@ -214,6 +214,30 @@ async def test_ceil_ok_false_over_the_wire_when_the_ceiling_is_close(rig: Rig) -
     await ws.close()
 
 
+async def test_ceil_ok_goes_false_after_stale_over_the_real_path(rig: Rig) -> None:
+    """**変異 1 を本物の経路で縛る**（brief §3 の要求）。
+
+    天井の読み値が途中で更新されなくなると、`ceiling_stale_ms` 後に
+    **偽の ESP32 が受ける `ceil_ok`** が `false` になる。前の `true` を使い回したら赤になる。
+    """
+    await rig.warm()  # 遠い読み値を手に入れておく
+    ws = await rig.browser()
+    await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
+    await rig.wait_axis("lift_up")
+    await rig.pump()
+    assert rig.last()["ceil_ok"] is True, "天井が遠いので上昇を許す"
+
+    # ここから新しい読み値を返さない（センサが止まる / I2C が読めない）
+    rig.hw.freeze_ceiling()
+    await rig.pump(distance_mm=None)  # まだ古くない
+    assert rig.last()["ceil_ok"] is True
+
+    state = await rig.pump(1000, distance_mm=None)  # ceiling_stale_ms=600 を超える
+    assert rig.last()["ceil_ok"] is False, "前の許可を使い回さない"
+    assert state["ceiling"]["reason"] == "CEILING_STALE"
+    await ws.close()
+
+
 async def test_release_from_the_browser_sends_stop(rig: Rig) -> None:
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
