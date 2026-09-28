@@ -40,3 +40,25 @@ video_fps = 10                   # 仮（H-A8）
 video_jpeg_quality = 60          # 仮（H-A8）
 # 設定の保存先
 settings_path = "~/hve_data/settings.json"
+# 昇降部（ESP32）の WS。名前は names §5 にある。アドレスの決め方は DetailedDesign-open.md D-1
+lift_ws_url = "ws://hve-lift.local/ws"
+# 映像の配信プロセス hve_video のポート（倍率の送り先。127.0.0.1 だけ）
+video_port = 8080
+# 仮値のまま動いているパラメータ名の一覧（DD-3、画面に出す）。DetailedDesign-names.md §5 の
+# 「カメラ部」と「hve_video」の行のうち「仮」と書いてあるもの全部。実測（WP-MEAS-*）で
+# 置き換えたらここから外す。
+provisional = [
+  "ceiling_margin_mm",
+  "ceiling_stale_ms",
+  "hold_timeout_ms",
+  "lift_cmd_period_ms",
+  "lift_state_timeout_ms",
+  "state_period_ms",
+  "pitch_min_deg",
+  "pitch_max_deg",
+  "video_capture_width",
+  "video_capture_height",
+  "video_out_height",
+  "video_fps",
+  "video_jpeg_quality",
+]
