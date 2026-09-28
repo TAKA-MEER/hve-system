@@ -72,7 +72,7 @@ python3 -m pytest -p no:anyio camera/tests            # カメラ部の試験（
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §3・§4.2・[-protocol.md](DetailedDesign-protocol.md) §3
 - 作るもの: `ceiling.py`・`settings.py`・`axes.py`・`params.py`
-- 受け入れ: pytest が成功し、変異が赤になる: 天井の古さの判定を消す／`min ≦ init ≦ max` の検証を消す／軸が可動範囲を越える
+- 受け入れ: pytest が成功し、変異が赤になる: 天井の古さの判定を消す／**I2C の読み取り失敗を「反射なし（範囲外＝上昇可）」として扱う**／最小測定距離より近い値を上昇可にする／`min ≦ init ≦ max` の検証を消す／軸が可動範囲を越える
 
 ### `WP-CAM-02` 制御ループ・アプリ・偽物のモード
 

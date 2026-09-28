@@ -77,6 +77,7 @@
  "provisional":["ceiling_margin_mm","ceiling_stale_ms"],"fake":false,"clients":1}
 ```
 
+`ceiling.reason` は `NONE` / `CEILING_NEAR` / `CEILING_STALE` / `OUT_OF_RANGE`（反射なし。`ok` は `true`。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b）。
 `reason` は画面に出す停止理由（カメラ部の判断 `HOLD_TIMEOUT` / `LINK_LOST` / 天井の理由 / 昇降部の `reason` のうち最も上流のもの）。
 `provisional` は仮値のまま動いているパラメータ名（`DD-3`）。`clients` は繋いでいる画面の数（spec [Spec-ui.md](../spec/Spec-ui.md) §1.6）。
 

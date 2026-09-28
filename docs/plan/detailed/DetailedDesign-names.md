@@ -61,6 +61,7 @@
 | `HOLD_TIMEOUT` | カメラ部 | 画面からの操作が途絶えた |
 | `LINK_LOST` | カメラ部 | 昇降部と繋がっていない |
 | `AXIS_LIMIT` | カメラ部 | ピッチ・ヨーが可動範囲の端 |
+| `OUT_OF_RANGE` | カメラ部（天井の理由のみ。**停止理由ではない**） | 天井の距離計に反射が返らない。上昇は許す |
 
 ## 4. メッセージ
 
@@ -90,7 +91,7 @@
 | `axis_speed_abs_max_dps` | カメラ部 | 60 | 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。**実測で確定** |
 | `yaw_steps_per_rev` | カメラ部 | 4096 | 28BYJ-48 の半ステップ（資料により 4076 とも。**実測で確定**） |
 | `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
-| `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは `H-X8` |
+| `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3a・#3b |
 | `srf02_ranging_wait_ms` | カメラ部 | 70 | SRF02 のデータシート（測定に約 66 ms） |
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`） |
 | `yaw_limit_deg` | カメラ部 | 170 | **仮**（提案 `P-4`） |

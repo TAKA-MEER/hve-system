@@ -107,4 +107,5 @@ th-system 側の関連項目と、この決定による扱い:
 | 2026-09-25 | `P-3` | 複数の端末で開いたときは**最後の操作が勝つ**。画面に接続台数を出す | [Spec-ui.md](Spec-ui.md) §1.6 |
 | 2026-09-28 | — | **部品の決定**: 天井の超音波は SRF02（I2C）、高さの超音波は HC-SR04、ピッチは SG90、ヨーは 28BYJ-48 ＋ ULN2003。カメラ部の基板は沼津高専 MIRS のシールド基板（MIRSMG5D-ELEC-0003）を元に作る。Web カメラは未定 | [Spec.md](Spec.md) §5 ／ [DetailedDesign-hardware.md](../detailed/DetailedDesign-hardware.md) |
 | 2026-09-28 | — | 揺れ対策は**実機で揺れを確認してから決める** | [stabilization.md](../stabilization.md) |
+| 2026-09-28 | `H-X8` | 天井の距離計（SRF02）が近すぎて測れないときは「天井が近い」として上昇しない。反射が返らないときは「天井は遠い」として上昇を許し「天井: 範囲外」と出す | [Spec-safety.md](Spec-safety.md) §2 |
 | 2026-09-25 | `H-S3` | 盤前の低速並進は担当しない（走行は th-system のもので、互いに干渉しない決定に含まれる） | [Spec.md](Spec.md) §1 |

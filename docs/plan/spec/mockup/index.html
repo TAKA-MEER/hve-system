@@ -255,6 +255,7 @@ td input.bad{border-color:var(--ng)}
     <button data-mock="normal" class="on">通常</button>
     <button data-mock="ceilNear">天井が近い</button>
     <button data-mock="ceilStale">天井の値が届かない</button>
+    <button data-mock="ceilOut">天井 範囲外</button>
     <button data-mock="link">昇降部と切断</button>
     <button data-mock="topUnset">上端が未設定</button>
     <button data-mock="height">高さセンサ故障</button>
@@ -281,7 +282,7 @@ td input.bad{border-color:var(--ng)}
 
   // ---- 機体の状態（シミュレーション） ----
   const S = {height:120, top:1500, ceilingAt:2200, pitch:0, yaw:0,
-             link:true, ceilStale:false, topUnset:false, heightBad:false, video:true,
+             link:true, ceilStale:false, ceilOut:false, topUnset:false, heightBad:false, video:true,
              active:null, reason:'CMD_STOP'};
   const CEIL_MARGIN = 500, PITCH_LIM = 45, YAW_LIM = 170, BOTTOM = 100;
   const LIFT_MM_PER_PCT_S = 9.6; // 絵を動かすための適当な値（仕様ではない）
@@ -327,7 +328,7 @@ td input.bad{border-color:var(--ng)}
     if (axis === 'lift_up'){
       if (!S.link) return 'LINK_LOST';
       if (S.ceilStale) return 'CEILING_STALE';
-      if (S.ceilingAt - S.height <= CEIL_MARGIN) return 'CEILING_NEAR';
+      if (!S.ceilOut && S.ceilingAt - S.height <= CEIL_MARGIN) return 'CEILING_NEAR';
       if (S.heightBad) return 'HEIGHT_UNKNOWN';
       if (S.topUnset) return 'TOP_UNSET';
       if (S.height >= S.top) return 'TOP';
@@ -374,7 +375,7 @@ td input.bad{border-color:var(--ng)}
     const up = S.active === 'lift_up', dn = S.active === 'lift_down';
     const gap = Math.round(S.ceilingAt - S.height);
     setBadge($('bLink'), S.link ? '' : 'ng', S.link ? '昇降部' : '昇降部 切断');
-    setBadge($('bCeil'), S.ceilStale ? 'ng' : (gap <= CEIL_MARGIN ? 'warn' : ''), S.ceilStale ? '天井 値なし' : `天井 ${gap} mm`);
+    setBadge($('bCeil'), S.ceilStale ? 'ng' : (!S.ceilOut && gap <= CEIL_MARGIN ? 'warn' : ''), S.ceilStale ? '天井 値なし' : (S.ceilOut ? '天井 範囲外' : `天井 ${gap} mm`));
     // 映像: 画面中央に来る世界の y。下端では盤面、上がるほど盤上部へ。ピッチ上向きでさらに上
     const cy = -50 - (S.height - BOTTOM) * 0.62 - S.pitch * 9, tx = -S.yaw * 6;
     $('world').setAttribute('transform', `translate(${tx},${240 - cy})`);
@@ -459,7 +460,7 @@ td input.bad{border-color:var(--ng)}
   $('mockRow').addEventListener('click', e => {
     const m = e.target.dataset.mock; if (!m) return;
     if (m === 'normal'){
-      Object.assign(S, {link:true, ceilStale:false, topUnset:false, heightBad:false, video:true, ceilingAt:2200});
+      Object.assign(S, {link:true, ceilStale:false, ceilOut:false, topUnset:false, heightBad:false, video:true, ceilingAt:2200});
       $('bFake').style.display = 'none'; $('bClients').lastElementChild.textContent = '端末 1';
       document.querySelectorAll('#mockRow button').forEach(b => b.classList.toggle('on', b.dataset.mock === 'normal'));
       return;
@@ -468,7 +469,7 @@ td input.bad{border-color:var(--ng)}
     document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');
     e.target.classList.toggle('on');
     const on = e.target.classList.contains('on');
-    const toggles = {ceilStale:'ceilStale', topUnset:'topUnset', height:'heightBad'};
+    const toggles = {ceilStale:'ceilStale', ceilOut:'ceilOut', topUnset:'topUnset', height:'heightBad'};
     if (toggles[m]) S[toggles[m]] = on;
     if (m === 'link') S.link = !on;
     if (m === 'novideo') S.video = !on;
