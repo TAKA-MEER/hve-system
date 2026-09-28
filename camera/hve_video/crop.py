@@ -15,7 +15,7 @@ def crop_rect(
     倍率は 1〜`zoom_max` に丸め、`zoom_step` の倍数にそろえる。
     切り出す枠は**取り込みと同じ縦横比**（幅・高さとも 1/倍率）で、画像からはみ出さない。
 
-    倍率の丸めは不到的側（`hve_video`）でも行う。画面 → `hve_camera` → `hve_video` の
+    倍率の丸めは受け取る側（`hve_video`）でも行う。画面 → `hve_camera` → `hve_video` の
     2 経路で倍率が届くので、受け取った側でも同じ規則にそろえる。
     """
     if capture_width < 1 or capture_height < 1:
