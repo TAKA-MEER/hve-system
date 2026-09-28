@@ -14,7 +14,7 @@ EXPECTED = {
     "state_period_ms": 100,
     "axis_speed_abs_max_dps": 60,
     "yaw_steps_per_rev": 4096,
-    # names §5 は 0x70 と書いてある。TOML に 16 進数は無いので 10 進で持つ。
+    # names §5 は 0x70 と書いてある。TOML は 16 進が書けるので params.toml もその表記。
     "srf02_i2c_addr": 0x70,
     "srf02_min_range_mm": 150,
     "srf02_max_range_mm": 6000,
