@@ -23,6 +23,11 @@ EXPECTED = {
     "pitch_max_deg": 45,
     "zoom_max": 4,
     "zoom_step": 0.5,
+    "video_capture_width": 1920,
+    "video_capture_height": 1080,
+    "video_out_height": 480,
+    "video_fps": 10,
+    "video_jpeg_quality": 60,
     "settings_path": "~/hve_data/settings.json",
 }
 
