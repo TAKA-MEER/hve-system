@@ -28,7 +28,7 @@
 | `firmware/lift/test/test_lift_core/`・`test_lift_decide/`・`test_lift_controller/`・`test_cmd_codec/` | Unity の試験（`env:native`。1 ディレクトリ 1 試験で、それぞれ `test_main.cpp` を持つ） |
 | `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,rpi_hw,fake_hw,fake_lift}.py` |
 | `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
-| `camera/web/` | `index.html`・`settings.html`・`app.js`・`settings.js`・`style.css` |
+| `camera/web/` | `index.html`・`app.js`・`settings.js`・`style.css`。**設定画面は `index.html` のオーバーレイ**（別ページではない。モックアップと同じ） |
 | `camera/config/params.toml` | パラメータ（§5 のカメラ部の行） |
 | `camera/requirements.txt` ／ `camera/requirements-dev.txt` | ラズパイで pip で入れるもの（`aiohttp`・`smbus2`） ／ ホストの試験用（[DetailedDesign.md](DetailedDesign.md) §4.5） |
 | `camera/tests/` | pytest |
