@@ -19,7 +19,7 @@ volatile bool g_echo_done = false;       // 1 回測り終えた（loop() 側で
 // ECHO の両エッジ（CHANGE）で、割り込みの横幅だけ測る。loop() を止めないため
 // （ECHO は 5 V なので分圧して 3.3 V にしてある。分圧なしだと壊す）。
 // IRAM に置く。呼ぶのは micros() と digitalRead() だけで、両方とも
-// ARDUINO_ISR_ATTR（IRAM から呼べる）。Serial もdelay もしない。
+// ARDUINO_ISR_ATTR（IRAM から呼べる）。Serial も delay も使わない。
 void IRAM_ATTR echo_edge_isr() {
   if (digitalRead(SONAR_ECHO_PIN) == HIGH) {
     g_echo_rise_us = micros();
