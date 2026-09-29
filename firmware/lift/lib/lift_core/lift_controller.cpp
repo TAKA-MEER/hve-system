@@ -31,9 +31,12 @@ void LiftController::on_command(const LiftCmd& cmd, uint32_t now_ms) {
 LiftState LiftController::step(uint32_t now_ms) {
   // 直前の step から今回までのあいだ、実際に回っていた時間を足してから判定する
   // （判定のあとに足すと、止まるまでが 1 周期ぶん延びる）。
-  const uint32_t elapsed = now_ms - run_at_ms_;
+  // 時計が一周していても正しく出る。割り込みや WS のタスクが now より少し
+  // 新しい時刻を書いていても負の小さな値になるので、そこで止める必要はない。
+  const int32_t elapsed = elapsed_ms(now_ms, run_at_ms_);
   if (turning_ && elapsed > 0) {
-    run_ms_ = (elapsed > kRunStopMs - run_ms_) ? kRunStopMs : run_ms_ + elapsed;
+    const uint32_t step_ms = static_cast<uint32_t>(elapsed);
+    run_ms_ = (step_ms > kRunStopMs - run_ms_) ? kRunStopMs : run_ms_ + step_ms;
   }
   // 停止指令（指令を一度も受けていない場合もこれと同じ扱い）・方向の変化で 0 に戻す
   if (cmd_.dir == LiftDir::STOP || cmd_.dir != run_dir_) {
@@ -67,11 +70,13 @@ LiftState LiftController::step(uint32_t now_ms) {
   state_.reason = decided.reason;
   state_.bottom = in.bottom_pressed;
   state_.height_mm = in.height_mm;
-  state_.height_ok = in.height_ok &&
-                     static_cast<int64_t>(now_ms) - static_cast<int64_t>(in.height_at_ms) <=
-                         HEIGHT_STALE_MS;
+  // 鮮度の判断は lift_decide の表 4 と同じ 1 か所(height_is_fresh)で行う
+  state_.height_ok = in.height_ok && height_is_fresh(now_ms, in.height_at_ms);
   state_.top_mm = top_mm_;
-  state_.cmd_age_ms = has_cmd_ ? now_ms - cmd_received_at_ms_ : 0;
+  // 指令の年齢も elapsed_ms で数える。負（指令の時刻が now より新しい）や
+  // 一周したときは 0 として出す（巨大な値を出さない）
+  const int32_t cmd_age = has_cmd_ ? elapsed_ms(now_ms, cmd_received_at_ms_) : 0;
+  state_.cmd_age_ms = cmd_age > 0 ? static_cast<uint32_t>(cmd_age) : 0u;
   return state_;
 }
 

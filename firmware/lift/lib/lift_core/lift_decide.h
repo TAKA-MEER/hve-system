@@ -71,5 +71,20 @@ struct LiftDecideResult {
   StopReason reason = StopReason::NONE;
 };
 
+// 経過時間（ms）を数える**唯一の**関数（DetailedDesign-names.md §1）。
+//
+// millis() は約 49.7 日で一周して 0 に戻るので、int64 に広げてから引くと、
+// 一周をまたいだ直後に経過時間が巨大な負の値になり、ウォッチドッグも高さの
+// 鮮度も効かなくなる（指令が途絶えても止まらない）。
+//
+// そのため uint32 のまま（2^32 を法として）引き算してから int32 に直す。
+// こうすると一周をまたいでも正しい経過時間が出る。割り込みや WS のタスクが
+// now より少し新しい時刻を書いた場合は小さな負の値になるので、誤停止しない。
+int32_t elapsed_ms(uint32_t now_ms, uint32_t then_ms);
+
+// 高さの読み値が HEIGHT_STALE_MS 以内か（= 上昇してよい高さか）。
+// lift_decide の表 4 と LiftController の state.height_ok がここだけを共有する。
+bool height_is_fresh(uint32_t now_ms, uint32_t height_at_ms);
+
 // DetailedDesign.md §4.1 の表の順に、最初に当たったもので止める。
 LiftDecideResult lift_decide(const LiftDecideInput& in);
