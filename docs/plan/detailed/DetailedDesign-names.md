@@ -212,6 +212,8 @@
 | `state_period_ms` | カメラ部 | 100 | **仮** |
 | `ui_hold_period_ms` / `ui_state_timeout_ms` | 画面 | 100 / 1000 | **仮** |
 | `lift_gauge_full_mm` | 画面 | 1800 | **仮**（操作画面の高さのゲージの満量。`lift.top_mm` が設定されたらその値を使う。`WP-MEAS-01` で決まる `LIFT_TOP_MM` が確定したら置き換え） |
+| `ui_tick_ms` | 画面 | 500 | **仮**（画面が見直す周期。`state` が古ければ「接続切れ」を出し、WS が閉じていれば繋ぎ直す） |
+| `video_probe_ms` | 画面 | 1500 | **仮**（映像の `<img>` を差してから、`load` も `error` も来ない場合に「映像があります」と見なすまでの待ち時間） |
 | `axis_speed_abs_max_dps` | カメラ部 | 60 | 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。**実測で確定** |
 | `yaw_steps_per_rev` | カメラ部 | 4096 | 28BYJ-48 の半ステップ（資料により 4076 とも。**実測で確定**） |
 | `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
