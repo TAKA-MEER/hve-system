@@ -20,7 +20,7 @@
 const ui_hold_period_ms = 100;    // `hold` を送り続ける周期
 const ui_state_timeout_ms = 1000; // `state` がこの時間届かないと「接続切れ」
 const ui_tick_ms = 500;           // 画面が見直す周期
-const video_probe_ms = 1500;      // 映像：`load` も `error` も来ないまでの待ち時間
+const video_probe_ms = 1500;      // 映像：配信が居るかを見直す周期（映像が来るまで・途絶えたあいだ「映像がありません」を出し続ける）
 const zoom_max = 4;               // デジタルズームの上限
 const zoom_step = 0.5;            // 「＋」「−」の 1 段
 const lift_gauge_full_mm = 1800;  // 高さのゲージの満量（上端が未設定のあいだ）
@@ -293,6 +293,51 @@ function setBadge(element, cls, text) {
   element.lastElementChild.textContent = text;
 }
 
+/**
+ * 映像を `<img>` に取り付ける。
+ * **フレームが来るまで `<img>` を見せない**（壊れた画像のアイコンと `alt` の文字が
+ * 左に出て OSD に重なる。spec Spec-ui.md §1・§4 の「映像がありません」）。
+ */
+function attachStream() {
+  const image = $('videoImage');
+  image.classList.remove('ready');
+  $('nosig').classList.add('show');
+  image.src = streamUrl(location.protocol, location.hostname, video_port);
+  scheduleProbe();
+}
+
+function scheduleProbe() {
+  if (video_probe_timer !== null) clearTimeout(video_probe_timer);
+  video_probe_timer = setTimeout(probeStream, video_probe_ms);
+}
+
+/**
+ * 配信が居るかを `video_probe_ms` ごとに見る。**MJPEG は配信が止まっても `<img>` に
+ * `error` が来ず最後のフレームが残る**ので、`<img>` とは別に接続だけ試す（応答の先頭が
+ * 来たらすぐ切る）。居なければ `<img>` を隠して「映像がありません」、居るのに映像が無ければ取り直す。
+ */
+async function probeStream() {
+  video_probe_timer = null;
+  const image = $('videoImage');
+  const controller = new AbortController();
+  const giveup = setTimeout(() => controller.abort(), video_probe_ms);
+  try {
+    await fetch(streamUrl(location.protocol, location.hostname, video_port),
+      {mode: 'no-cors', cache: 'no-store', signal: controller.signal});
+    clearTimeout(giveup);
+    controller.abort();
+    if (!image.classList.contains('ready')) {
+      attachStream(); // 配信が居るのに映像が無い: 取り直す（次の見直しも attachStream が入れる）
+      return;
+    }
+  } catch (err) {
+    clearTimeout(giveup);
+    image.classList.remove('ready');
+    $('nosig').classList.add('show');
+  }
+  scheduleProbe();
+}
+
 function render() {
   const state = last_state;
   if (!state) return;
@@ -300,10 +345,7 @@ function render() {
   // 映像。**カメラ部が切り出して送る**ので、ブラウザ側は大きさを変えないだけ
   if (state.video_port !== undefined && state.video_port !== video_port) {
     video_port = state.video_port;
-    $('videoImage').src = streamUrl(location.protocol, location.hostname, video_port);
-    $('nosig').classList.add('show');
-    if (video_probe_timer !== null) clearTimeout(video_probe_timer);
-    video_probe_timer = setTimeout(() => $('nosig').classList.remove('show'), video_probe_ms);
+    attachStream();
   }
 
   const lift = state.lift || {};
@@ -395,8 +437,16 @@ function initApp() {
   });
 
   const image = $('videoImage');
-  image.addEventListener('error', () => $('nosig').classList.add('show'));
-  image.addEventListener('load', () => $('nosig').classList.remove('show'));
+  // フレームが来た!: `ready` を付けて「映像がありません」を消す
+  image.addEventListener('load', () => {
+    image.classList.add('ready');
+    $('nosig').classList.remove('show');
+  });
+  // 取れなかった!: `<img>` を見せず「映像がありません」を出す（取り直しは probeStream）
+  image.addEventListener('error', () => {
+    image.classList.remove('ready');
+    $('nosig').classList.add('show');
+  });
 
   // ページが隠れたとき（タブを切り替えた）と、ページを閉じたときに離す
   document.addEventListener('visibilitychange', () => {

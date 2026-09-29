@@ -8,6 +8,8 @@
 // 2. 上昇ボタンを押したままページを閉じると、別の画面から見て昇降が止まる
 // 3. 設定で不正値（下限 > 上限）を入れると保存されない
 // 4. ズームの「＋」で state.zoom が 1.5 になり、映像の <img> の大きさは変わらない
+// 5. 映像が無いときと途絶えたとき「映像がありません」が見え、壊れた画像（アイコン・alt 文字）が見えない
+//    ※5 は `hve_video` を立てて**いない**ときに始める（試験の中で立てたり止めたりする）
 // 純関数の試験（web.test.js）ではこの 4 本の経路は縛れないので、ブラウザで通す。
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
@@ -105,6 +107,56 @@ async function pressUp(page) {
   const box = await page.locator('[data-axis=lift_up]').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
+}
+
+// 映像（`hve_video`）は別プロセス。試験の中で出し入れして「来た / 途絶えた」を作る
+const {spawn} = require('node:child_process');
+const net = require('node:net');
+const path = require('node:path');
+const PYTHON = process.env.PYTHON || path.resolve(__dirname, '../../../.venv/bin/python');
+const VIDEO_MS = 20000;
+
+function waitPort(port, timeout_ms) {
+  /** ポートが返事を始めるまで待つ（`hve_video` の準備を待つ）。 */
+  const deadline = Date.now() + timeout_ms;
+  return new Promise((resolve, reject) => {
+    const probe = () => {
+      const socket = net.connect(port, '127.0.0.1');
+      socket.once('connect', () => {socket.destroy(); resolve();});
+      socket.once('error', () => {
+        socket.destroy();
+        if (Date.now() > deadline) {
+          reject(new Error(`ポート ${port} が ${timeout_ms} ms 内に開かなかった`));
+          return;
+        }
+        setTimeout(probe, 100);
+      });
+    };
+    probe();
+  });
+}
+
+async function startVideo(port) {
+  /** 偽の映像を配信し始める。 */
+  // `hve_video` は入れていない（`pyproject.toml` §packages）ので `camera/` で起動する
+  const child = spawn(PYTHON, ['-m', 'hve_video', '--fake', '--port', String(port)], {
+    cwd: path.resolve(__dirname, '../../../camera'),
+    stdio: 'ignore',
+  });
+  try {
+    await waitPort(port, VIDEO_MS);
+  } catch (err) {
+    child.kill();
+    throw err;
+  }
+  return child;
+}
+
+async function stopVideo(child) {
+  /** 配信を止める（途絶えた状態を作る）。 */
+  const gone = new Promise((resolve) => child.once('exit', resolve));
+  child.kill();
+  await gone;
 }
 
 const tests = [];
@@ -231,14 +283,19 @@ test('4 ズームの「＋」で state.zoom が 1.5、<img> の大きさは変�
 
     const image = page.locator('#videoImage');
     assert.match(await image.getAttribute('src'), /\/stream$/, '映像は /stream を向いている');
-    const before = await image.boundingBox();
+    // フレームが来ないあいだ `<img>` は隠れているので、DOM の矩形で測る
+    const imageRect = () => page.evaluate(() => {
+      const rect = document.getElementById('videoImage').getBoundingClientRect();
+      return {width: rect.width, height: rect.height};
+    });
+    const before = await imageRect();
 
     await page.click('#zIn');
     const zoomed = await watcher.waitFor((s) => s.zoom === 1.5, 2000, '＋ で 1.5 倍');
     assert.equal(zoomed.zoom, 1.5);
     assert.equal((await page.locator('#zLvl').innerText()).trim(), '1.5×', '画面に出る倍率は state と同じ');
 
-    const after = await image.boundingBox();
+    const after = await imageRect();
     assert.equal(Math.round(after.width), Math.round(before.width),
       `<img> の幅が変わった（${before.width}→${after.width}）`);
     assert.equal(Math.round(after.height), Math.round(before.height),
@@ -249,6 +306,44 @@ test('4 ズームの「＋」で state.zoom が 1.5、<img> の大きさは変�
     await cleanup();
   }
 });
+
+/* --- 5. 映像が無いとき / 途絶えたとき --------------------------------------- */
+test('5 映像が無いときと途絶えたとき「映像がありません」が見え、壊れた画像が見えない',
+  async (browser) => {
+    const {page, errors, cleanup} = await openScreen(browser);
+    let video = null;
+    const nosig = page.locator('#nosig');
+    const image = page.locator('#videoImage');
+    try {
+      // (1) 映像が無いとき: 壊れた画像のアイコンと alt の文字を見せない
+      await nosig.waitFor({state: 'visible', timeout: 5000});
+      assert.equal((await nosig.innerText()).trim(), '映像がありません');
+      assert.equal(await image.getAttribute('alt'), 'カメラ映像', 'alt は読み上げのために残す');
+      assert.equal(await image.isVisible(), false, '壊れた <img> が見える');
+      assert.equal(
+        await page.evaluate(() => getComputedStyle(document.getElementById('videoImage')).visibility),
+        'hidden');
+      // 隠すのは `<img>` だけ（高さ・ピッチの OSD は出す）
+      assert.equal(await page.locator('#osdH').isVisible(), true, '高さの OSD が見えない');
+      assert.equal(await page.locator('#osdP').isVisible(), true, 'ピッチの OSD が見えない');
+
+      // (2) 映像を配り始めたら出す（`<img>` だけ）。案内は消す
+      const port = Number(new URL(await image.getAttribute('src')).port);
+      video = await startVideo(port);
+      await image.waitFor({state: 'visible', timeout: VIDEO_MS});
+      assert.equal(await nosig.isVisible(), false, '映像が来ても案内が残る');
+
+      // (3) 途絶えたら戻す（取り直しは `video_probe_ms` ごと）
+      await stopVideo(video);
+      video = null;
+      await nosig.waitFor({state: 'visible', timeout: VIDEO_MS});
+      assert.equal(await image.isVisible(), false, '途絶えても壊れた <img> が見える');
+      assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+    } finally {
+      if (video !== null) await stopVideo(video);
+      await cleanup();
+    }
+  });
 
 (async () => {
   const browser = await chromium.launch({

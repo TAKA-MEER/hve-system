@@ -152,6 +152,8 @@
 | `bindHoldButtons` | `camera/web/app.js` | 「押している間だけ動く」ボタンに `pointerdown`・`pointerup`・`pointercancel`・`lostpointercapture` を結ぶ |
 | `startHold` / `sendHold` / `endHold` | `camera/web/app.js` | 押した軸を覚えて `hold` を送り続ける（`ui_hold_period_ms` ごと）／離したときだけ `release` を送る。**別の軸を押したら前の操作を先に離す**（最後の操作が勝つ。spec [Spec-ui.md](../spec/Spec-ui.md) §1.6） |
 | `render` | `camera/web/app.js` | 受け取った `state` を画面に描く（映像の URL・バッジ・停止理由の帯・高さ・ピッチ・ゲージ・倍率） |
+| `attachStream` | `camera/web/app.js` | 映像を `<img>` に取り付ける。**フレームが来るまで `<img>` を見せない**（壊れた画像のアイコンと `alt` の文字が OSD に重なるので）。`video_probe_ms` まで `load` も `error` も来なければ「映像がありません」を出し続けて取り直す |
+| `FAKE_CEILING_MM` | `camera/hve_camera/__main__.py` | **偽物のモードで起動したときの天井の読み値** [mm]（`MEASURED`）。読み値が無いと画面が「天井 値なし」で上昇ボタンが薄いままになる。実測の代わりに「十分遠い」を渡す |
 | `tick` | `camera/web/app.js` | `ui_tick_ms` ごとに「接続切れ」・再接続・設定の読み直しを見る |
 | `nowMs` | `camera/web/app.js` | 画面が使う時計（`performance.now()`） |
 | `settings_draft` | `camera/web/settings.js` | 設定画面に出している下書き。**閉じる操作では元に戻さない**（保存しない） |

@@ -46,7 +46,9 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 
 /* 映像: 枠いっぱいに広げる。**拡大はカメラ部がする**のでブラウザ側ではtransformを掛けない */
 .video{position:relative;min-height:0;background:#000;border-radius:var(--r);overflow:clip;border:1px solid var(--bd)}
-.video img.frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+/* フレームが来るまで隠す（隠さないと壊れた画像のアイコンと alt の文字が OSD に重なる） */
+.video img.frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;visibility:hidden}
+.video img.frame.ready{visibility:visible}
 .guide{position:absolute;inset:0;pointer-events:none}
 .guide .h,.guide .v{position:absolute;background:rgba(127,180,238,.55)}
 .guide .h{left:0;right:0;top:50%;height:1px}
