@@ -364,6 +364,71 @@ void test_state_before_step_is_stopped() {
   TEST_ASSERT_EQUAL_INT(LIFT_TOP_MM, state.top_mm);
 }
 
+// --- millis() が一周したあと（安全面の穴）---
+
+// 状態に出る height_ok も CMD_TIMEOUT も、uint32 のまま引いてから int32 に直さないと
+// 一周をまたいだ直後に「経過時間が巨大な負の値」になって、判定が効かなくなる。
+// ここでは LiftController を通して実際にモータが止まるか・state の値が
+// 正しいかを見る（純関数の試験だけでは呼び出し側を縛れないので）。
+
+// 一周をまたいでも、高さが新しい（経過 512 ms）間は上昇でき、state も true
+void test_height_ok_in_state_survives_millis_wrap_when_fresh() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0xFFFFFF00u);
+  ctrl.on_command(up_cmd(), 0x00000100u);  // 経過 512 ms
+  const LiftState state = ctrl.step(0x00000100u);
+  TEST_ASSERT_TRUE(state.height_ok);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hal.motor_dir()));
+  assert_reason(StopReason::NONE, state);
+}
+
+// 一周をまたいでも、高さが古くなれば（経過 1280 ms）止まり、state も false
+void test_height_ok_in_state_detects_stale_across_millis_wrap() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0xFFFFFF00u);
+  ctrl.on_command(up_cmd(), 0x00000400u);  // 経過 1280 ms
+  const LiftState state = ctrl.step(0x00000400u);
+  TEST_ASSERT_FALSE(state.height_ok);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(hal.motor_dir()));
+  assert_reason(StopReason::HEIGHT_UNKNOWN, state);
+}
+
+// 一周をまたいでも、指令が古くなれば（経過 1280 ms）ウォッチドッグで止まる
+void test_cmd_timeout_survives_millis_wrap() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0x00000400u);
+  ctrl.on_command(up_cmd(), 0xFFFFFF00u);  // 時計が 0xFFFFFF00 のときに受け取った
+  const LiftState state = ctrl.step(0x00000400u);  // 1280 ms 後に見る
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(hal.motor_dir()));
+  assert_reason(StopReason::CMD_TIMEOUT, state);
+}
+
+// 指令の時刻が now より少し新しいとき（WS のタスクとのずれ）は
+// タイムアウトにしない。state.cmd_age_ms も巨大な値を出さない
+void test_newer_cmd_timestamp_does_not_stop_or_report_huge_age() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0x00001000u);
+  ctrl.on_command(up_cmd(), 0x00001005u);  // now より 5 ms 新しい
+  const LiftState state = ctrl.step(0x00001000u);
+  assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hal.motor_dir()));
+  TEST_ASSERT_TRUE(state.cmd_age_ms == 0u);
+}
+
+// 一周をまたいでも state.cmd_age_ms が巨大にならない（1280 ms が出る）
+void test_cmd_age_in_state_survives_millis_wrap() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0xFFFFFF00u);
+  ctrl.on_command(stop_cmd(), 0xFFFFFF00u);
+  ctrl.step(0x00000400u);
+  TEST_ASSERT_EQUAL_UINT32(1280u, ctrl.state().cmd_age_ms);
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -397,6 +462,12 @@ int main(int /*argc*/, char** /*argv*/) {
 
   RUN_TEST(test_state_reports_actual_motor_output);
   RUN_TEST(test_state_before_step_is_stopped);
+
+  RUN_TEST(test_height_ok_in_state_survives_millis_wrap_when_fresh);
+  RUN_TEST(test_height_ok_in_state_detects_stale_across_millis_wrap);
+  RUN_TEST(test_cmd_timeout_survives_millis_wrap);
+  RUN_TEST(test_newer_cmd_timestamp_does_not_stop_or_report_huge_age);
+  RUN_TEST(test_cmd_age_in_state_survives_millis_wrap);
 
   return UNITY_END();
 }

@@ -3,11 +3,6 @@
 
 namespace {
 
-// 時計が戻っても巨大な値にならないように符号付きで差を取る
-int64_t elapsed_ms(uint32_t now_ms, uint32_t then_ms) {
-  return static_cast<int64_t>(now_ms) - static_cast<int64_t>(then_ms);
-}
-
 int clamp_duty(int duty) {
   if (duty < 0) {
     return 0;
@@ -28,12 +23,23 @@ LiftDecideResult stop_with(StopReason reason) {
 
 }  // namespace
 
+int32_t elapsed_ms(uint32_t now_ms, uint32_t then_ms) {
+  // _uint32 のまま_（2^32 を法として）引いてから int32 に直す。一周をまたいでも正しい
+  return static_cast<int32_t>(now_ms - then_ms);
+}
+
+bool height_is_fresh(uint32_t now_ms, uint32_t height_at_ms) {
+  // then が now より少し新しい場合は負の値になるので「新鮮」と見る（誤停止しない）
+  return elapsed_ms(now_ms, height_at_ms) <= static_cast<int32_t>(HEIGHT_STALE_MS);
+}
+
 LiftDecideResult lift_decide(const LiftDecideInput& in) {
   // 表 1 最後の指令から LIFT_CMD_TIMEOUT_MS 超（指令を一度も受けていない場合も同じ扱い）
   if (!in.has_cmd) {
     return stop_with(StopReason::CMD_TIMEOUT);
   }
-  if (elapsed_ms(in.now_ms, in.cmd_received_at_ms) > LIFT_CMD_TIMEOUT_MS) {
+  // 経過が負（指令の時刻が now より新しい）なら「まだ来ていない」のでここで止めない
+  if (elapsed_ms(in.now_ms, in.cmd_received_at_ms) > static_cast<int32_t>(LIFT_CMD_TIMEOUT_MS)) {
     return stop_with(StopReason::CMD_TIMEOUT);
   }
 
@@ -48,8 +54,7 @@ LiftDecideResult lift_decide(const LiftDecideInput& in) {
   }
 
   // 表 4 上昇 かつ 高さが読めない・HEIGHT_STALE_MS 超
-  const bool height_usable =
-      in.height_ok && elapsed_ms(in.now_ms, in.height_at_ms) <= HEIGHT_STALE_MS;
+  const bool height_usable = in.height_ok && height_is_fresh(in.now_ms, in.height_at_ms);
   if (in.cmd.dir == LiftDir::UP && !height_usable) {
     return stop_with(StopReason::HEIGHT_UNKNOWN);
   }
