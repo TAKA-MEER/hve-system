@@ -123,8 +123,10 @@ td input.bad{border-color:var(--ng)}
 .primary:disabled{opacity:.4;cursor:not-allowed}
 .prov{padding:6px 10px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:12px}
 .prov b{color:var(--warn-tx)}
-@media (max-height:420px){
+/* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう） */
+@media (max-height:480px){
   .sheet{padding:8px 12px;gap:4px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
+  .prov{font-size:11px;padding:4px 8px} .err{min-height:0}
 }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
 .toast.show{display:block}
