@@ -82,6 +82,8 @@
 | `LiftController` | `firmware/lift/lib/lift_core/lift_controller.{h,cpp}` | 指令の受付・ウォッチドッグ・`lift_decide()` の結果をモータへ出す |
 | `cmd_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 指令の JSON → `LiftCmd`。壊れた入力は「上昇させない」側にして `false` |
 | `state_encode` / `state_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 状態の JSON ⇔ `LiftState`。`fw` は `lift_core_version()` から入れる |
+| `elapsed_ms` | `firmware/lift/lib/lift_core/lift_decide.{h,cpp}` | **経過時間（ms）を数える唯一の関数**。`static_cast<int32_t>(now_ms - then_ms)` の形だけ。`uint32` のまま引いてから `int32` にするので、`millis()` が一周（約 49.7 日）しても正しい。割り込みや WS のタスクが `now` より少し新しい時刻を書いた場合は小さな負の値になり、誤って停止しない。`lift_decide` と `lift_controller` の両方から使う |
+| `height_is_fresh` | `firmware/lift/lib/lift_core/lift_decide.{h,cpp}` | 純関数。高さの読み値が `HEIGHT_STALE_MS` 以内か。`elapsed_ms` を使う。**`lift_decide` の表 4 と `LiftController` の `state.height_ok` はこの 1 か所来判断する**（同じ規則を 2 か所に書かない） |
 
 `WP-LIFT-02` で足した関数・型（§0 の命名規則に従う。**`lift_core` は変えていない**）:
 
