@@ -416,3 +416,10 @@ async def test_zoom_is_sent_only_when_it_changes() -> None:
     assert await rig.loop.set_zoom(99) == 4.0
     assert rig.zoom.sent == [2.0, 4.0]
     assert rig.loop.build_state(1)["zoom"] == 4.0
+
+
+async def test_state_carries_the_video_port() -> None:
+    """画面は映像（hve_video）の URL を組み立てるのに `video_port` が要る（protocol §2.4）。"""
+    rig = Loop()
+    await rig.prime()
+    assert rig.loop.build_state(1)["video_port"] == PARAMS["video_port"]
