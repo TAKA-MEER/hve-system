@@ -3,7 +3,7 @@
 th-system の走行部に載せて運ぶ**昇降機**と、その**上部カメラ**の制御システム。
 配電盤の上部をカメラで確認するために、盤前に停止した機体の上でカメラを持ち上げ・向ける。
 
-**実装を始めたところ**（2026-09-28。進み具合は [docs/plan/ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1）。
+**PC でできる実装は済み、実機での確認はこれから**（2026-09-29。進み具合は [docs/plan/ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1、次に実機で確かめることは [docs/試験項目.md](docs/試験項目.md)、実機の準備は [docs/使い方.md](docs/使い方.md)）。
 
 | 知りたいこと | 見る文書 |
 | --- | --- |
