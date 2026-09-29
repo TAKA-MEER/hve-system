@@ -134,7 +134,32 @@
 | `stateStale` | `camera/web/app.js` | `state` が `ui_state_timeout_ms` 届かないか（「接続切れ」を出す） |
 | `SETTING_AXES` | `camera/web/settings.js` | 設定画面の項目（名前・単位・絶対範囲）。4 項目（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
 | `validateSettingsDraft` | `camera/web/settings.js` | 設定の検証。`min ≦ init ≦ max` と絶対範囲を見て、理由の一覧を返す（保存前に画面側でも確かめる） |
-| `settingsErrorText` | `camera/web/settings.js` | 検証の理由の一覧を 1 行の文言にする（行を増やして画面からはみ出さない） |
+| `settingsErrorText` | `camera/web/settings.js` | 検証の理由の一覧を 1 行の文言にする（行を増やしても画面からはみ出さない） |
+
+`WP-UI-01` で足した、画面（DOM）と結びつくもの。**上の表の関数だけを試験する経路では、
+「離したときだけ `release` を送る」「押しているあいだ続けて送る」ことを縛れない**ので、
+ブラウザでの試験（`camera/web/tests/browser_paths.js`）で確かめる（brief §2 試験）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `REASON_TEXT` | `camera/web/app.js` | 停止理由 → `{色, 文言}` の表（`reasonText` が使う。**文言は仮**） |
+| `AXIS_SETTING` | `camera/web/app.js` | 軸 → 速度の設定の項目。`pitch_up`・`pitch_down` は `pitch`、`yaw_left`・`yaw_right` は `yaw` |
+| `initApp` | `camera/web/app.js` | 画面を組み立てる（スライダー・ボタン・ズーム・ガイド線・設定・映像・離脱）。**DOM が無いときは呼ばない**（Node の試験で `require` できるように） |
+| `connect` | `camera/web/app.js` | カメラ部の WS をつなぎ、`state` を受ける。切れても次の見直しのときに繋ぎ直す |
+| `send` | `camera/web/app.js` | カメラ部へ JSON を送る。**開いていないときは何もしない**（接続前の操作で例外にしない） |
+| `loadSettings` | `camera/web/app.js` | `GET /api/settings` を読んでスライダーを作り直す。読めなかったときは HTML の既定のまま |
+| `applySettings` | `camera/web/app.js` | スライダーの範囲と初期位置を設定どおりに作り直す（`sliderSpec` を使う） |
+| `bindHoldButtons` | `camera/web/app.js` | 「押している間だけ動く」ボタンに `pointerdown`・`pointerup`・`pointercancel`・`lostpointercapture` を結ぶ |
+| `startHold` / `sendHold` / `endHold` | `camera/web/app.js` | 押した軸を覚えて `hold` を送り続ける（`ui_hold_period_ms` ごと）／離したときだけ `release` を送る。**別の軸を押したら前の操作を先に離す**（最後の操作が勝つ。spec [Spec-ui.md](../spec/Spec-ui.md) §1.6） |
+| `render` | `camera/web/app.js` | 受け取った `state` を画面に描く（映像の URL・バッジ・停止理由の帯・高さ・ピッチ・ゲージ・倍率） |
+| `tick` | `camera/web/app.js` | `ui_tick_ms` ごとに「接続切れ」・再接続・設定の読み直しを見る |
+| `nowMs` | `camera/web/app.js` | 画面が使う時計（`performance.now()`） |
+| `settings_draft` | `camera/web/settings.js` | 設定画面に出している下書き。**閉じる操作では元に戻さない**（保存しない） |
+| `openSettingsOverlay` / `closeSettingsOverlay` | `camera/web/settings.js` | 設定画面のオーバーレイを現在の設定で出す／閉じる |
+| `saveSettingsOverlay` | `camera/web/settings.js` | 検証に通らなければ **`PUT` を送らない**。通れば `PUT /api/settings` して、400 のときはサーバーの理由をそのまま出して保存しない |
+| `validateSettingsInputs` | `camera/web/settings.js` | 入力欄・理由・保存ボタンに検証の結果を反映する |
+| `provisionalText` | `camera/web/settings.js` | 仮値で動作中のパラメータ（`state.provisional`）の説明文。**読み取り専用**（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
+| `hve_settings_saved` | `camera/web/settings.js` | 保存できたときに `document` に流す CustomEvent の名前。`app.js` がスライダーを作り直す（この画面は `app.js` の内部 state を知らない） |
 
 ## 2. 機器・ホスト名
 
