@@ -1,0 +1,35 @@
+# カメラ部の制御アプリ（ピッチ・ヨー・天井の判定・画面の配信）
+#
+# == 準備時に直す所（詳しくは docs/使い方.md §7）==
+#   1. User= と Group=      … 作ったユーザ名。gpio・i2c グループに入れておく
+#   2. WorkingDirectory=    … リポジトリを置いた場所
+#   3. ExecStart= の python … 仮想環境の場所（--system-site-packages 付きで作ったもの）
+#   4. --port               … 本番は 80。試験で 80 を避けたいときだけ変える
+#
+# :80 で待ち受けるので AmbientCapabilities=CAP_NET_BIND_SERVICE を付ける。
+# **root では動かさない**（特権ポートを開けるためだけに root にしない）。
+# 落ちたら 2 秒後に再起動する（再起動のたびにヨーのコイルは電流が切れた状態から始まる）。
+
+[Unit]
+Description=HVE camera control (pitch / yaw / ceiling)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/hve-system
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/hve-system/.venv/bin/python -m hve_camera --port 80
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+Restart=always
+RestartSec=2
+
+# 落ちた理由は journalctl -u hve-camera で見る
+SyslogIdentifier=hve-camera
+
+[Install]
+WantedBy=multi-user.target

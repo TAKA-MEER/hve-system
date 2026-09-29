@@ -6,7 +6,13 @@
 
 - `--fake`: 偽のハードウェア（`hw/fake_hw.py`）と偽の昇降部（`hw/fake_lift.py`）で起動する。
   画面に `fake` が付く（偽物だと分かるようにする）
-- `--port`: 待ち受けるポート。**既定は 80**（ラズパイでの本番。`systemd` 側の準備は `WP-CAM-03`）
+- `--port`: 待ち受けるポート。**既定は 80**（ラズパイでの本番）
+
+`--fake` を付けない本番では `hw/rpi_hw.py`（SG90・28BYJ-48・SRF02）と
+実の昇降部（`lift_link.py`）を使う。**ラズパイ以外で実行したら exit 2** で
+「ラズパイ 4 + Raspberry Pi OS で動かすこと」と「ラズパイ以外なら `--fake`」
+を案内する（ラズパイ以外で本物の GPIO を開いてもエラーになるだけなので）。
+
 
 時計は `time.monotonic()` の ms。単調増加なので、NTP で時刻が飛んでも古さの判定が壊れない。
 """
@@ -67,10 +73,30 @@ def main(argv: list[str] | None = None) -> int:
         lift = FakeLift(clock)
         log.warning("偽物のモードで起動する（実機の結果と取り違えないこと）")
     else:
-        log.error(
-            "実物のハードウェア（hw/rpi_hw.py）はまだ無い。偽物を確かめるときは --fake を付ける"
-        )
-        return 2
+        from hve_camera.hw.rpi_hw import RpiHardware, is_raspberry_pi
+        from hve_camera.lift_link import LiftLink
+
+        if not is_raspberry_pi():
+            # ラズパイ以外で本物の GPIO を開くと EROFS や初期化失敗になる。
+            # 例外を握りつぶさず exit 2 にして、
+            # 「ラズパイだと取り違えて別の機械で動かす」状態をそのまま出さない。
+            log.error(
+                "ラズパイ以外で実物のハードウェアを開こうとした。"
+                "ラズパイ 4 + Raspberry Pi OS で動かすこと。"
+                "ラズパイ以外で画面だけ確かめるときは --fake を付ける"
+            )
+            return 2
+
+        try:
+            hw = RpiHardware(params, clock)
+        except Exception:
+            # 配線の抜けや i2c の権限不足を握りつぶさない（握りつぶすと
+            # 「動いているように見えるが、実際には動かない」状態になる）。
+            log.exception("ラズパイのハードウェアを開けなかった")
+            return 2
+
+        lift = LiftLink(params["lift_ws_url"], clock)
+        log.info("実物のモードで起動する（昇降部 %s）", params["lift_ws_url"])
 
     settings, using_defaults = load_settings(params["settings_path"], params)
     app = create_app(
@@ -81,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         params=params,
         clock=clock,
         video_zoom=VideoZoom(params["video_port"]),
-        fake=True,
+        fake=args.fake,
         settings_path=params["settings_path"],
         web_dir=WEB_DIR,
     )
