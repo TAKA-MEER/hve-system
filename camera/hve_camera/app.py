@@ -45,8 +45,10 @@ class VideoZoom:
     def __init__(self, port: int) -> None:
         self._url = f"http://127.0.0.1:{int(port)}/zoom"
         self._session: aiohttp.ClientSession | None = None
-        #: 送れなかった倍率。次に `send_zoom()` が呼ばれたとき送り直す
+        #: 送れなかった倍率。次に `send_zoom()` が呼ばれるとき送り直す
         self.pending: float | None = None
+        #: 直前の送信が失敗したか。**同じ失敗を 100 ms ごとに出さない**（送れなくなったときと復帰だけ出す）
+        self._failing = False
 
     async def send_zoom(self, level: float) -> bool:
         """倍率を送る。**送れたら `True`、送れなかったら `False`（例外は投げない）。**"""
@@ -57,11 +59,26 @@ class VideoZoom:
             async with session.post(self._url, json={"level": value}) as response:
                 if response.status == 200:
                     self.pending = None
+                    self._note_recovered(value)
                     return True
-                log.info("hve_video が倍率を %s で受け付けなかった", response.status)
+                self._note_failure("hve_video が倍率を %s で受け付けなかった", response.status)
         except Exception as exc:  # noqa: BLE001 - hve_video が居ないのは想定内
-            log.info("hve_video (%s) に倍率を送れなかった: %s", self._url, exc)
+            self._note_failure("hve_video (%s) に倍率を送れなかった: %s", self._url, exc)
         return False
+
+    def _note_failure(self, message: str, *args: Any) -> None:
+        """**送れなくなったときだけ**記録する。送れ続けるあいだは繰り返し出さない。"""
+        if self._failing:
+            return
+        self._failing = True
+        log.info(message, *args)
+
+    def _note_recovered(self, level: float) -> None:
+        """**また送れるようになったときだけ**記録する。"""
+        if not self._failing:
+            return
+        self._failing = False
+        log.info("hve_video に倍率を送れるようになった（%s 倍）", level)
 
     async def close(self) -> None:
         """セッションを閉じる。"""

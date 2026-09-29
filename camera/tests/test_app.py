@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import copy
 import json
+import socket
 from typing import Any
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from hve_camera.__main__ import WEB_DIR
 from hve_camera.app import VideoZoom, create_app
 from hve_camera.ceiling import CeilingStatus
 from hve_camera.hw.fake_hw import FakeHardware
@@ -43,7 +45,8 @@ class Rig:
     """
 
     def __init__(self, *, fake: bool = True, autostart: bool = False,
-                 deliver_zoom: bool = True, use_fake_lift: bool = False) -> None:
+                 deliver_zoom: bool = True, use_fake_lift: bool = False,
+                 web_dir: str | None = None) -> None:
         self.clock = ManualClock()
         self.esp32: FakeEsp32 | None = None
         self.hw = FakeHardware(self.clock)
@@ -52,6 +55,8 @@ class Rig:
         self.fake = fake
         self.autostart = autostart
         self.use_fake_lift = use_fake_lift
+        #: 画面を配る置き場（`WP-UI-01` で `camera/web` を入れる）
+        self.web_dir = web_dir
         self.client: TestClient | None = None
         self.app: Any = None
         #: 制御ループを何回回したか。指令は 1 回につき 1 本なので、指令の到達を待ち合わせに使う
@@ -98,6 +103,7 @@ class Rig:
             fake=self.fake,
             autostart=self.autostart,
             settings_path=f"{SETTINGS_DIR}/settings-test.json",
+            web_dir=self.web_dir,
         )
         self.client = TestClient(TestServer(self.app))
         await self.client.start_server()
@@ -380,6 +386,60 @@ async def test_zoom_survives_absent_hve_video() -> None:
         await zoom.close()
 
 
+async def test_zoom_logs_only_when_it_starts_and_stops_failing(caplog) -> None:
+    """**同じ失敗を 100 ms ごとに出さない。**送れなくなったときと復帰したときだけ出す。"""
+    from aiohttp import web
+
+    def unused_port() -> int:
+        """誰も居ないポートを 1 個取る（`hve_video` を出し入れするため）。"""
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            return int(probe.getsockname()[1])
+
+    def video_app() -> web.Application:
+        """`hve_video` 役。`POST /zoom` を受け取るだけ。"""
+        async def zoom_handler(request: web.Request) -> web.Response:
+            await request.json()
+            return web.json_response({"ok": True})
+
+        app = web.Application()
+        app.router.add_post("/zoom", zoom_handler)
+        return app
+
+    port = unused_port()
+    zoom = VideoZoom(port)
+    video = TestClient(TestServer(video_app(), port=port))
+    await video.start_server()
+    try:
+        # 1. 最初から送れるとき: 記録しない
+        with caplog.at_level("INFO", logger="hve_camera.app"):
+            assert await zoom.send_zoom(1.5) is True
+        assert caplog.records == [], [r.getMessage() for r in caplog.records]
+
+        # 2. `hve_video` を止める: 送れなくなったときだけ 1 回、続けても 1 回
+        await video.close()
+        with caplog.at_level("INFO", logger="hve_camera.app"):
+            for level in (2.0, 2.5, 3.0):
+                assert await zoom.send_zoom(level) is False
+        assert len([r for r in caplog.records if "送れなかった" in r.getMessage()]) == 1, (
+            [r.getMessage() for r in caplog.records]
+        )
+
+        # 3. 復活したら: 復帰の記録を 1 回
+        caplog.clear()
+        again = TestClient(TestServer(video_app(), port=port))
+        await again.start_server()
+        with caplog.at_level("INFO", logger="hve_camera.app"):
+            assert await zoom.send_zoom(2.0) is True
+            assert await zoom.send_zoom(2.5) is True
+        assert len([r for r in caplog.records if "送れるように" in r.getMessage()]) == 1, (
+            [r.getMessage() for r in caplog.records]
+        )
+        await again.close()
+    finally:
+        await zoom.close()
+
+
 async def test_app_retries_the_zoom_it_could_not_send() -> None:
     """**送れなかった倍率を次の周期に送り直す。**（握り潰す経路を縛る）"""
     r = Rig(autostart=True, deliver_zoom=False)
@@ -524,11 +584,21 @@ async def test_fake_api_does_not_exist_outside_fake_mode() -> None:
 # --- 画面そのもの -----------------------------------------------------------------------------------
 
 
-async def test_index_is_404_until_wp_ui_01_arrives(rig: Rig) -> None:
-    """静的ファイルは `WP-UI-01` の仕事。それまで 404。"""
-    assert rig.client is not None
-    response = await rig.client.get("/")
-    assert response.status == 404
+async def test_index_is_served_after_wp_ui_01() -> None:
+    """`camera/web` を配る設定なら操作画面を返す（names §1）。"""
+    r = Rig(web_dir=str(WEB_DIR))
+    await r.start()
+    try:
+        assert r.client is not None
+        response = await r.client.get("/")
+        assert response.status == 200
+        body = await response.text()
+        assert "hve 昇降・カメラ" in body, "画面の題が出る"
+        assert 'src="settings.js"' in body and 'src="app.js"' in body, "読み込みの順番"
+        # スタイルも配る
+        assert (await r.client.get("/style.css")).status == 200
+    finally:
+        await r.stop()
 
 
 async def test_state_is_json_serialisable(rig: Rig) -> None:
