@@ -182,6 +182,15 @@ test('3 下限 > 上限は保存されない（PUT を出さない・サーバ�
   const before = await (await fetch(`${BASE}/api/settings`)).json();
   const {page, cleanup} = await openScreen(browser);
   try {
+    // 速度スライダーの範囲は設定どおり、**位置は初期値**（上限ではない）
+    const slider = await page.evaluate(() => {
+      const input = document.getElementById('sUp');
+      return {value: input.value, min: input.min, max: input.max};
+    });
+    assert.equal(slider.min, String(before.settings.lift_up.min), 'スライダーの下限');
+    assert.equal(slider.max, String(before.settings.lift_up.max), 'スライダーの上限');
+    assert.equal(slider.value, String(before.settings.lift_up.init), 'スライダーの位置は初期値');
+
     const puts = [];
     page.on('request', (request) => {
       if (request.method() === 'PUT') puts.push(request.url());
