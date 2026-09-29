@@ -5,8 +5,8 @@
 
    DOM に触れない部分は validateSettingsDraft() と settingsErrorText() に分ける
    （camera/web/tests/web.test.js から Node の組み込みの試験で確かめる）。
-   保存できたときは `hve_settings_saved` をdocument に流す。スライダーの
-   更新などは app.js を受ける側（app.js はこの画面を読み書きしない）。
+   保存できたときは `hve_settings_saved` を document に流す。スライダーの
+   更新などは app.js が見る側（app.js はこの画面を読み書きしない）。
    ============================================================ */
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
@@ -134,6 +134,8 @@ function openSettingsOverlay(settings, provisional) {
   });
 
   document.getElementById('stProv').textContent = provisionalText(provisional);
+  // 仮値で動いているものが無ければ説明の帯は出さない（spec §2）
+  document.getElementById('stProv').style.display = provisional && provisional.length ? '' : 'none';
   validateSettingsInputs();
   document.getElementById('settings').classList.add('show');
 }
