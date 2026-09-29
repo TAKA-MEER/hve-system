@@ -79,6 +79,13 @@
 
 ヨーの角度は載せない（spec [Spec-ui.md](../spec/Spec-ui.md) §1.4）。`lift.top_mm` が `null` のとき画面は「上端が未設定（開発中）」を常に出す。
 `ceiling.reason` は `NONE` / `CEILING_NEAR` / `CEILING_STALE` / `OUT_OF_RANGE`（反射なし。`ok` は `true`。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b）。
+`reason` の選び方（**上から順に最初に当たったもの**。2026-09-28 実装時に決定）:
+1. `LINK_LOST`（昇降部と繋がっていない）
+2. いま押している軸が止められている理由（ピッチの `AXIS_LIMIT`、`lift_up` の天井の理由、昇降部の判定の理由）
+3. `HOLD_TIMEOUT`（押していた操作が途絶えた）
+4. 昇降部の `reason`（`NONE` と `CMD_STOP` は出さない。指令で止まっているだけなので）
+5. `NONE`
+
 `reason` は画面に出す停止理由（カメラ部の判断 `HOLD_TIMEOUT` / `LINK_LOST` / 天井の理由 / 昇降部の `reason` のうち最も上流のもの）。
 `provisional` は仮値のまま動いているパラメータ名（`DD-3`）。`clients` は繋いでいる画面の数（spec [Spec-ui.md](../spec/Spec-ui.md) §1.6）。
 
