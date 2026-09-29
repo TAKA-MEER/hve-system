@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hve-camera"
 version = "0.1.0"
-description = "th-system カメラ部の制御（WP-CAM-*）"
+description = "hve-system カメラ部の制御（WP-CAM-*）"
 requires-python = ">=3.10"
 # 依存は requirements.txt / requirements-dev.txt Listed separately. See CLAUDE.md "Build and test"
 dependencies = [
@@ -14,4 +14,4 @@ dependencies = [
 
 # 明示列挙。自動発現だと tests・hve_video まで入ってしまう
 [tool.setuptools]
-packages = ["hve_camera", "hve_camera.hw"]
+packages = ["hve_camera", "hve_camera.hw", "hve_video"]
