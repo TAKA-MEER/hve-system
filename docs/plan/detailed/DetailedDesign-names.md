@@ -81,6 +81,40 @@
 | `cmd_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 指令の JSON → `LiftCmd`。壊れた入力は「上昇させない」側にして `false` |
 | `state_encode` / `state_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 状態の JSON ⇔ `LiftState`。`fw` は `lift_core_version()` から入れる |
 
+`WP-CAM-02` で足した関数・クラス（§0 の命名規則に従う）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `HardwareBase` | `camera/hve_camera/hw/base.py` | ハードウェアの抽象。ピッチのサーボ・ヨーのステッピング・天井の距離計。**判定は持たない**（天井の許可は `ceiling.py`、上下端は昇降部側。`DD-4`） |
+| `read_ceiling` | `camera/hve_camera/hw/base.py` | 天井の距離を 1 回測って `CeilingReading` で返す。**測れなかったことと、新しい測定が無いことをどちらも `None` で表す**（最後の読み値は呼び出し側が保持する） |
+| `set_pitch` | `camera/hve_camera/hw/base.py` | ピッチのサーボへ角度を出す |
+| `drive_yaw` | `camera/hve_camera/hw/base.py` | ヨーを 1 秒あたりの半ステップ数と向きで回す |
+| `stop_yaw` | `camera/hve_camera/hw/base.py` | ヨーを止める |
+| `close` | `camera/hve_camera/hw/base.py` | ハードウェアを片付ける |
+| `FakeHardware` | `camera/hve_camera/hw/fake_hw.py` | `HardwareBase` の偽物。出した値を記録し、天井の読み値は外から差し替える |
+| `set_ceiling` | `camera/hve_camera/hw/fake_hw.py` | 天井の「次の測定値」（状態と距離 mm）を差し込む |
+| `freeze_ceiling` | `camera/hve_camera/hw/fake_hw.py` | 以降新しい天井の測定値を返さない（読み値が止まった・古い状態を再現する） |
+| `fake_lift_decide` | `camera/hve_camera/hw/fake_lift.py` | 偽の昇降部の判定（純関数）。[DetailedDesign.md](DetailedDesign.md) §4.1 の表を Python で写す。**本物の判定は ESP32 側**（`firmware/lift`）で、ここは画面を動かすための真似 |
+| `FakeLift` | `camera/hve_camera/hw/fake_lift.py` | プロセス内の偽の昇降部。**`LiftPort` と同じ使い方ができる**（偽物のモード用） |
+| `set_height_mm` / `set_bottom` | `camera/hve_camera/hw/fake_lift.py` | 偽の昇降の高さと下端スイッチ |
+| `LiftPort` | `camera/hve_camera/lift_link.py` | 昇降部への出口の抽象。`LiftLink` と `FakeLift` が実装する（「同じ使い方ができる」の根拠） |
+| `start` / `close` | `camera/hve_camera/lift_link.py` | 昇降部と繋がり始める（`LiftLink` は切れたら再接続し続ける）／片付ける |
+| `send_cmd` | `camera/hve_camera/lift_link.py` | 昇降部へ `cmd` を送る。**`seq` はここが数える**（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
+| `link_ok` | `camera/hve_camera/lift_link.py` | 昇降部から `state` が `lift_state_timeout_ms` 以内に届いていれば `True`。**`False` の間が `LINK_LOST`** |
+| `latest_state` / `state_received_at_ms` | `camera/hve_camera/lift_link.py` | 最後に受けた `state` とその受信時刻 |
+| `LiftLink` | `camera/hve_camera/lift_link.py` | 昇降部への WS クライアント。切れても再接続し続ける（その間は `LINK_LOST`） |
+| `ControlLoop` | `camera/hve_camera/control.py` | 制御ループ。操作の鮮度・動かす軸・速度を組み立て、昇降部への指令・ピッチ・ヨーを効かせ、状態を集める |
+| `hold` / `release` | `camera/hve_camera/control.py` | 画面から受け取った操作を覚える／押していない状態に戻す |
+| `set_zoom` | `camera/hve_camera/control.py` | 倍率を 1〜`zoom_max`・`zoom_step` の倍数に丸めて持ち、**変わったときだけ** `VideoZoom` へ渡す |
+| `step` | `camera/hve_camera/control.py` | 制御ループ 1 回。**昇降部への指令を先に送り、そのあと天井を測る**（100 ms の指令を I2C の待ち时间和せない） |
+| `build_state` | `camera/hve_camera/control.py` | 画面へ配る `state`（[-protocol.md](DetailedDesign-protocol.md) §2.4）を組み立てる |
+| `CameraApp` | `camera/hve_camera/app.py` | 画面・設定 API・ブラウザとの WS を持つアプリ |
+| `create_app` | `camera/hve_camera/app.py` | `CameraApp` を作って aiohttp の `Application` を返す（**起動と試験が同じ物を使う**） |
+| `control_step` / `broadcast_state` | `camera/hve_camera/app.py` | 制御ループ 1 回／`state` を全画面へ配る。**立ち上げたタスクも試験も同じ関数を使う** |
+| `VideoZoom` | `camera/hve_camera/app.py` | 倍率を `hve_video` へ送る。偽物に差し替えられる。**`hve_video` が居なくてもアプリは止まらない**（逢わなかった倍率は次に送る）。`close` でセッションを閉じる |
+| `send_zoom` | `camera/hve_camera/app.py` | `VideoZoom` の送り口。倍率を受け取って `POST http://127.0.0.1:<video_port>/zoom`。**失敗しても例外を投げない**（次の `send_zoom` で送り直す。送れたかどうかを返す） |
+| `main` | `camera/hve_camera/__main__.py` | `python3 -m hve_camera [--fake] [--port N]` の入口 |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
@@ -112,6 +146,25 @@
 ## 4. メッセージ
 
 種類 `t` は `hold` / `release` / `cmd` / `state`。フィールドは [-protocol.md](DetailedDesign-protocol.md) §2 が正。
+
+`POST /api/fake`（[-protocol.md](DetailedDesign-protocol.md) §3。**偽物のモードのときだけ存在する**）のフィールド:
+
+| フィールド | 値 |
+| --- | --- |
+| `ceiling` | 偽の天井。`{"status": "MEASURED" / "NO_ECHO" / "READ_ERROR", "mm": 1450}`（`status`・`mm` は省略可。`NO_ECHO` / `READ_ERROR` では `mm` を要らない）。**`{"stale": true}` なら「以降新しい測定値を返さない」**（`freeze_ceiling`） |
+| `height_mm` | 偽の昇降の高さ [mm] |
+| `bottom` | 偽の下端スイッチ |
+
+**指定しなかったものは動かない。**`ceiling` の `status`・`mm` は画面へ配る `state` の `ceiling`（[-protocol.md](DetailedDesign-protocol.md) §2.4）と、
+`height_mm`・`bottom` は昇降部の `state`（同 §2.3）と同じ名前・同じ意味。
+
+`GET` / `PUT /api/settings`（同 §3）の返り値。**検証に通らなければ 400 と理由の一覧**を返し、**保存しない**:
+
+| フィールド | 値 |
+| --- | --- |
+| `settings` | 現在の設定（4 軸の `min` / `max` / `init`） |
+| `using_defaults` | 設定ファイルが無い・壊れている・検証を通らないので**既定値で動いている**か（`true` の間だけ画面に出す） |
+| `errors` | **`400` のときだけ**入る。通らなかった理由の一覧（`validate_settings` の戻り値そのまま） |
 
 ## 5. パラメータと仮値
 
@@ -145,6 +198,9 @@
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`。SG90 自体は約 ±90°） |
 | `zoom_max` / `zoom_step` | カメラ部 | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
 | `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
+| `lift_ws_url` | カメラ部 | `ws://hve-lift.local/ws` | §2 の `hve-lift`（アドレスの決め方は未確定。[-open.md](DetailedDesign-open.md) `D-1`） |
+| `video_port` | カメラ部 | 8080 | [-protocol.md](DetailedDesign-protocol.md) §1・[DetailedDesign.md](DetailedDesign.md) §4.3 |
+| `provisional` | カメラ部 `params.toml` | 下の 13 個の配列 | `DD-3`。**この表の「カメラ部」と「`hve_video`」の行のうち `仮` と書いてあるもの全部**を並べたもの。画面に出す（[-protocol.md](DetailedDesign-protocol.md) §2.4）。実測（`WP-MEAS-*`）で置き換えたらここから外す |
 | 設定の既定値 | カメラ部 | [-protocol.md](DetailedDesign-protocol.md) §3 の例の値 | **仮** |
 | `video_capture_width` / `video_capture_height` | `hve_video` | 1920 / 1080 | **仮**（カメラの型番未定。[-hardware.md](DetailedDesign-hardware.md) §2） |
 | `video_out_height` | `hve_video` | 480（幅は取り込みの縦横比に合わせる） | **仮**（`H-A8`） |
