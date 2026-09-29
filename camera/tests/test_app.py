@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import json
 import socket
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -34,7 +35,7 @@ from tests.cam_support import (
 )
 
 #: 設定を保存する場所。作業ツリーを汚さないよう `.briefs/tmp` の下へ置く
-SETTINGS_DIR = "/home/yisahia787/code/MIRS-Local/TM/hve-system/.briefs/tmp/cam02"
+SETTINGS_DIR = str(Path(__file__).resolve().parents[2] / ".briefs" / "tmp" / "cam02")
 
 
 class Rig:

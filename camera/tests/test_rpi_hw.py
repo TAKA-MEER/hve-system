@@ -140,13 +140,18 @@ class FakeSmbus:
 class RecordingWrite:
     """PWM の sysfs への書き込みの記録。**呼ばれた順に `(名前, 値)` を残す。**"""
 
-    def __init__(self, *, fail_export: bool = False) -> None:
+    def __init__(self, *, fail_export: bool = False, deny_period: int = 0) -> None:
         self.calls: list[tuple[str, str]] = []
         self.fail_export = fail_export
+        #: `period` の書き込みを、この回数だけ `PermissionError` で断る（udev の権限待ち）
+        self.deny_period = deny_period
 
     def __call__(self, path: Path, value: str) -> None:
         if path.name == "export" and self.fail_export:
             raise OSError(16, "Device or resource busy")  # EBUSY
+        if path.name == "period" and self.deny_period > 0:
+            self.deny_period -= 1
+            raise PermissionError(13, "Permission denied")
         self.calls.append((path.name, value))
 
     def last(self, name: str) -> str | None:
@@ -364,6 +369,28 @@ def test_pwm_tolerates_an_already_exported_channel():
     PwmChannel(Path("/sys/class/pwm/pwmchip0"), write=write).enable(20_000_000, 1_500_000)
     assert write.last("enable") == "1"
     assert "export" not in write.names()
+
+
+def test_pwm_waits_for_udev_to_grant_permission_after_export():
+    """**`export` 直後は権限がまだ無い**（再起動後の初回）。付くまで `period` を書き直す。"""
+    write = RecordingWrite(deny_period=3)
+    sleeps: list[float] = []
+    PwmChannel(Path("/sys/class/pwm/pwmchip0"), write=write, sleep=sleeps.append).enable(
+        20_000_000, 1_500_000
+    )
+    assert len(sleeps) == 3
+    assert write.names() == ["export", "period", "duty_cycle", "enable"]
+    assert write.last("period") == "20000000"
+
+
+def test_pwm_gives_up_when_permission_never_arrives():
+    """**待っても書けなければ握りつぶさない。**原因（権限）を見せるため `PermissionError` を投げる。"""
+    write = RecordingWrite(deny_period=10_000)
+    with pytest.raises(PermissionError):
+        PwmChannel(Path("/sys/class/pwm/pwmchip0"), write=write, sleep=lambda _s: None).enable(
+            20_000_000, 1_500_000
+        )
+    assert "enable" not in write.names()
 
 
 def test_set_duty_does_not_touch_the_period():

@@ -131,6 +131,10 @@ SRF02_STOP_TIMEOUT_S = 1.0
 
 #: カーネルの PWM。**書けないときは udev の規則が要る**（DetailedDesign.md §4.4）
 PWM_BASE = "/sys/class/pwm"
+#: `export` の直後は udev が権限を付け終えるまで書けない。`PermissionError` の間、これだけ待つ [s]
+PWM_EXPORT_SETTLE_S = 2.0
+#: 上の待ちで、書き直すまでの間隔 [s]
+PWM_EXPORT_RETRY_S = 0.02
 #: ラズパイかどうかを確かめるファイル（`dtparam` の `model`）
 RPI_MODEL_PATH = "/proc/device-tree/model"
 #: `lgpio` のチップ番号
@@ -261,11 +265,14 @@ class PwmChannel:
         channel: int = 0,
         *,
         write: WriteText = _write_text,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._chip = Path(chip)
         self._channel = int(channel)
         #: sysfs への書き込み。**試験は記録だけの偽物を差す**
         self._write_text = write
+        #: 権限待ちの間隔。**試験は待たない偽物を差す**
+        self._sleep = sleep
 
     @property
     def path(self) -> Path:
@@ -279,7 +286,7 @@ class PwmChannel:
         周期とパルス幅は上書きする**（再起動で `export` だけ残ることがある）。
         """
         self._export()
-        self._write(self.path / "period", int(period_ns))
+        self._write_after_export(self.path / "period", int(period_ns))
         self._write(self.path / "duty_cycle", int(duty_ns))
         self._write(self.path / "enable", 1)
 
@@ -297,6 +304,24 @@ class PwmChannel:
         except OSError:
             # EBUSY = 既に export 済み。**そのままで使える**ので黙って続ける
             log.info("PWM %s の export は既に済んでいた", self.path)
+
+    def _write_after_export(self, path: Path, value: int) -> None:
+        """`export` 直後の最初の書き込み。**権限が付くまで `PermissionError` を待つ。**
+
+        `export` で `pwm0` ができてから udev が `gpio` グループへ権限を付けるまでに
+        少し間があり、その間は書けない（再起動後の初回だけ起きる）。
+        待っても書けなければ、最後の `PermissionError` をそのまま投げる。
+        """
+        waited = 0.0
+        while True:
+            try:
+                self._write(path, value)
+                return
+            except PermissionError:
+                if waited >= PWM_EXPORT_SETTLE_S:
+                    raise
+                self._sleep(PWM_EXPORT_RETRY_S)
+                waited += PWM_EXPORT_RETRY_S
 
     def _write(self, path: Path, value: int) -> None:
         self._write_text(path, str(value))
