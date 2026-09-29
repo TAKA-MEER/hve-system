@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -45,7 +46,9 @@ from hve_camera.hw.rpi_hw import (
     pitch_to_pulse_ns,
     srf02_reading,
 )
-from tests.cam_support import PARAMS
+from hve_camera.control import ControlLoop
+from hve_camera.hw.fake_lift import FakeLift
+from tests.cam_support import PARAMS, SETTINGS, ManualClock, RecordingVideoZoom
 
 # --- 偽物 --------------------------------------------------------------------------------
 
@@ -735,27 +738,51 @@ async def test_the_sonar_thread_keeps_measuring_after_an_error():
         await hw.close()
 
 
-async def test_at_ms_is_the_measurement_time():
-    """**`at_ms` はスレッド内で測ったときの時計**（取り出しを遅らせても変わらない）。
+class GatedSmbus(FakeSmbus):
+    """1 回だけ測って、2 回目の読みから**止まる**偽の SRF02（固まった I2C・止まったスレッドの再現）。
 
-    取り出しの時刻にしてしまうと、**取得を遅らせた分だけ新しく見える**バグになる。
-    ここでは「読むたび時計が 100 ms 進む」fake を使い、
-    `at_ms` が**その測定の時点の時計**であることを見る。
+    `release()` するまで 2 回目の `read_i2c_block_data` が返らない。
     """
-    from tests.cam_support import ManualClock
 
+    def __init__(self, first: object = 200) -> None:
+        super().__init__([first])
+        self._gate = threading.Event()
+
+    def read_i2c_block_data(self, addr: int, register: int, length: int) -> bytes:
+        if self.reads_done >= 1:
+            self._gate.wait(timeout=5.0)
+        return super().read_i2c_block_data(addr, register, length)
+
+    def release(self) -> None:
+        self._gate.set()
+
+
+async def wait_until_measured(bus: FakeSmbus, timeout: float = 2.0) -> None:
+    """スレッドが 1 回読み終え、結果を置くまで待つ。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and bus.reads_done < 1:
+        await asyncio.sleep(0.005)
+    assert bus.reads_done >= 1, "SRF02 のスレッドが測らなかった"
+    await asyncio.sleep(0.05)  # 読み終えてから結果を置くまでの余裕
+
+
+async def test_at_ms_is_the_measurement_time():
+    """**`at_ms` は測ったときの時計**。取り出しを遅らせても取り出した時刻にならない。
+
+    時計 1000 ms で測り、取り出す前に時計を 700 ms 進める。`at_ms` が 1000 のままでなければ、
+    取り出しの時刻にしている（**固まったスレッドの古い値が新しく見える**バグ）。
+    """
     clock = ManualClock(1000.0)
-    bus = FakeSmbus([200, 200, 200])
-    bus.bind(clock, advance_ms=100.0)
+    bus = GatedSmbus(200)
     hw, _lgpio, _b, _w = make_hw(smbus=bus, clock=clock)
     try:
-        first = await wait_for_ceiling(hw)
-        assert first is not None
-        assert first.at_ms is not None
-        # 取り出す時刻を遅らせても `at_ms` は変わらない（古さが効く）
-        time.sleep(0.15)
-        assert first.at_ms < clock.now_ms, "at_ms が取り出しの時計と同じになっている"
+        await wait_until_measured(bus)
+        clock.advance(700.0)  # 取り出す前に時間が経つ
+        reading = await hw.read_ceiling()
+        assert reading is not None
+        assert reading.at_ms == 1000.0
     finally:
+        bus.release()
         await hw.close()
 
 
@@ -766,8 +793,6 @@ async def test_a_stuck_sonar_still_goes_stale_in_the_real_path():
     `ceiling_stale_ms` を超えると必ず古くなる。**取り出した時刻にしてしまうと、
     固まったスレッドの古い読み値が永遠に新しく見えて上昇を許し続ける。**
     """
-    from tests.cam_support import ManualClock
-
     clock = ManualClock(0.0)
     bus = FakeSmbus([200] * 20)
     hw, _lgpio, _b, _w = make_hw(smbus=bus, clock=clock)
@@ -947,3 +972,107 @@ def test_running_the_whole_hardware_does_not_import_lgpio():
 def test_rpi_hardware_does_not_import_lgpio():
     """**`RpiHardware` を作り回しても `lgpio` を import しない。**"""
     assert "lgpio" not in sys.modules
+
+
+# --- 実物の経路: `RpiHardware`（偽の I2C）→ `ControlLoop` → 偽の昇降部への `ceil_ok` --------------
+#
+# 純関数の試験が緑でも、`read_ceiling` の返す `at_ms` や例外の扱いが壊れていれば、
+# 昇降部へ送る `ceil_ok` が true のままになる。**送られた指令そのもの**を見る。
+
+
+class LoopOverRpi:
+    """`RpiHardware`（偽の I2C）と `ControlLoop` と偽の昇降部をまとめる。"""
+
+    def __init__(self, bus: FakeSmbus, start_ms: float = 1000.0) -> None:
+        self.clock = ManualClock(start_ms)
+        self.bus = bus
+        self.hw, _lgpio, _b, _w = make_hw(smbus=bus, clock=self.clock)
+        self.lift = FakeLift(self.clock)
+        self.loop = ControlLoop(
+            self.hw,
+            self.lift,
+            settings=SETTINGS,
+            params=make_params(),
+            clock=self.clock,
+            video_zoom=RecordingVideoZoom(),
+        )
+
+    async def step(self, advance_ms: float = 0.0) -> dict:
+        """時計を進め、上昇を押し続けたまま 1 回回し、**送られた指令**を返す。"""
+        self.clock.advance(advance_ms)
+        self.loop.hold("lift_up", 30)
+        await self.loop.step()
+        return self.lift.cmd_history[-1]
+
+
+async def test_a_healthy_sonar_lets_the_lift_go_up_through_the_control_loop():
+    """対照: 正常に測れていれば `ceil_ok` は true。**これが無いと下の「false」の試験が空振りする。**"""
+    rig = LoopOverRpi(FakeSmbus([200] * 50))  # 200 cm = 2000 mm。余裕の 500 mm より遠い
+    try:
+        await wait_until_measured(rig.bus)
+        await rig.step()  # ここで読み値を受け取る
+        cmd = await rig.step()
+        assert (cmd["dir"], cmd["ceil_ok"]) == ("up", True)
+    finally:
+        await rig.hw.close()
+
+
+class AlwaysFailingSmbus(FakeSmbus):
+    """読むたびに例外を出す偽の SRF02（配線が抜けた・バスが死んだ）。"""
+
+    def read_i2c_block_data(self, addr: int, register: int, length: int) -> bytes:
+        self.reads_done += 1
+        raise OSError(121, "Remote I/O error")
+
+
+async def test_an_i2c_that_keeps_failing_never_lets_the_lift_go_up():
+    """**SRF02 が例外を出し続けたら、昇降部へ送る `ceil_ok` は false のまま。**本物の経路。
+
+    例外を `NO_ECHO`（反射なし＝天井は遠い＝上昇を許す）にしてしまうと、
+    センサが死んでも上昇し続けて天井へ突っ込む。
+    """
+    rig = LoopOverRpi(AlwaysFailingSmbus())
+    try:
+        await wait_until_measured(rig.bus)
+        for _ in range(5):
+            cmd = await rig.step(advance_ms=100.0)
+            assert cmd["dir"] == "up"
+            assert cmd["ceil_ok"] is False
+            await asyncio.sleep(0.02)
+    finally:
+        await rig.hw.close()
+
+
+async def test_a_stuck_sonar_thread_stops_the_lift_after_the_stale_time():
+    """**スレッドが固まって新しい測定が来なくなったら、`ceiling_stale_ms` を過ぎて `ceil_ok` が false になる。**"""
+    bus = GatedSmbus(200)
+    rig = LoopOverRpi(bus)
+    try:
+        await wait_until_measured(bus)
+        await rig.step()
+        assert (await rig.step())["ceil_ok"] is True  # 測った直後は許す
+        stale_ms = make_params()["ceiling_stale_ms"]
+        assert (await rig.step(advance_ms=stale_ms - 100))["ceil_ok"] is True
+        cmd = await rig.step(advance_ms=200.0)  # 合計で stale_ms を超えた
+        assert cmd["ceil_ok"] is False
+    finally:
+        bus.release()
+        await rig.hw.close()
+
+
+async def test_a_reading_collected_late_is_still_judged_by_when_it_was_measured():
+    """**取り出しが遅れても、古さは「測った時刻」から数える。**`at_ms` を取り出しの時刻にすると落ちる。
+
+    時計 1000 ms で測り、誰も取り出さないまま 700 ms（> `ceiling_stale_ms`）経つ。
+    そのあとの `step()` で取り出した値は、すでに古いので `ceil_ok` は false でなければならない。
+    """
+    bus = GatedSmbus(200)
+    rig = LoopOverRpi(bus)
+    try:
+        await wait_until_measured(bus)
+        await rig.step(advance_ms=700.0)  # この step の最後で読み値を受け取る
+        cmd = await rig.step()
+        assert cmd["ceil_ok"] is False
+    finally:
+        bus.release()
+        await rig.hw.close()
