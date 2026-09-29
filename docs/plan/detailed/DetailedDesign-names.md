@@ -115,6 +115,27 @@
 | `send_zoom` | `camera/hve_camera/app.py` | `VideoZoom` の送り口。倍率を受け取って `POST http://127.0.0.1:<video_port>/zoom`。**失敗しても例外を投げない**（次の `send_zoom` で送り直す。送れたかどうかを返す） |
 | `main` | `camera/hve_camera/__main__.py` | `python3 -m hve_camera [--fake] [--port N]` の入口 |
 
+`WP-UI-01` で足した関数（§0 の命名規則に従う。**画面は素の HTML・CSS・JavaScript。ビルドも外部の読み込みもしない**ので、
+ブラウザでは上位スコープの宣言がそのまま共有される。Node の試験からは `module.exports` 越しに使う）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `holdMessage` | `camera/web/app.js` | 送る `hold` の JSON を組み立てる純関数（protocol §2.1） |
+| `releaseMessage` / `zoomMessage` | `camera/web/app.js` | 送る `release` / `zoom` の JSON |
+| `zoomTarget` | `camera/web/app.js` | 「＋」「−」で次に送る倍率。1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる |
+| `speedFor` | `camera/web/app.js` | 軸 → 送る速度。`pitch_*` は `pitch`・`yaw_*` は `yaw` を見る（`pitch_up` と `pitch_down` は同じ枠） |
+| `sliderSpec` | `camera/web/app.js` | スライダーの範囲（設定の下限〜上限）と初期位置（設定の初期値）。**画面を開くたびに初期値**（spec [Spec-ui.md](../spec/Spec-ui.md) §1） |
+| `formatSpeed` | `camera/web/app.js` | 速度の数値の書式（`%` は整数・`deg/s` は小数 1 桁） |
+| `streamUrl` | `camera/web/app.js` | 映像（`hve_video` の `/stream`）の URL。**宿主は画面と同じにする**（protocol §2.4 の `video_port`） |
+| `reasonText` | `camera/web/app.js` | 停止理由（[-names.md](DetailedDesign-names.md) §3）→ `{色, 文言}`。`NONE` は `null`（帯を出さない） |
+| `ceilingText` | `camera/web/app.js` | 天井のバッジの `{色, 文言}`（距離・値なし・範囲外。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b） |
+| `heightText` | `camera/web/app.js` | 高さの OSD の文言（読めない値・値なしを含む） |
+| `holdBlocked` | `camera/web/app.js` | その軸のボタンを薄くするか。昇降部と切れている・天井の `ok` が `false` なら上昇、下端なら下降 |
+| `stateStale` | `camera/web/app.js` | `state` が `ui_state_timeout_ms` 届かないか（「接続切れ」を出す） |
+| `SETTING_AXES` | `camera/web/settings.js` | 設定画面の項目（名前・単位・絶対範囲）。4 項目（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
+| `validateSettingsDraft` | `camera/web/settings.js` | 設定の検証。`min ≦ init ≦ max` と絶対範囲を見て、理由の一覧を返す（保存前に画面側でも確かめる） |
+| `settingsErrorText` | `camera/web/settings.js` | 検証の理由の一覧を 1 行の文言にする（行を増やして画面からはみ出さない） |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
@@ -190,13 +211,14 @@
 | `lift_state_timeout_ms` | カメラ部 | 600 | **仮** |
 | `state_period_ms` | カメラ部 | 100 | **仮** |
 | `ui_hold_period_ms` / `ui_state_timeout_ms` | 画面 | 100 / 1000 | **仮** |
+| `lift_gauge_full_mm` | 画面 | 1800 | **仮**（操作画面の高さのゲージの満量。`lift.top_mm` が設定されたらその値を使う。`WP-MEAS-01` で決まる `LIFT_TOP_MM` が確定したら置き換え） |
 | `axis_speed_abs_max_dps` | カメラ部 | 60 | 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。**実測で確定** |
 | `yaw_steps_per_rev` | カメラ部 | 4096 | 28BYJ-48 の半ステップ（資料により 4076 とも。**実測で確定**） |
 | `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
 | `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3a・#3b |
 | `srf02_ranging_wait_ms` | カメラ部 | 70 | SRF02 のデータシート（測定に約 66 ms） |
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`。SG90 自体は約 ±90°） |
-| `zoom_max` / `zoom_step` | カメラ部 | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
+| `zoom_max` / `zoom_step` | カメラ部（画面も「＋」「−」の 1 段に使う） | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
 | `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
 | `lift_ws_url` | カメラ部 | `ws://hve-lift.local/ws` | §2 の `hve-lift`（アドレスの決め方は未確定。[-open.md](DetailedDesign-open.md) `D-1`） |
 | `video_port` | カメラ部 | 8080 | [-protocol.md](DetailedDesign-protocol.md) §1・[DetailedDesign.md](DetailedDesign.md) §4.3 |
