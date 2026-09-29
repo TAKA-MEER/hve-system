@@ -250,6 +250,8 @@ class ControlLoop:
             },
             "pitch_deg": round(self._pitch_deg, 3),
             "zoom": self._zoom,
+            # 画面は映像（hve_video）の URL を組み立てるのにこのポートが要る（protocol §2.4）
+            "video_port": int(self._params["video_port"]),
             "active_axis": self._active_axis(now)[0],
             "reason": self._screen_reason(now, link_ok, ceil_ok, ceil_reason, raw.get("reason")),
             "provisional": list(self._params.get("provisional", [])),

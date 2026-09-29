@@ -27,11 +27,16 @@ from pathlib import Path
 from aiohttp import web
 
 from hve_camera.app import VideoZoom, create_app
+from hve_camera.ceiling import CeilingStatus
 from hve_camera.params import load_params
 from hve_camera.settings import load_settings
 
 #: 画面の静的ファイル（`WP-UI-01` で入る。無くても起動できる）
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
+
+#: **偽物のモードで起動したときの天井の読み値** [mm]。天井の読み値が無いと画面が
+#: 「天井 値なし」になり、上昇ボタンが薄いまま動かせない。実測の代わりに「十分遠い」を渡す
+FAKE_CEILING_MM = 2000
 
 log = logging.getLogger(__name__)
 
@@ -70,8 +75,12 @@ def main(argv: list[str] | None = None) -> int:
         from hve_camera.hw.fake_lift import FakeLift
 
         hw = FakeHardware(clock)
+        # **偽物でも天井は「十分遠い MEASURED」で保つ（古くならない）。**天井の読み値が無く起動すると
+        # 画面が「天井 値なし」で上昇ボタンも薄いままになる（画面を見る人が動かせない）
+        hw.set_steady_ceiling(CeilingStatus.MEASURED, FAKE_CEILING_MM)
         lift = FakeLift(clock)
         log.warning("偽物のモードで起動する（実機の結果と取り違えないこと）")
+        log.info("偽物の天井は %d mm（MEASURED）から始める。POST /api/fake の差し込みは 1 回分、止めるのは freeze", FAKE_CEILING_MM)
     else:
         from hve_camera.hw.rpi_hw import RpiHardware, is_raspberry_pi
         from hve_camera.lift_link import LiftLink

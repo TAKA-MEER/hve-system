@@ -73,11 +73,12 @@
 {"t":"state",
  "lift":{"link":"ok","dir":"stop","duty":0,"reason":"CMD_STOP","bottom":true,"height_mm":102,"height_ok":true,"top_mm":null},
  "ceiling":{"mm":1450,"age_ms":80,"ok":true,"reason":"NONE"},
- "pitch_deg":0.0,"zoom":1.0,"active_axis":null,"reason":"NONE",
+ "pitch_deg":0.0,"zoom":1.0,"video_port":8080,"active_axis":null,"reason":"NONE",
  "provisional":["ceiling_margin_mm","ceiling_stale_ms"],"fake":false,"clients":1}
 ```
 
 ヨーの角度は載せない（spec [Spec-ui.md](../spec/Spec-ui.md) §1.4）。`lift.top_mm` が `null` のとき画面は「上端が未設定（開発中）」を常に出す。
+`video_port` は映像（`hve_video`・§1）のポート。**画面は映像の URL を組み立てるのにこれが要る**（2026-09-29 `WP-UI-01` で足した。宿主は画面自身と同じにする）。
 `ceiling.reason` は `NONE` / `CEILING_NEAR` / `CEILING_STALE` / `OUT_OF_RANGE`（反射なし。`ok` は `true`。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b）。
 `reason` の選び方（**上から順に最初に当たったもの**。2026-09-28 実装時に決定）:
 1. `LINK_LOST`（昇降部と繋がっていない）

@@ -29,7 +29,7 @@
 | `firmware/lift/test/test_lift_core/`・`test_lift_decide/`・`test_lift_controller/`・`test_cmd_codec/`・`test_hal_core/` | Unity の試験（`env:native`。1 ディレクトリ 1 試験で、それぞれ `test_main.cpp` を持つ） |
 | `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,rpi_hw,fake_hw,fake_lift}.py` |
 | `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
-| `camera/web/` | `index.html`・`settings.html`・`app.js`・`settings.js`・`style.css` |
+| `camera/web/` | `index.html`・`app.js`・`settings.js`・`style.css`。**設定画面は `index.html` のオーバーレイ**（別ページではない。モックアップと同じ） |
 | `camera/config/params.toml` | パラメータ（§5 のカメラ部の行） |
 | `camera/requirements.txt` ／ `camera/requirements-dev.txt` | ラズパイで pip で入れるもの（`aiohttp`・`smbus2`） ／ ホストの試験用（[DetailedDesign.md](DetailedDesign.md) §4.5） |
 | `camera/tests/` | pytest |
@@ -147,6 +147,54 @@
 | `open_srf02_bus` | `camera/hve_camera/hw/rpi_hw.py` | **実装しない**。I2C バスは `RpiHardware` の引数 `smbus` で差し替えるので、開くのは `RpiHardware._open_smbus` の中だけ。**`smbus2` はその中でしか import しない** |
 | `is_raspberry_pi` | `camera/hve_camera/hw/rpi_hw.py` | `RPI_MODEL_PATH` に `Raspberry Pi` と書いてあるか。ラズパイ以外で `--fake` 無しの起動を止めるのに使う |
 
+`WP-UI-01` で足した関数（§0 の命名規則に従う。**画面は素の HTML・CSS・JavaScript。ビルドも外部の読み込みもしない**ので、
+ブラウザでは上位スコープの宣言がそのまま共有される。Node の試験からは `module.exports` 越しに使う）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `holdMessage` | `camera/web/app.js` | 送る `hold` の JSON を組み立てる純関数（protocol §2.1） |
+| `releaseMessage` / `zoomMessage` | `camera/web/app.js` | 送る `release` / `zoom` の JSON |
+| `zoomTarget` | `camera/web/app.js` | 「＋」「−」で次に送る倍率。1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる |
+| `speedFor` | `camera/web/app.js` | 軸 → 送る速度。`pitch_*` は `pitch`・`yaw_*` は `yaw` を見る（`pitch_up` と `pitch_down` は同じ枠） |
+| `sliderSpec` | `camera/web/app.js` | スライダーの範囲（設定の下限〜上限）と初期位置（設定の初期値）。**画面を開くたびに初期値**（spec [Spec-ui.md](../spec/Spec-ui.md) §1） |
+| `formatSpeed` | `camera/web/app.js` | 速度の数値の書式（`%` は整数・`deg/s` は小数 1 桁） |
+| `streamUrl` | `camera/web/app.js` | 映像（`hve_video` の `/stream`）の URL。**宿主は画面と同じにする**（protocol §2.4 の `video_port`） |
+| `reasonText` | `camera/web/app.js` | 停止理由（[-names.md](DetailedDesign-names.md) §3）→ `{色, 文言}`。`NONE` は `null`（帯を出さない） |
+| `ceilingText` | `camera/web/app.js` | 天井のバッジの `{色, 文言}`（距離・値なし・範囲外。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b） |
+| `heightText` | `camera/web/app.js` | 高さの OSD の文言（読めない値・値なしを含む） |
+| `holdBlocked` | `camera/web/app.js` | その軸のボタンを薄くするか。昇降部と切れている・天井の `ok` が `false` なら上昇、下端なら下降 |
+| `stateStale` | `camera/web/app.js` | `state` が `ui_state_timeout_ms` 届かないか（「接続切れ」を出す） |
+| `SETTING_AXES` | `camera/web/settings.js` | 設定画面の項目（名前・単位・絶対範囲）。4 項目（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
+| `validateSettingsDraft` | `camera/web/settings.js` | 設定の検証。`min ≦ init ≦ max` と絶対範囲を見て、理由の一覧を返す（保存前に画面側でも確かめる） |
+| `settingsErrorText` | `camera/web/settings.js` | 検証の理由の一覧を 1 行の文言にする（行を増やしても画面からはみ出さない） |
+
+`WP-UI-01` で足した、画面（DOM）と結びつくもの。**上の表の関数だけを試験する経路では、
+「離したときだけ `release` を送る」「押しているあいだ続けて送る」ことを縛れない**ので、
+ブラウザでの試験（`camera/web/tests/browser_paths.js`）で確かめる（brief §2 試験）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `REASON_TEXT` | `camera/web/app.js` | 停止理由 → `{色, 文言}` の表（`reasonText` が使う。**文言は仮**） |
+| `AXIS_SETTING` | `camera/web/app.js` | 軸 → 速度の設定の項目。`pitch_up`・`pitch_down` は `pitch`、`yaw_left`・`yaw_right` は `yaw` |
+| `initApp` | `camera/web/app.js` | 画面を組み立てる（スライダー・ボタン・ズーム・ガイド線・設定・映像・離脱）。**DOM が無いときは呼ばない**（Node の試験で `require` できるように） |
+| `connect` | `camera/web/app.js` | カメラ部の WS をつなぎ、`state` を受ける。切れても次の見直しのときに繋ぎ直す |
+| `send` | `camera/web/app.js` | カメラ部へ JSON を送る。**開いていないときは何もしない**（接続前の操作で例外にしない） |
+| `loadSettings` | `camera/web/app.js` | `GET /api/settings` を読んでスライダーを作り直す。読めなかったときは HTML の既定のまま |
+| `applySettings` | `camera/web/app.js` | スライダーの範囲と初期位置を設定どおりに作り直す（`sliderSpec` を使う） |
+| `bindHoldButtons` | `camera/web/app.js` | 「押している間だけ動く」ボタンに `pointerdown`・`pointerup`・`pointercancel`・`lostpointercapture` を結ぶ |
+| `startHold` / `sendHold` / `endHold` | `camera/web/app.js` | 押した軸を覚えて `hold` を送り続ける（`ui_hold_period_ms` ごと）／離したときだけ `release` を送る。**別の軸を押したら前の操作を先に離す**（最後の操作が勝つ。spec [Spec-ui.md](../spec/Spec-ui.md) §1.6） |
+| `render` | `camera/web/app.js` | 受け取った `state` を画面に描く（映像の URL・バッジ・停止理由の帯・高さ・ピッチ・ゲージ・倍率） |
+| `attachStream` | `camera/web/app.js` | 映像を `<img>` に取り付ける。**フレームが来るまで `<img>` を見せない**（壊れた画像のアイコンと `alt` の文字が OSD に重なるので）。`video_probe_ms` まで `load` も `error` も来なければ「映像がありません」を出し続けて取り直す |
+| `FAKE_CEILING_MM` | `camera/hve_camera/__main__.py` | **偽物のモードで起動したときの天井の読み値** [mm]（`MEASURED`）。読み値が無いと画面が「天井 値なし」で上昇ボタンが薄いままになる。実測の代わりに「十分遠い」を渡す |
+| `tick` | `camera/web/app.js` | `ui_tick_ms` ごとに「接続切れ」・再接続・設定の読み直しを見る |
+| `nowMs` | `camera/web/app.js` | 画面が使う時計（`performance.now()`） |
+| `settings_draft` | `camera/web/settings.js` | 設定画面に出している下書き。**閉じる操作では元に戻さない**（保存しない） |
+| `openSettingsOverlay` / `closeSettingsOverlay` | `camera/web/settings.js` | 設定画面のオーバーレイを現在の設定で出す／閉じる |
+| `saveSettingsOverlay` | `camera/web/settings.js` | 検証に通らなければ **`PUT` を送らない**。通れば `PUT /api/settings` して、400 のときはサーバーの理由をそのまま出して保存しない |
+| `validateSettingsInputs` | `camera/web/settings.js` | 入力欄・理由・保存ボタンに検証の結果を反映する |
+| `provisionalText` | `camera/web/settings.js` | 仮値で動作中のパラメータ（`state.provisional`）の説明文。**読み取り専用**（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
+| `hve_settings_saved` | `camera/web/settings.js` | 保存できたときに `document` に流す CustomEvent の名前。`app.js` がスライダーを作り直す（この画面は `app.js` の内部 state を知らない） |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
@@ -239,13 +287,16 @@
 | `lift_state_timeout_ms` | カメラ部 | 600 | **仮** |
 | `state_period_ms` | カメラ部 | 100 | **仮** |
 | `ui_hold_period_ms` / `ui_state_timeout_ms` | 画面 | 100 / 1000 | **仮** |
+| `lift_gauge_full_mm` | 画面 | 1800 | **仮**（操作画面の高さのゲージの満量。`lift.top_mm` が設定されたらその値を使う。`WP-MEAS-01` で決まる `LIFT_TOP_MM` が確定したら置き換え） |
+| `ui_tick_ms` | 画面 | 500 | **仮**（画面が見直す周期。`state` が古ければ「接続切れ」を出し、WS が閉じていれば繋ぎ直す） |
+| `video_probe_ms` | 画面 | 1500 | **仮**（映像の `<img>` を差してから、`load` も `error` も来ない場合に「映像があります」と見なすまでの待ち時間） |
 | `axis_speed_abs_max_dps` | カメラ部 | 60 | 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。**実測で確定** |
 | `yaw_steps_per_rev` | カメラ部 | 4096 | 28BYJ-48 の半ステップ（資料により 4076 とも。**実測で確定**） |
 | `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
 | `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3a・#3b |
 | `srf02_ranging_wait_ms` | カメラ部 | 70 | SRF02 のデータシート（測定に約 66 ms） |
 | `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`。SG90 自体は約 ±90°） |
-| `zoom_max` / `zoom_step` | カメラ部 | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
+| `zoom_max` / `zoom_step` | カメラ部（画面も「＋」「−」の 1 段に使う） | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
 | `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
 | `lift_ws_url` | カメラ部 | `ws://hve-lift.local/ws` | §2 の `hve-lift`（アドレスの決め方は未確定。[-open.md](DetailedDesign-open.md) `D-1`） |
 | `video_port` | カメラ部 | 8080 | [-protocol.md](DetailedDesign-protocol.md) §1・[DetailedDesign.md](DetailedDesign.md) §4.3 |

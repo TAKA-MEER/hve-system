@@ -1,0 +1,134 @@
+/* ============================================================
+   hve-system 操作画面
+   docs/plan/spec/Spec-ui.md に対応する画面。見た目は
+   docs/plan/spec/mockup/index.html（モックアップ）と同じ組み方にする
+   （Spec-ui.md §0.1・§4）。ビルド無し・外部の読み込み無しの素の CSS。
+
+   【スクロール禁止】どの画面サイズでもページ・パネルともスクロールさせない
+   （Spec-ui.md §0.1）。画面全体を表示領域の高さに固定し、中の部品を伸び縮みさせて収める。
+   対応する最小の大きさは 360×640（縦）／ 640×360（横）。
+   ============================================================ */
+:root{
+  --bg:#0f1117; --panel:#1a1d24; --inset:#12141b;
+  --ctrl:#252830; --ctrl-hi:#343849; --ctrl-on:#2c4a74;
+  --bd:#2a2d35; --bd-hi:#3a3f4c;
+  --tx:#e6e8ec; --mut:#8b93a1;
+  --brand:#3f8ae0;
+  --ok:#4caf50; --warn:#ffb74d; --warn-tx:#ffcc80; --ng:#ef5350; --ng-tx:#ff9b98;
+  --mock:#8e5bd0;
+  --r:8px; --gap:8px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{height:100dvh;display:flex;flex-direction:column;background:var(--bg);color:var(--tx);
+  font:14px/1.4 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button{font:inherit;color:inherit}
+
+/* ---------- ヘッダ ---------- */
+header{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--bd)}
+.title{font-weight:700;margin-right:4px;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;background:var(--inset);border:1px solid var(--bd);font-size:12px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.badge.warn{border-color:var(--warn);color:var(--warn-tx)} .badge.warn .dot{background:var(--warn)}
+.badge.ng{border-color:var(--ng);color:var(--ng-tx)} .badge.ng .dot{background:var(--ng)}
+.badge.fake{border-color:var(--mock);color:#d7c2f3}
+.spacer{flex:1}
+.hbtn{padding:6px 12px;border-radius:var(--r);border:1px solid var(--bd-hi);background:var(--ctrl);cursor:pointer;white-space:nowrap}
+.hbtn:hover{background:var(--ctrl-hi)}
+
+/* ---------- 本体: 横長＝映像｜操作、縦長＝映像／操作 ---------- */
+main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
+  grid-template-columns:minmax(0,1fr) clamp(280px,34vw,400px);grid-template-rows:minmax(0,1fr)}
+@media (orientation:portrait){
+  main{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,4fr) minmax(0,5fr)}
+}
+
+/* 映像: 枠いっぱいに広げる。**拡大はカメラ部がする**のでブラウザ側ではtransformを掛けない */
+.video{position:relative;min-height:0;background:#000;border-radius:var(--r);overflow:clip;border:1px solid var(--bd)}
+/* フレームが来るまで隠す（隠さないと壊れた画像のアイコンと alt の文字が OSD に重なる） */
+.video img.frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;visibility:hidden}
+.video img.frame.ready{visibility:visible}
+.guide{position:absolute;inset:0;pointer-events:none}
+.guide .h,.guide .v{position:absolute;background:rgba(127,180,238,.55)}
+.guide .h{left:0;right:0;top:50%;height:1px}
+.guide .v{top:0;bottom:0;left:50%;width:1px}
+.guide .box{position:absolute;left:25%;top:25%;width:50%;height:50%;border:1px dashed rgba(127,180,238,.45)}
+.osd{position:absolute;left:6px;top:6px;right:80px;display:flex;gap:4px;flex-wrap:wrap}
+.osd span{background:rgba(0,0,0,.6);padding:1px 7px;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums}
+.stopbar{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.75);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px}
+.stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
+.stopbar.show{display:block}
+.guidebtn{position:absolute;right:6px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
+.zoom{position:absolute;right:6px;top:36px;display:flex;flex-direction:column;gap:4px;z-index:1}
+.zoombtn{width:40px;height:36px;padding:0;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:16px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums}
+.zoombtn.lvl{font-size:12px}
+.zoombtn:disabled{opacity:.35;cursor:not-allowed}
+.nosig{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--mut);background:#050608;font-size:16px}
+.nosig.show{display:flex}
+
+/* ---------- 操作パネル ---------- */
+.panel{min-height:0;display:grid;gap:var(--gap);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+/* 縦長、または背の低い横長では 2 枚を横に並べる */
+@media (orientation:portrait),(max-height:560px){
+  .panel{grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
+@media (orientation:landscape) and (max-height:560px){
+  main{grid-template-columns:minmax(0,1fr) clamp(300px,46vw,520px)}
+}
+.card{min-height:0;min-width:0;display:flex;flex-direction:column;gap:6px;background:var(--panel);border:1px solid var(--bd);border-radius:var(--r);padding:8px;container-type:inline-size}
+.card h2{flex:none;margin:0;font-size:13px;color:var(--mut);font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:6px;white-space:nowrap}
+.card h2 .st{color:var(--tx);overflow:hidden;text-overflow:ellipsis}
+
+.hold{display:flex;align-items:center;justify-content:center;gap:6px;min-height:0;border-radius:var(--r);border:1px solid var(--bd-hi);
+  background:var(--ctrl);font-size:clamp(14px,2.4vh,20px);font-weight:700;cursor:pointer;touch-action:none;padding:0}
+.hold:active,.hold.on{background:var(--ctrl-on);border-color:var(--brand)}
+.hold.blocked{opacity:.4;cursor:not-allowed}
+
+/* 昇降: ボタン 2 つ＋高さのゲージが残りの高さを分け合う */
+.lift{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:8px}
+.liftbtns{min-height:0;display:grid;grid-template-rows:1fr 1fr;gap:6px}
+.gauge{position:relative;border-radius:6px;background:var(--inset);border:1px solid var(--bd);min-height:0}
+.gauge .fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(var(--brand),#1c3d66);border-radius:0 0 5px 5px}
+.gauge .top{position:absolute;left:0;right:0;height:0;border-top:2px dashed var(--ng)}
+
+/* カメラの向き: 十字ボタンが残りの高さを使う */
+.pad{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:5px}
+.pad .c{display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;color:var(--mut);background:var(--inset);border-radius:var(--r);font-variant-numeric:tabular-nums;overflow:hidden;white-space:nowrap}
+
+/* スライダー: 幅が狭いカードでは「ラベル 値」／「つまみ」の 2 行 */
+.sub{flex:none;font-size:11px;color:var(--mut);margin-bottom:-4px}
+.slider{flex:none;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"l r o";align-items:center;gap:0 8px;font-size:12px}
+.slider label{grid-area:l;color:var(--mut);white-space:nowrap}
+.slider output{grid-area:o;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.slider input{grid-area:r}
+@container (max-width:300px){
+  .slider{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l o" "r r"}
+}
+input[type=range]{width:100%;margin:0;accent-color:var(--brand);height:26px}
+
+/* ---------- 設定画面 ---------- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:8px;z-index:10}
+.overlay.show{display:flex}
+.sheet{background:var(--panel);border:1px solid var(--bd-hi);border-radius:12px;max-width:720px;width:100%;max-height:100%;padding:12px 14px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.sheet h1{font-size:17px;margin:0}
+.note{color:var(--mut);font-size:12px;margin:0}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th,td{padding:4px;text-align:left;border-bottom:1px solid var(--bd);font-size:13px}
+th{color:var(--mut);font-weight:600;font-size:12px}
+th:first-child,td:first-child{width:4.2em;white-space:nowrap} th:last-child,td:last-child{width:3.8em}
+td input{width:100%;padding:6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
+td input.bad{border-color:var(--ng)}
+.err{color:var(--ng-tx);font-size:12px;min-height:1.4em}
+.row-actions{display:flex;gap:8px;justify-content:flex-end}
+.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.primary:disabled{opacity:.4;cursor:not-allowed}
+.prov{padding:6px 10px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:12px}
+.prov b{color:var(--warn-tx)}
+/* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう） */
+@media (max-height:480px){
+  .sheet{padding:8px 12px;gap:4px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
+  .prov{font-size:11px;padding:4px 8px} .err{min-height:0}
+}
+.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
+.toast.show{display:block}
