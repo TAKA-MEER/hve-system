@@ -101,7 +101,7 @@ YAW_MIN_STEP_INTERVAL_S = 0.0002
 YAW_STOP_TIMEOUT_S = 1.0
 
 #: 待つ大きさを刻む大きさ [s]。**長い待ちも数 ms ごとに分割する**
-#: （丸ごと 1 回で待たると、`close()` や `stop_yaw()` の反応が遅くなる）
+#: （丸ごと 1 回で待つと、`close()` や `stop_yaw()` の反応が遅くなる）
 _WAIT_SLICE_S = 0.005
 
 # --- Devantech SRF02（天井） -----------------------------------------------------------------
@@ -147,7 +147,7 @@ def pitch_to_pulse_ns(angle_deg: float) -> int:
     """ピッチの角度を SG90 のパルス幅 [ns] にする。純関数。
 
     0°（正面・水平）が `SG90_PULSE_CENTER_NS`、1 度につき `SG90_NS_PER_DEG` を足す。
-    **範囲外は端に留める**（データシートの 0.5〜2.4 ms の外へ出すとサーボが端まで押されて)。
+    **範囲外は端に留める**（データシートの 0.5〜2.4 ms の外へ出すと、サーボが端に押し付けられて壊れうる）。
     可動範囲は `axes.py` の `pitch_step` が `pitch_min_deg`〜`pitch_max_deg` で決めるので、
     この留めは「その数行が壊れたとき」の保険。
     """
@@ -167,7 +167,7 @@ def srf02_reading(
     | # | 受け取ったもの | 状態 | 意味 |
     | --- | --- | --- | --- |
     | 1 | I2C の例外 | `READ_ERROR` | バスから読めなかった・応答が無い。**上昇を許さない**（spec §2 #4） |
-    | 2 | `SRF02_BUSY_RAW`（`0xFFFF`） | `READ_ERROR` | ranging 中に読んだ。**反射が無いのとは別**（反射が返った统计学意义が無い） |
+    | 2 | `SRF02_BUSY_RAW`（`0xFFFF`） | `READ_ERROR` | ranging 中に読んだ。**反射が無いのとは別**（まだ結果が出ていないだけ） |
     | 3 | `SRF02_NO_ECHO_RAW`（`0`） | `NO_ECHO` | 反射が無い。**上昇を許す**（spec §2 #3b） |
     | 4 | `srf02_max_range_mm` を超える | `NO_ECHO` | 測定範囲の外なので反射が無いのと同じ扱い（spec §2 #3b） |
     | 5 | それ以外 | `MEASURED` | 距離 [mm]。近すぎれば `ceiling.py` が `CEILING_NEAR` にする（#3a・#4） |

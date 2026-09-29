@@ -1,0 +1,32 @@
+# 映像の配信（Web カメラ → 切り出し → MJPEG）
+#
+# == 準備時に直す所（詳しくは docs/使い方.md §7）==
+#   1. User= と Group=      … 作ったユーザ名。video グループに入れておく（Web カメラを開くため）
+#   2. WorkingDirectory=    … リポジトリを置いた場所
+#   3. ExecStart= の python … 仮想環境の場所
+#   4. --port               … 既定は 8080（画面がこのポートを見に行く）
+#
+# 8080 は特権ポートではないので capability は要らない。root でも動かさない。
+# 制御アプリ（hve-camera.service）とは別プロセス。片方が落ちてももう片方は動き続ける。
+
+[Unit]
+Description=HVE camera video stream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+SupplementaryGroups=video
+WorkingDirectory=/home/pi/hve-system
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/hve-system/.venv/bin/python -m hve_video --port 8080
+NoNewPrivileges=true
+Restart=always
+RestartSec=2
+
+SyslogIdentifier=hve-video
+
+[Install]
+WantedBy=multi-user.target

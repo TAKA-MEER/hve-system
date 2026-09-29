@@ -97,7 +97,7 @@ class FakeSmbus:
         self.closed = False
         #: `read_i2c_block_data` を待たせる時間 [s]（**スレッドを止める実験**）
         self.block_for_s = 0.0
-        #: 読み成功的回数
+        #: 読みに成功した回数
         self.reads_done = 0
         #: 結果を返すときにこの時計を進める（`at_ms` の試験で使う）
         self.clock: object | None = None
@@ -199,7 +199,7 @@ async def wait_for_ceiling(hw: RpiHardware, timeout: float = 2.0):
     return None
 
 
-#: 向きを比べる试验用のゆっくりした速さ。**1 回のステップが 100 ms**（8 回で一周の余りが出る）
+#: 向きを比べる試験用のゆっくりした速さ。**1 回のステップが 100 ms**（8 回で一周の余りが出る）
 _SLOW_STEPS_PER_S = 10.0
 
 
