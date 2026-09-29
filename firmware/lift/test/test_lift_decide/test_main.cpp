@@ -262,6 +262,63 @@ void test_stop_command_never_keeps_a_duty() {
   assert_decision(in, LiftDir::STOP, 0, StopReason::CMD_STOP);
 }
 
+// --- millis() が一周したあと（安全面の穴）---
+
+// millis() は約 49.7 日で一周して 0 に戻る。一周をまたいだ直後に時計が
+// 0xFFFFFF00 付近から 0x00000000 付近へ戻る状況を、int64 に広げて引くと
+// 経過時間が巨大な負の値になり、ウォッチドッグも鮮度判定も効かなくなる
+// （指令が途絶えても止まらない）。uint32 のまま引いてから int32 に直す
+// ことで、どちらの判定も正しくなることを確かめる。
+
+// 一周をまたいだ、まだ新しい指令（経過 512 ms < 600 ms）は止めない
+void test_cmd_timeout_across_millis_wrap_still_moves_at_512ms() {
+  LiftDecideInput in = movable();
+  in.cmd_received_at_ms = 0xFFFFFF00u;
+  in.now_ms = 0x00000100u;  // 経過 512 ms
+  in.height_at_ms = in.now_ms;
+  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+}
+
+// 一周をまたいだ古い指令（経過 1280 ms > 600 ms）は CMD_TIMEOUT で止める
+void test_cmd_timeout_across_millis_wrap_stops_at_1280ms() {
+  LiftDecideInput in = movable();
+  in.cmd_received_at_ms = 0xFFFFFF00u;
+  in.now_ms = 0x00000400u;  // 経過 1280 ms
+  in.height_at_ms = in.now_ms;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::CMD_TIMEOUT);
+}
+
+// 高さの鮮度も一周をまたいでも判定できる（経過 512 ms は新鮮なので上昇できる）
+void test_height_freshness_across_millis_wrap_is_fresh_at_512ms() {
+  LiftDecideInput in = movable();
+  in.height_at_ms = 0xFFFFFF00u;
+  in.now_ms = 0x00000100u;  // 経過 512 ms
+  in.cmd_received_at_ms = in.now_ms;  // 指令は新しく保つ（表 4 だけを試験する）
+  TEST_ASSERT_TRUE(height_is_fresh(in.now_ms, in.height_at_ms));
+  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+}
+
+// 高さの鮮度も一周をまたいで古くなったら「読めない」で止める
+void test_height_freshness_across_millis_wrap_is_stale_at_1280ms() {
+  LiftDecideInput in = movable();
+  in.height_at_ms = 0xFFFFFF00u;
+  in.now_ms = 0x00000400u;  // 経過 1280 ms
+  in.cmd_received_at_ms = in.now_ms;  // 指令は新しく保つ（表 4 だけを試験する）
+  TEST_ASSERT_FALSE(height_is_fresh(in.now_ms, in.height_at_ms));
+  assert_decision(in, LiftDir::STOP, 0, StopReason::HEIGHT_UNKNOWN);
+}
+
+// 割り込みや WS のタスクが now より少し新しい時刻を書いていても、
+// 経過は小さな負の値になるのでタイムアウトにしない（誤停止しない）
+void test_cmd_timestamp_newer_than_now_does_not_time_out() {
+  LiftDecideInput in = movable();
+  in.now_ms = 0x00001000u;
+  in.cmd_received_at_ms = 0x00001005u;  // now より 5 ms 新しい
+  in.height_at_ms = in.now_ms;
+  TEST_ASSERT_EQUAL_INT32(-5, elapsed_ms(in.now_ms, in.cmd_received_at_ms));
+  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -301,6 +358,12 @@ int main(int /*argc*/, char** /*argv*/) {
 
   RUN_TEST(test_duty_is_clamped_into_0_to_100);
   RUN_TEST(test_down_duty_is_clamped_too);
+
+  RUN_TEST(test_cmd_timeout_across_millis_wrap_still_moves_at_512ms);
+  RUN_TEST(test_cmd_timeout_across_millis_wrap_stops_at_1280ms);
+  RUN_TEST(test_height_freshness_across_millis_wrap_is_fresh_at_512ms);
+  RUN_TEST(test_height_freshness_across_millis_wrap_is_stale_at_1280ms);
+  RUN_TEST(test_cmd_timestamp_newer_than_now_does_not_time_out);
 
   return UNITY_END();
 }
