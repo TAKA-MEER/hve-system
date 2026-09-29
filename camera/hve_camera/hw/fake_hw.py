@@ -38,6 +38,8 @@ class FakeHardware(HardwareBase):
         self._pending: CeilingReading | None = None
         #: 測った読み値の履歴
         self.ceiling_history: list[CeilingReading] = []
+        #: 差し込みが無いとき毎回返す「いつもの読み値」（偽物のモードの起動用。試験は使わない）
+        self._steady: tuple[CeilingStatus, int | None] | None = None
         self.closed = False
 
     # --- 外から天井の読み値を差し替える ----------------------------------------------------------
@@ -46,22 +48,31 @@ class FakeHardware(HardwareBase):
         """天井の「次の測定値」を差し込む。`read_ceiling()` を呼ぶと 1 回分だけ返る。"""
         self._pending = CeilingReading(CeilingStatus(status), distance_mm)
 
+    def set_steady_ceiling(self, status: CeilingStatus | str, distance_mm: int | None = None) -> None:
+        """**差し込みが無いとき、毎回この読み値を新しく測ったことにして返す。**
+
+        偽物のモードを立ち上げただけで上昇できるようにする（1 回分の差し込みだと
+        `ceiling_stale_ms` で古くなって「天井 値なし」に戻る）。`freeze_ceiling()` で止まる。
+        """
+        self._steady = (CeilingStatus(status), distance_mm)
+
     def freeze_ceiling(self) -> None:
         """以降新しい測定値を返さない（読み値が止まった・古い状態。spec §2 #4 を再現する）。"""
         self._pending = None
+        self._steady = None
 
     # --- HardwareBase -------------------------------------------------------------------------
 
     async def read_ceiling(self) -> CeilingReading | None:
         """差し込まれた測定値を 1 回返す。無いなら `None`（呼び出し側が保持する）。"""
-        if self._pending is None:
+        if self._pending is not None:
+            status, distance_mm = self._pending.status, self._pending.distance_mm
+            self._pending = None
+        elif self._steady is not None:
+            status, distance_mm = self._steady
+        else:
             return None
-        reading = CeilingReading(
-            status=self._pending.status,
-            distance_mm=self._pending.distance_mm,
-            at_ms=self._clock(),
-        )
-        self._pending = None
+        reading = CeilingReading(status=status, distance_mm=distance_mm, at_ms=self._clock())
         self.ceiling_history.append(reading)
         return reading
 
