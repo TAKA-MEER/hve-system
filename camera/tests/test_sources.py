@@ -154,3 +154,40 @@ def test_open_source_picks_the_real_camera(monkeypatch):
         sources.cv2, "VideoCapture", lambda device: _RecordingCapture(opened=True)
     )
     assert isinstance(sources.open_source(False, 320, 240), sources.V4L2Source)
+
+
+# --- カメラの選び方 -----------------------------------------------------------------------
+
+
+def test_find_camera_device_picks_the_usb_camera_by_name(tmp_path):
+    """**`/dev/videoN` の番号ではなく、名前（`*-video-index0`）で選ぶ**（挿し直しで番号が変わる）。"""
+    (tmp_path / "usb-Image+_UGREEN_Camera_4K_LL-0000000001-video-index1").touch()
+    wanted = tmp_path / "usb-Image+_UGREEN_Camera_4K_LL-0000000001-video-index0"
+    wanted.touch()
+    assert sources.find_camera_device(tmp_path) == str(wanted)
+
+
+def test_find_camera_device_falls_back_to_zero(tmp_path):
+    """名前で見つからなければ従来どおり 0 番（ディレクトリが無くても落ちない）。"""
+    assert sources.find_camera_device(tmp_path) == 0
+    assert sources.find_camera_device(tmp_path / "missing") == 0
+
+
+def test_open_source_opens_the_camera_found_by_name(monkeypatch):
+    """**実物を開くときは `find_camera_device` の結果を渡す**（経路を縛る）。"""
+    opened = []
+
+    class FakeCapture:
+        def __init__(self, device):
+            opened.append(device)
+
+        def isOpened(self):
+            return True
+
+        def set(self, *_args):
+            return True
+
+    monkeypatch.setattr(sources.cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(sources, "find_camera_device", lambda: "/dev/v4l/by-id/cam-video-index0")
+    sources.open_source(False, 320, 240)
+    assert opened == ["/dev/v4l/by-id/cam-video-index0"]

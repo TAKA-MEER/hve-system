@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 
@@ -12,6 +14,9 @@ BACKGROUND_VALUES = (24, 124)  # 市松模様の背景。目印と取り違え�
 MOVING_BAR_VALUE = 180  # フレームごとに動く帯
 MOVING_BAR_WIDTH = 8
 MOVING_BAR_STEP_PX = 8
+
+#: USB カメラの安定した名前が並ぶ場所（`/dev/videoN` の番号は挿し直しで変わる）
+V4L2_BY_ID_DIR = "/dev/v4l/by-id"
 
 
 class FakeSource:
@@ -70,7 +75,7 @@ class FakeSource:
 class V4L2Source:
     """実物の V4L2 カメラ。OpenCV の `VideoCapture` で MJPEG と取り込みの大きさを要求する。"""
 
-    def __init__(self, capture_width: int, capture_height: int, device: int = 0):
+    def __init__(self, capture_width: int, capture_height: int, device: int | str = 0):
         self._capture = cv2.VideoCapture(device)
         if not self._capture.isOpened():
             self._capture.release()
@@ -91,8 +96,18 @@ class V4L2Source:
         self._capture.release()
 
 
+def find_camera_device(by_id_dir: str | Path = V4L2_BY_ID_DIR) -> int | str:
+    """開くカメラを返す。**USB カメラの映像の口（`*-video-index0`）を名前で探す。**
+
+    `/dev/video0` は Pi 内蔵のコーデックなどに取られたり、挿し直しで番号が変わったりする。
+    名前で見つかればそのパス（名前順で先頭）、無ければ従来どおり 0 番。
+    """
+    found = sorted(Path(by_id_dir).glob("*-video-index0"))
+    return str(found[0]) if found else 0
+
+
 def open_source(fake: bool, capture_width: int, capture_height: int) -> FakeSource | V4L2Source:
     """`fake` なら偽の画像列、そうでなければ実物の V4L2 カメラを作る。"""
     if fake:
         return FakeSource(capture_width, capture_height)
-    return V4L2Source(capture_width, capture_height)
+    return V4L2Source(capture_width, capture_height, device=find_camera_device())
