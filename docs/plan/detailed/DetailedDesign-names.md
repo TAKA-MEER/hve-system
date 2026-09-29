@@ -134,6 +134,19 @@
 | `send_zoom` | `camera/hve_camera/app.py` | `VideoZoom` の送り口。倍率を受け取って `POST http://127.0.0.1:<video_port>/zoom`。**失敗しても例外を投げない**（次の `send_zoom` で送り直す。送れたかどうかを返す） |
 | `main` | `camera/hve_camera/__main__.py` | `python3 -m hve_camera [--fake] [--port N]` の入口 |
 
+`WP-CAM-03` で足した関数・型（§0 の命名規則に従う）:
+
+| 名前 | 置き場 | 何か |
+| --- | --- | --- |
+| `pitch_to_pulse_ns` | `camera/hve_camera/hw/rpi_hw.py` | 純関数。ピッチの角度を SG90 のパルス幅 [ns] にする。0° を `SG90_PULSE_CENTER_NS` として 1 度につき `SG90_NS_PER_DEG` を足し、`SG90_PULSE_MIN_NS`〜`SG90_PULSE_MAX_NS` に丸める（外側へ出さない） |
+| `srf02_reading` | `camera/hve_camera/hw/rpi_hw.py` | 純関数。SRF02 の返り値（cm）または I2C の例外を `CeilingReading` にする。**例外は `READ_ERROR`**・`0`（反射なし）と `SRF02_BUSY_RAW`（測定中）は別の扱い・`srf02_max_range_mm` を超える値は `NO_ECHO`・それ以外は `MEASURED`（mm） |
+| `RpiHardware` | `camera/hve_camera/hw/rpi_hw.py` | `HardwareBase` の実物。SG90（カーネル PWM）・28BYJ-48（`lgpio`・専用スレッド）・SRF02（`smbus2`・専用スレッド）。**`lgpio`・`smbus2`・PWM の sysfs はコンストラクタで差し替えられる**（ホストの試験は偽物を差す。**ホストでは `lgpio` を import しない**） |
+| `PwmChannel` | `camera/hve_camera/hw/rpi_hw.py` | カーネルの PWM 1 チャネル（`/sys/class/pwm/pwmchipN/pwm0`）。`export` → `period` → `duty_cycle` → `enable` の順に書く |
+| `find_pwm_chip` | `camera/hve_camera/hw/rpi_hw.py` | `PWM_BASE` の中から使う PWM チップのディレクトリを 1 つ選ぶ |
+| `LgpioPort` | `camera/hve_camera/hw/rpi_hw.py` | `lgpio` のチップハンドル分销。4 つの `YAW_IN*_PIN` を出力として確保し、書き換える。**`lgpio` はこの中でだけ import する**（ホストには入っていない） |
+| `open_srf02_bus` | `camera/hve_camera/hw/rpi_hw.py` | `smbus2.SMBus` を作る。**`smbus2` はこの中でだけ import する** |
+| `is_raspberry_pi` | `camera/hve_camera/hw/rpi_hw.py` | `RPI_MODEL_PATH` に"Raspberry Pi"と書いてあるか。ラズパイ以外で `--fake` 無しの起動を止めるのに使う |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
@@ -241,6 +254,29 @@
 | `video_capture_width` / `video_capture_height` | `hve_video` | 1920 / 1080 | **仮**（カメラの型番未定。[-hardware.md](DetailedDesign-hardware.md) §2） |
 | `video_out_height` | `hve_video` | 480（幅は取り込みの縦横比に合わせる） | **仮**（`H-A8`） |
 | `video_fps` / `video_jpeg_quality` | `hve_video` | 10 / 60 | **仮**（`H-A8`） |
+
+**カメラ部の実物の定数（`WP-CAM-03`）は `camera/hve_camera/hw/rpi_hw.py` に置く。**
+`params.toml` に入れなかったのは、部品のデータシートの値、または配線で決まる値だから。
+**データシートの出典は Devantech「SRF02 Ultrasonic Range Finder Technical Specification — I2C Mode」**
+（`http://www.robot-electronics.co.uk/htm/srf02techI2C.htm`）。
+
+| 名前 | 置き場 | 値 | 出どころ |
+| --- | --- | --- | --- |
+| `SG90_PERIOD_NS` | `hw/rpi_hw.py` | 20000000 | SG90 のデータシート（50 Hz） |
+| `SG90_PULSE_CENTER_NS` | `hw/rpi_hw.py` | 1500000 | 同（0° ＝ 正面・水平。[-hardware.md](DetailedDesign-hardware.md) §2.3「動いても害の無い向きを初期角」）。`control.py` の初期角 0° と揃える |
+| `SG90_NS_PER_DEG` | `hw/rpi_hw.py` | 10000 | 同（1 度あたり 10 µs。0.5〜2.4 ms が約 -100°〜+90° に対応する） |
+| `SG90_PULSE_MIN_NS` / `SG90_PULSE_MAX_NS` | `hw/rpi_hw.py` | 500000 / 2400000 | 同。**この外側へパルス幅を出さない**（角度は `pitch_min_deg`〜`pitch_max_deg` で止める。`axes.py` の `pitch_step`） |
+| `SG90_PWM_PIN` | `hw/rpi_hw.py` | 18 | [-hardware.md](DetailedDesign-hardware.md) §2.2（**仮**） |
+| `YAW_IN1_PIN` / `YAW_IN2_PIN` / `YAW_IN3_PIN` / `YAW_IN4_PIN` | `hw/rpi_hw.py` | 23 / 24 / 25 / 16 | 同（**仮**） |
+| `YAW_HALF_STEP_SEQUENCE` | `hw/rpi_hw.py` | `(0b0001, 0b0101, 0b0100, 0b0110, 0b0010, 0b1010, 0b1000, 0b1001)` | ULN2003 の 2 相励磁の半ステップ。**下位ビットから IN1〜IN4**。区間をまたぐ相（1 本のコイルと 2 本のコイルが切り替わる所）で脱調しやすいので実機で確認する |
+| `YAW_STEP_SIGN` | `hw/rpi_hw.py` | `left` = +1 / `right` = -1 | **仮**（どちらが左かは配線と、ギアの減速比の向きで決まる。実機で確認する。昇降部の `MOTOR_DIR_UP_LEVEL` と同じ扱い） |
+| `YAW_MIN_STEP_INTERVAL_S` | `hw/rpi_hw.py` | 0.0002 | **仮**（設定の上限 `axis_speed_abs_max_dps` 60 deg/s なら 1.46 ms 止まり。**それより短い間隔は刻まない**） |
+| `SRF02_COMMAND_REGISTER` / `SRF02_RESULT_REGISTER` | `hw/rpi_hw.py` | 0x00 / 0x02 | Devantech SRF02 I2C 仕様。**書けるのはロケーション 0 だけ**。結果はロケーション 2・3 の 16 bit（上位バイト先頭） |
+| `SRF02_RANGING_CMD_CM` | `hw/rpi_hw.py` | 0x51 | 同（ranging を始めて cm で返すコマンド。**mm を返すコマンドは無い**。 hasilnya cm なので `MM_PER_CM` で mm にする） |
+| `SRF02_BUSY_RAW` | `hw/rpi_hw.py` | 0xFFFF | 同（**ranging 中は応答が無く 255 が返る**ので「測定中」は `0xFFFF` で分かる。`0`（反射なし）とは別の `READ_ERROR` にする。仕様の `#3b` と `#4` を取り違えないため） |
+| `MM_PER_CM` | `hw/rpi_hw.py` | 10 | SRF02 は inches・cm・µs の 3 種類しか返さない（データシート）。天井の判定は mm なので cm を受ける |
+| `PWM_BASE` | `hw/rpi_hw.py` | `/sys/class/pwm` | Linux のカーネル PWM。**書けないときは udev の規則が要る**（[DetailedDesign.md](DetailedDesign.md) §4.4） |
+| `RPI_MODEL_PATH` | `hw/rpi_hw.py` | `/proc/device-tree/model` | ラズパイかどうかの判定（ラズパイ以外で `--fake` 無しの起動を止める） |
 
 ## 6. th-system 側の名前（参照のみ）
 
