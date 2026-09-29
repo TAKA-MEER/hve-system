@@ -635,6 +635,28 @@ def test_the_half_step_sequence_never_goes_through_the_neutral_point():
         assert any((pattern >> i) & 1 for i in range(4)), f"{pattern:04b} が全部 LOW"
 
 
+def test_the_half_step_sequence_energises_adjacent_coils_in_order():
+    """**隣り合うコイルを順に励磁する**（IN1 → IN1+IN2 → IN2 → IN2+IN3 → …）。
+
+    IN1+IN3 のように隣り合わないコイルを混ぜた並びは、唸るだけでほとんど回らなかった（実機）。
+    """
+    for pos, pattern in enumerate(YAW_HALF_STEP_SEQUENCE):
+        coils = [i for i in range(4) if (pattern >> i) & 1]
+        if pos % 2 == 0:  # 偶数番目は 1 本
+            assert coils == [pos // 2], f"{pattern:04b}"
+        else:  # 奇数番目は、前後の 1 本と隣のコイル
+            first, second = (pos - 1) // 2, ((pos - 1) // 2 + 1) % 4
+            assert sorted(coils) == sorted([first, second]), f"{pattern:04b}"
+
+
+def test_the_half_step_sequence_changes_one_coil_at_a_time():
+    """**隣の相へ進むたびに、変わるコイルは 1 本だけ**（一周して先頭へ戻るところも同じ）。"""
+    count = len(YAW_HALF_STEP_SEQUENCE)
+    for pos in range(count):
+        now, nxt = YAW_HALF_STEP_SEQUENCE[pos], YAW_HALF_STEP_SEQUENCE[(pos + 1) % count]
+        assert bin(now ^ nxt).count("1") == 1, f"{now:04b} → {nxt:04b}"
+
+
 def test_the_half_step_sequence_has_eight_phases():
     """**半ステップは 8 相**。相が足りないと同じ向きでも回転がずれる。"""
     assert len(YAW_HALF_STEP_SEQUENCE) == 8

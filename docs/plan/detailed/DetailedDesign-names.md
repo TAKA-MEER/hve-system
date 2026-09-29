@@ -320,7 +320,7 @@
 | `SG90_INITIAL_PITCH_DEG` | `hw/rpi_hw.py` | 0 | [-hardware.md](DetailedDesign-hardware.md) §2.3「動いても害の無い向きを初期角とする」＝正面・水平。`control.py` のピッチの初期角と揃える。**起動時に最初のパルスでここへ動く** |
 | `YAW_IN1_PIN` / `YAW_IN2_PIN` / `YAW_IN3_PIN` / `YAW_IN4_PIN` | `hw/rpi_hw.py` | 23 / 24 / 25 / 16 | 同（**仮**） |
 | `YAW_PINS` | `hw/rpi_hw.py` | 上記 4 本の組 | `YAW_HALF_STEP_SEQUENCE` の下位ビットと順番を揃える |
-| `YAW_HALF_STEP_SEQUENCE` | `hw/rpi_hw.py` | `(0b0001, 0b0101, 0b0100, 0b0110, 0b0010, 0b1010, 0b1000, 0b1001)` | ULN2003 の 2 相励磁の半ステップ。**下位ビットから IN1〜IN4**。**中性点（`0b0000`）は使わない**。2 本 → 1 本 → 2 本の切替は中性点が入れ替わるので脱調しやすい。実機で確認する |
+| `YAW_HALF_STEP_SEQUENCE` | `hw/rpi_hw.py` | `(0b0001, 0b0011, 0b0010, 0b0110, 0b0100, 0b1100, 0b1000, 0b1001)` | ULN2003 の半ステップ。**下位ビットから IN1〜IN4**。**隣り合うコイルを順に励磁する**（IN1 → IN1+IN2 → IN2 → …）。**中性点（`0b0000`）は使わない**。隣り合わないコイル（IN1+IN3 など）を混ぜた並びは、唸るだけでほとんど回らなかった（2026-09-29 実機で確認） |
 | `YAW_STEP_SIGN` | `hw/rpi_hw.py` | `left` = +1 / `right` = -1 | **仮**（どちらが左かは配線と、ギアの減速比の向きで決まる。実機で確認する。昇降部の `MOTOR_DIR_UP_LEVEL` と同じ扱い） |
 | `YAW_MIN_STEP_INTERVAL_S` | `hw/rpi_hw.py` | 0.0002 | **仮**（設定の上限 `axis_speed_abs_max_dps` 60 deg/s なら 1.46 ms 止まり。**それより短い間隔は刻まない**） |
 | `YAW_STOP_TIMEOUT_S` | `hw/rpi_hw.py` | 1.0 | **仮**（スレッドを止めてピンを LOW にするまで待つ時間。越えたら諦めてログを出す） |
