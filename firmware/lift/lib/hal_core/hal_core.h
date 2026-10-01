@@ -31,6 +31,25 @@ constexpr int BOTTOM_PRESSED_LEVEL = 1;  // HIGH
 // out_mm が nullptr のときも false。
 bool sonar_echo_to_mm(uint32_t echo_us, int* out_mm);
 
+// 高さの読み値を「直近 SONAR_MEDIAN_WINDOW 回の有効な読み値の中央値」にする
+// （spec Spec-safety.md §2「高さの読み値は、単発の外れ値で変わらない」）。
+// WiFi 通信中に混ざる実際より低い偽値を弾くため。窓がそろうまでは「読めない」。
+// 範囲外・時間切れが 1 回でも来たら窓を空にしてそろえ直す。
+constexpr int SONAR_MEDIAN_WINDOW = 5;
+
+struct HeightFilter {
+  // ECHO の幅 [µs] を 1 回分入れる。窓がそろって中央値が出せるときだけ true を返し、
+  // *out_mm に書く。範囲外（時間切れの幅 0 を含む）は窓を空にして false。
+  // out_mm が nullptr のときも false（窓は変えない）。
+  bool on_echo(uint32_t echo_us, int* out_mm);
+  // 反射が返らなかった（時間切れ）。窓を空にする
+  void on_invalid();
+
+  int buf_[SONAR_MEDIAN_WINDOW] = {};
+  int count_ = 0;  // 窓に入っている数（満杯でも SONAR_MEDIAN_WINDOW のまま）
+  int next_ = 0;   // 次に書く位置
+};
+
 // ピンのレベル（Arduino の HIGH = 1 / LOW = 0）から下端スイッチが押されているかを返す。
 // BOTTOM_PRESSED_LEVEL のときだけ true。
 bool bottom_pressed_from_level(int level);

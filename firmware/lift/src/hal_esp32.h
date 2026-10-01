@@ -37,6 +37,9 @@ class LiftEsp32Hal : public LiftHal {
   // 反射が返らなかった（時間切れ・範囲外）ので「高さが読めない」にする
   void invalidate_height();
 
+  // 直近 5 回の中央値（spec Spec-safety.md §2）。そろうまでは height_ok_ を立てない
+  HeightFilter filter_;
+
   // --- loop() だけが触る値 ---
   int height_mm_ = 0;
   bool height_ok_ = false;

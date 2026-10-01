@@ -27,6 +27,42 @@ bool sonar_echo_to_mm(uint32_t echo_us, int* out_mm) {
   return true;
 }
 
+bool HeightFilter::on_echo(uint32_t echo_us, int* out_mm) {
+  if (out_mm == nullptr) {
+    return false;
+  }
+  int mm = 0;
+  if (!sonar_echo_to_mm(echo_us, &mm)) {
+    on_invalid();
+    return false;
+  }
+  buf_[next_] = mm;
+  next_ = (next_ + 1) % SONAR_MEDIAN_WINDOW;
+  if (count_ < SONAR_MEDIAN_WINDOW) {
+    ++count_;
+  }
+  if (count_ < SONAR_MEDIAN_WINDOW) {
+    return false;
+  }
+  int sorted[SONAR_MEDIAN_WINDOW];
+  for (int i = 0; i < SONAR_MEDIAN_WINDOW; ++i) {
+    int v = buf_[i];
+    int j = i;
+    while (j > 0 && sorted[j - 1] > v) {
+      sorted[j] = sorted[j - 1];
+      --j;
+    }
+    sorted[j] = v;
+  }
+  *out_mm = sorted[SONAR_MEDIAN_WINDOW / 2];
+  return true;
+}
+
+void HeightFilter::on_invalid() {
+  count_ = 0;
+  next_ = 0;
+}
+
 bool bottom_pressed_from_level(int level) {
   return level == BOTTOM_PRESSED_LEVEL;
 }

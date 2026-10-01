@@ -74,6 +74,7 @@ void LiftEsp32Hal::poll(uint32_t now_ms) {
   if (g_echo_rise_seen && (micros() - g_echo_rise_us) > SONAR_ECHO_TIMEOUT_US) {
     g_echo_rise_seen = false;
     g_echo_width_us = 0;
+    filter_.on_invalid();
     invalidate_height();
   }
   // 次の測定を出す。1 回 60 ms 以上空ける（DetailedDesign-hardware.md §0）
@@ -96,7 +97,8 @@ void LiftEsp32Hal::trigger_sonar(uint32_t now_ms) {
 
 void LiftEsp32Hal::apply_echo_width(uint32_t now_ms) {
   int mm = 0;
-  if (sonar_echo_to_mm(g_echo_width_us, &mm)) {
+  // 範囲外なら filter_ が窓を空にする。5 回そろうまでは false
+  if (filter_.on_echo(g_echo_width_us, &mm)) {
     // **有効な値を得た時刻だけを進める**。鮮度は「有効な値がいつ取れたか」で測る
     height_mm_ = mm;
     height_ok_ = true;
