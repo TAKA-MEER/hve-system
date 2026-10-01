@@ -130,11 +130,13 @@ void broadcast_state(const LiftState& state) {
 
 // WiFi は待たない。繋がる前も loop() は回り、指令が来なければ lift_decide が止める
 void start_wifi() {
+  // SSID が無くても WiFi.mode() は呼ぶ。TCP/IP スタックがここで立ち上がるので、
+  // 呼ばないまま server.begin() すると tcpip_api_call の "Invalid mbox" で落ちる
+  WiFi.mode(WIFI_STA);
   if (WIFI_SSID[0] == '\0') {
     Serial.println("[wifi] SSID が無いので繋がない（loop は回り続ける）");
     return;
   }
-  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // 応答を遅くしない
   WiFi.setHostname(LIFT_MDNS_NAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
