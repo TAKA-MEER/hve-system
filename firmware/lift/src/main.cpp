@@ -184,11 +184,14 @@ void setup() {
   // 指令を一度も受けていないので、この 1 回は CMD_TIMEOUT で止まる
   controller.step(millis());
 
+  // TCP/IP スタックは WiFi.mode() で立ち上がる。server.begin() より先にしないと
+  // tcpip_api_call の "Invalid mbox" で落ちて再起動を繰り返す
+  start_wifi();
+
   ws.onEvent(on_ws_event);
   server.addHandler(&ws);
   server.begin();  // :80 は WS だけ。静的な画面は持たない（protocol §1）
 
-  start_wifi();
   Serial.println("[lift] 起動しました");
 }
 
