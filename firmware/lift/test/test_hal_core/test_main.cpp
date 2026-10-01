@@ -178,6 +178,97 @@ void test_pwm_works_at_12_bit_too() {
   TEST_ASSERT_EQUAL_UINT32(full, motor_duty_to_pwm(100, 12));
 }
 
+// --- 高さの中央値フィルタ（直近 5 回）---
+
+namespace {
+// 5 回分を入れる。最後の戻り値と中央値を返す
+bool feed(HeightFilter& f, const int* mms, int n, int* out) {
+  bool ok = false;
+  for (int i = 0; i < n; ++i) {
+    ok = f.on_echo(echo_us_for_mm(mms[i]), out);
+  }
+  return ok;
+}
+}  // namespace
+
+void test_filter_is_not_ready_until_five_samples() {
+  HeightFilter f;
+  int mm = -1;
+  for (int i = 0; i < 4; ++i) {
+    TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), &mm));
+  }
+  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2200), &mm));
+  TEST_ASSERT_EQUAL_INT(2200, mm);
+}
+
+void test_filter_rejects_one_or_two_low_outliers() {
+  const int one[] = {2200, 350, 2203, 2201, 2204};
+  HeightFilter f1;
+  int mm = -1;
+  TEST_ASSERT_TRUE(feed(f1, one, 5, &mm));
+  TEST_ASSERT_INT_WITHIN(3, 2201, mm);
+
+  const int two[] = {350, 2203, 340, 2201, 2204};
+  HeightFilter f2;
+  TEST_ASSERT_TRUE(feed(f2, two, 5, &mm));
+  TEST_ASSERT_INT_WITHIN(3, 2203, mm);
+}
+
+void test_filter_cannot_reject_three_in_a_row() {
+  // 仕様の受け入れリスク（Spec-safety.md §2）。除けないことを明示しておく
+  const int three[] = {2200, 350, 340, 360, 2204};
+  HeightFilter f;
+  int mm = -1;
+  TEST_ASSERT_TRUE(feed(f, three, 5, &mm));
+  TEST_ASSERT_INT_WITHIN(3, 360, mm);
+}
+
+void test_filter_window_slides() {
+  HeightFilter f;
+  int mm = -1;
+  const int first[] = {1000, 1000, 1000, 1000, 1000};
+  TEST_ASSERT_TRUE(feed(f, first, 5, &mm));
+  TEST_ASSERT_INT_WITHIN(2, 1000, mm);
+  // 3 個入れ替わると中央値が新しい値になる（古い値が落ちている）
+  const int next[] = {2000, 2000, 2000};
+  TEST_ASSERT_TRUE(feed(f, next, 3, &mm));
+  TEST_ASSERT_INT_WITHIN(3, 2000, mm);
+  // 4 個目で 1000 が 1 個だけ残る → まだ 2000 が多数派
+  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2000), &mm));
+  TEST_ASSERT_INT_WITHIN(3, 2000, mm);
+}
+
+void test_filter_restarts_after_out_of_range() {
+  HeightFilter f;
+  int mm = -1;
+  const int full[] = {2200, 2200, 2200, 2200, 2200};
+  TEST_ASSERT_TRUE(feed(f, full, 5, &mm));
+  // 範囲外（時間切れの幅 0 を含む）が 1 回来たら窓を空にする
+  TEST_ASSERT_FALSE(f.on_echo(0, &mm));
+  for (int i = 0; i < 4; ++i) {
+    TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), &mm));
+  }
+  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2200), &mm));
+}
+
+void test_filter_restarts_after_timeout() {
+  HeightFilter f;
+  int mm = -1;
+  const int full[] = {2200, 2200, 2200, 2200, 2200};
+  TEST_ASSERT_TRUE(feed(f, full, 5, &mm));
+  f.on_invalid();
+  for (int i = 0; i < 4; ++i) {
+    TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), &mm));
+  }
+  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2200), &mm));
+}
+
+void test_filter_null_out_is_false() {
+  HeightFilter f;
+  TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), nullptr));
+}
+
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
   RUN_TEST(test_echo_width_becomes_mm_at_200mm);
@@ -205,5 +296,12 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_duty_is_linear_in_pwm);
   RUN_TEST(test_pwm_stays_inside_the_channel);
   RUN_TEST(test_pwm_works_at_12_bit_too);
+  RUN_TEST(test_filter_is_not_ready_until_five_samples);
+  RUN_TEST(test_filter_rejects_one_or_two_low_outliers);
+  RUN_TEST(test_filter_cannot_reject_three_in_a_row);
+  RUN_TEST(test_filter_window_slides);
+  RUN_TEST(test_filter_restarts_after_out_of_range);
+  RUN_TEST(test_filter_restarts_after_timeout);
+  RUN_TEST(test_filter_null_out_is_false);
   return UNITY_END();
 }
