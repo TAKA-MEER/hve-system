@@ -9,7 +9,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 **カメラ昇降のピッチ・ヨー・高さ**を担当する（th-system `Spec.md` §1・`Spec-onsite.md` §7.1）。
 
 **2026-09-29 時点で、PC だけでできる実装（昇降部の判定と ESP32 の配線・カメラ部の制御・映像・画面・ラズパイの実物の層）は済み。実機での確認はまだ**（[ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1・[docs/試験項目.md](docs/試験項目.md)）。開発体制は th-system と同じにしてある
-（文書の役割分担・herdr ＋ opencode による実装・受け入れ検査・git 運用）。
+（文書の役割分担・herdr／orca ＋ opencode による実装・受け入れ検査・git 運用）。
 **構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/detailed/DetailedDesign-hardware.md)）。
 
 ## 作業開始前のルール
@@ -53,9 +53,12 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 **正本は [docs/plan/ImplementationPlan.md](docs/plan/ImplementationPlan.md) §2。着手前に読む。**
 ここには要点だけ書く。
 
-- **「実装して」と言われたら自分でコードを書かない。**herdr の `ImplementAgent` タブに常駐させた
-  **opencode** にブリーフを渡して投げる（手順・落とし穴は ImplementationPlan §2.1）。
-  体数は固定しない。必要なだけ `herdr pane split` でペインを分ける。
+- **「実装して」と言われたら自分でコードを書かない。**ブリーフを **opencode** に渡して投げる
+  （手順・落とし穴は ImplementationPlan §2.1）。体数は固定しない。
+  **窓口は herdr と orca の 2 つ**（2026-10-01 から th-system で乗り換えを検討中。orca は th-system で試用済み）。
+  **いま開いている方を環境変数で見分けて使う**:
+  `TERM_PROGRAM=Orca`／`ORCA_TERMINAL_HANDLE` があれば orca（`orca worktree create --setup skip --agent opencode`）、
+  `HERDR_PANE_ID`／`HERDR_ENV` があれば herdr（`ImplementAgent` タブ・`herdr pane split`）。
 - **何をやるかは ImplementationPlan §6。**先頭から取る。
   **取る前に `git log --merges` と突き合わせ、マージ・実機確認・台帳の変更のたびに計画書を更新する**（§2.3「計画書を都度更新する」）。
 - **検証は必ず自分でやる**（§2.2）。**実装エージェントの「テストが緑」報告は信用しない。**
@@ -97,11 +100,13 @@ pio run  -d firmware/lift -e esp32dev
 
 ## 環境の癖・注意点
 
-th-system で踏んだもののうち、同じ道具（herdr ＋ opencode・PlatformIO）を使う限りここでも踏むものだけを移した。
+th-system で踏んだもののうち、同じ道具（herdr／orca ＋ opencode・PlatformIO）を使う限りここでも踏むものだけを移した。
 
 - **opencode は「完了」を報告してもコミットしていないことがある**（th-system 2026-09-20）。**完了報告を受けたら、まず `git log main..HEAD` と `git status` を見る。**
 - **opencode の `/tmp` 許可プロンプトは、拒否し続けてはいけない。**変異チェックのバックアップと**復元**が両方 `/tmp` 経由だと、拒否すると復元だけ失敗して**変異が入ったままのファイルが残る**。一時ファイルは `.briefs/tmp/` を使わせ、それでも出たら「Allow always」で通し、**あとで作業ツリーを自分で確認する**。
 - **opencode の質問画面（選択肢つきの確認）は、ペインが低いと入力欄が画面外に出て、`herdr agent prompt` の文字が入らない**（2026-09-28）。`herdr pane zoom <pane> --on` で広げ、`herdr pane read --source visible` で入力欄を確かめてから `herdr pane send-text` → `herdr pane send-keys <pane> Enter` で答える。終わったら `--off` で戻す。
+- **エージェントが作業中の worktree で、自分の変異チェック（ファイルを壊して `cp` で戻す）を回さない。**戻すときに、そのあいだにエージェントが入れた修正をバックアップで上書きして消す（th-system 2026-10-01）。エージェントを待機させてから回すか、検証用に別の worktree を切る。
+- **orca で作った worktree には gitignore 済みの `.venv/`・`.briefs/` が無い。**カメラ部の試験は worktree 内で `.venv` を作り直す（または検証は本体側の `.venv` で worktree を指して回す）。`.briefs/tmp/` も作る。
 - **既に opencode が動いているペインに `herdr agent start` を打たない。**`start` はシェルプロンプト待ちを期待するため、動作中のセッションに文字列を打ち込んで壊す。`herdr agent rename` だけで登録する。
 - **`pip3 install platformio` をホストの `python3 -m pytest` と同じ環境に入れると、依存の `anyio` が pytest プラグインとして自動登録され、`ModuleNotFoundError: No module named '_pytest.scope'` でテストが全滅する**（この環境の `pytest` は 6.2.5）。`python3 -m pytest -p no:anyio ...` で回避できる（th-system 2026-09-05）。
 - **リポジトリ直下から `.venv/bin/python -m hve_camera` を動かすには `camera/` を編集可能で入れておく**（`pip install -e camera`）。入れないと `No module named hve_camera` になる（`pytest.ini` の `pythonpath = camera` は pytest だけにも効く）。2026-09-29 WP-CAM-02。

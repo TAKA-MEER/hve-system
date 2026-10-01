@@ -48,5 +48,5 @@ desktop.ini
 .claude/settings.local.json
 .claude/RESUME.md
 
-# herdr 用の実装ブリーフ置き場（共有しない）
+# herdr/orca 用の実装ブリーフ置き場（共有しない）
 .briefs/

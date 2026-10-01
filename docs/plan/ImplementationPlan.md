@@ -38,15 +38,29 @@
 
 | # | 原則 | 補足 |
 | --- | --- | --- |
-| 1 | **実装は herdr の `ImplementAgent` タブに常駐させた opencode に投げる** | 体数は固定しない。必要なだけペインを分けて増やす（§2.1） |
+| 1 | **実装は opencode に投げる。窓口は herdr か orca**（いま開いている方を使う） | 体数は固定しない。必要なだけペインを分けて増やす（§2.1） |
 | 2 | **順番は「用途」で決める** | 実際の運用で先に要るものから埋める（§6） |
 | 3 | **検証は必ず実装管理担当（人＋Claude）が自分で行う** | **実装エージェントの「テストが緑」報告は信用しない。**§2.2 |
 | 4 | **完成の判定は実行できるコマンドで行う** | 「できたと思う」で先に進まない |
 | 5 | **モータを回す確認は、通電が要るものだけに絞る** | 通信・状態遷移・画面は電源を切ったまま確かめられるように作る |
 
-### 2.1 実装エージェントの動かし方（herdr ＋ opencode）
+### 2.1 実装エージェントの動かし方（herdr ／ orca ＋ opencode）
 
 **1 作業パケット ＝ 1 ブリーフ ＝ 1 エージェント**。並行数は作業の独立性で決める。
+
+**どちらの中で動いているかは環境変数で見分ける**（2026-10-01。th-system で herdr から orca への乗り換えを検討中で、両方を使う。orca の試用結果は th-system 側の記録を移した）。
+
+```bash
+env | grep -E '^(TERM_PROGRAM|ORCA_TERMINAL_HANDLE|HERDR_PANE_ID|HERDR_ENV)='
+```
+
+| 見えるもの | いる場所 | 使う手順 |
+| --- | --- | --- |
+| `TERM_PROGRAM=Orca` ／ `ORCA_TERMINAL_HANDLE=term_…` | **orca** | 下の「orca の場合」 |
+| `HERDR_PANE_ID` ／ `HERDR_ENV` | **herdr** | 下の「herdr の場合」。※変数名は th-system が herdr 0.8.2 の実行ファイルから拾ったもので、ペイン内での実在は未確認 |
+| どちらも無い | 素の端末 | どちらかのコマンド（`orca status` ／ `herdr status`）が通る方を使う |
+
+#### herdr の場合
 
 ```bash
 herdr tab list                                    # ImplementAgent タブの tab_id を確認
@@ -67,6 +81,28 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 | 承認プロンプト | `herdr agent send-keys <name> Left Left Right Enter` で「Allow always」 | カーソル位置が読めないので左端へ寄せてから 1 つ右 |
 | コミット | **細かく切らせる** | **無料枠・クォータで途中で止まる前提。**opencode は上限に達すると idle のまま進まなくなる |
 | `git push` | **投げない。実装管理担当が検証してから押す** | — |
+
+#### orca の場合（th-system が 2026-10-01 に試用。**hve-system ではまだ使っていない**ので、初回に確かめて直す）
+
+```bash
+orca worktree create --name <n> --no-parent --setup skip --agent opencode --json   # worktree 作成と opencode 起動を 1 回で
+git -C <worktreeのpath> branch -m <n> <種別>/<主題>     # orca はブランチ名を <n> にするので付け替える
+mkdir -p <worktreeのpath>/.briefs/tmp                    # .briefs は gitignore なので新しい worktree には無い。ブリーフもここに置く
+orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json   # satisfied:true を確かめてから送る
+orca terminal send --terminal <handle> --text "指示書は .briefs/brief-<ID>.md。…" --enter --json
+orca terminal read --terminal <handle> --limit 60        # 監視。画面に `esc interrupt` があれば作業中
+orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。フォルダ・ターミナル・ローカルブランチまで消える
+```
+
+| 項目 | 決まりごと | 理由 |
+| --- | --- | --- |
+| `worktree create` | **`--setup skip` を必ず付ける** | th-system では repo 設定のセットアップ hook が `pnpm install`（既定）で失敗した。hve-system でも直下に `package.json` は無い |
+| worktree の置き場 | `~/orca/workspaces/hve-system/<n>`（リポジトリの外） | `.venv/` も無いので、カメラ部の試験は worktree 内で作り直す |
+| 投入の確認 | `terminal send` の結果ではなく**画面を読んで**確かめる | opencode は `provider: unsupported` で、ターンが始まったことを orca が証明できない |
+| 監視 | `terminal read` を 30 秒間隔で読むスクリプトを Monitor で回す（`esc interrupt` が 2 回続けて無ければ停止） | ターン終了の通知が無い |
+| 承認プロンプト | **未確認**。`terminal send` に矢印キーを送るオプションが無い | th-system の試用では 1 度も出なかった。出たら確かめてここを書き換える |
+
+ブリーフ・一時ファイル・コミット・`git push` の決まりごとは herdr の表と同じ。
 
 **ブリーフに必ず書くこと**: 作業ブランチ名／読むべき設計書の節（担当パケットの §2）／
 受け入れ条件（実行できるコマンド）／触ってよいファイルの範囲／**触ってはいけないもの（th-system のリポジトリ）**。
