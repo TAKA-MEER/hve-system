@@ -2,6 +2,7 @@
 
 **何を・どの順番で作るか。**進捗はこのファイルの「状態」列を更新して共有する。
 
+- **2026-10-06 から設計を見直している（ブランチ `redesign/v2`）。以下の進捗と §6 の作業は旧版（[archive/v1/](archive/v1/spec/README.md)）に沿ったもので、v2 の spec が固まるまで新しく着手しない。**
 - 何を作るかは [完全設計書](spec/README.md)（正本）と [詳細設計書](detailed/README.md) にある。
   ここはその**順番と進み具合**だけを扱う。
 - 進め方（§2）は th-system の [ImplementationPlan.md](../../../th-system/docs/plan/ImplementationPlan.md) §2 を
@@ -16,7 +17,7 @@
 | | 状態 |
 | --- | --- |
 | 完全設計書（何が・どう振る舞うべきか） | **範囲・設計思想・機器構成・操作の流れ・上下端と天井・操作画面**（2026-09-25）。目標 `H-G1` は未定 |
-| 詳細設計書（どう実装するか） | **初版**（2026-09-25）。**ユーザー判断待ちの提案 4 件**（[DetailedDesign-open.md](detailed/DetailedDesign-open.md) §1） |
+| 詳細設計書（どう実装するか） | **初版**（2026-09-25）。**ユーザー判断待ちの提案 4 件**（[DetailedDesign-open.md](archive/v1/detailed/DetailedDesign-open.md) §1） |
 | 実装 | **`WP-BASE-01`（骨格と試験の土台）まで。**機器なしの作業（`WP-LIFT-01`・`WP-CAM-01`・`WP-VIDEO-01`）に着手 |
 
 ### 状態の書き方（証拠の水準）
@@ -179,8 +180,8 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 
 ## 3. 全体像 —— 5 段階
 
-段階の中身と「残るもの」は [DetailedDesign.md](detailed/DetailedDesign.md) §5。パケットの受け入れ条件は
-[DetailedDesign-packets.md](detailed/DetailedDesign-packets.md)。
+段階の中身と「残るもの」は [DetailedDesign.md](archive/v1/detailed/DetailedDesign.md) §5。パケットの受け入れ条件は
+[DetailedDesign-packets.md](archive/v1/detailed/DetailedDesign-packets.md)。
 
 | 段階 | 残るもの | 状態 |
 | --- | --- | --- |
@@ -193,7 +194,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 ### いま分かっている危険
 
 - **天井の判定は無線を挟む。**`WP-LIFT-01`・`WP-CAM-02` の変異チェックを**管理担当が必ず自分で**やる
-- 超音波が HC-SR04 系なら ECHO が 5 V で、分圧なしに繋ぐと ESP32・ラズパイの入力を壊す（[DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §4）
+- 超音波が HC-SR04 系なら ECHO が 5 V で、分圧なしに繋ぐと ESP32・ラズパイの入力を壊す（[DetailedDesign-hardware.md](archive/v1/detailed/DetailedDesign-hardware.md) §4）
 - 映像が th-system の無線を圧迫しうる（`WP-MEAS-03` まで分からない）
 
 ## 4. 段階ごとの作業
@@ -216,7 +217,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 | 段階 | コマンド・確認 |
 | --- | --- |
 | 0〜3（実機不要） | `pio test -d firmware/lift -e native` ／ `.venv/bin/python -m pytest camera/tests` ／ `python3 -m hve_camera --fake` で画面を開く ＋ **パケットごとの変異チェック** |
-| 1・2（実機） | [DetailedDesign-packets.md](detailed/DetailedDesign-packets.md) の各パケットの「実機で管理担当が確かめる」 |
+| 1・2（実機） | [DetailedDesign-packets.md](archive/v1/detailed/DetailedDesign-packets.md) の各パケットの「実機で管理担当が確かめる」 |
 | 4 | 測定結果を `docs/試験項目.md` に記録し、仮値を置き換える |
 
 ## 6. 次にやること
@@ -225,7 +226,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 
 | # | 作業 | 状態 |
 | --- | --- | --- |
-| ~~0~~ | ~~範囲と構成・画面・停止手段・設定（`H-S1`・`H-A1`〜`H-A7`・`H-X1`〜`H-X4`・`H-X7`・`H-U*`）~~ | 2026-09-25 決定（[Spec-open.md](spec/Spec-open.md) §4） |
+| ~~0~~ | ~~範囲と構成・画面・停止手段・設定（`H-S1`・`H-A1`〜`H-A7`・`H-X1`〜`H-X4`・`H-X7`・`H-U*`）~~ | 2026-09-25 決定（[Spec-open.md](archive/v1/spec/Spec-open.md) §4） |
 | ~~0.5~~ | ~~詳細設計の初版~~ | `1ad32b2` |
 | ~~1~~ | ~~ユーザー判断: 提案 `P-1`〜`P-4`~~ | 2026-09-28 すべて決定 |
 | 2 | ~~`WP-BASE-01`~~（`8a9e1b8`） ／ **`WP-MEAS-01`（先行試作で今すぐ測れる）** ／ Web カメラの選定（`D-5`。他の部品は 2026-09-28 に決定） | 未着手 |

@@ -11,8 +11,9 @@
 
 | フォルダ・ファイル | 役割 | 現状 |
 | --- | --- | --- |
-| [`spec/`](spec/README.md) | **完全設計書＝完成形の正本。**詳細設計・実装計画はここを入力にして書く | **骨格のみ。これから書く** |
-| [`detailed/`](detailed/README.md) | **詳細設計書。**ノード名・トピック名・ピン・作業パケット | 骨格のみ（spec の後） |
+| [`spec/`](spec/README.md) | **完全設計書＝完成形の正本。**詳細設計・実装計画はここを入力にして書く | **v2 を再設計中（2026-10-06〜）。骨格のみ** |
+| [`detailed/`](detailed/README.md) | **詳細設計書。**ノード名・トピック名・ピン・作業パケット | v2 は空（spec の後） |
+| [`archive/v1/`](archive/v1/spec/README.md) | 旧版（v1）の spec・detailed。いまの実装はこれに沿っている | **参照のみ** |
 | [`source/`](source/README.md) | spec に統合する前の原典・先行試作の設計書への参照 | 参照専用 |
 | [`ImplementationPlan.md`](ImplementationPlan.md) | 実装の進め方と進み具合 | 進め方（§2）のみ確定 |
 | [`EXCEPTION-LEDGER.md`](EXCEPTION-LEDGER.md) | デモ特例で省略・バイパスした事項の台帳 | 空 |

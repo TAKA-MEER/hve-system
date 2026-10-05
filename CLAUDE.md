@@ -10,7 +10,11 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 
 **2026-09-29 時点で、PC だけでできる実装（昇降部の判定と ESP32 の配線・カメラ部の制御・映像・画面・ラズパイの実物の層）は済み。実機での確認はまだ**（[ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1・[docs/試験項目.md](docs/試験項目.md)）。開発体制は th-system と同じにしてある
 （文書の役割分担・herdr／orca ＋ opencode による実装・受け入れ検査・git 運用）。
-**構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/detailed/DetailedDesign-hardware.md)）。
+**構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/archive/v1/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/archive/v1/detailed/DetailedDesign-hardware.md)）。
+
+**2026-10-06 から、使用できる機器が増えたため設計から見直している（ブランチ `redesign/v2`）。**
+上の実装と構成は旧版（v1）で、その spec・detailed は `docs/plan/archive/v1/` に移した。
+`docs/plan/spec/`・`detailed/` は v2 の骨格から書き直す。**既存コードのコメントにある spec・detailed への参照は旧版を指す**（[spec/README.md](docs/plan/spec/README.md)）。
 
 ## 作業開始前のルール
 
@@ -42,7 +46,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 ### th-system との境界
 
 - **th-system から独立させる。通信しない・走行禁止などの連動も設けない**（ユーザー決定 2026-09-25。
-  [Spec.md](docs/plan/spec/Spec.md) §4 `HD-1`）。互いの仕様変更を波及させないため。
+  [Spec.md](docs/plan/archive/v1/spec/Spec.md) §4 `HD-1`）。互いの仕様変更を波及させないため。
   **th-system と信号をやり取りする設計・実装を持ち込まない。**要りそうになったら、先にユーザーに確認して spec を直す。
 - 共有するのは機体と無線 AP（`th-rpi-ap`。将来名前が変わる）だけ。**AP 名をコードに直書きしない。**
 - **th-system のリポジトリは、ユーザーの指示があるときだけ編集する。**別の正本と運用ルールを持つので、
@@ -111,6 +115,6 @@ th-system で踏んだもののうち、同じ道具（herdr／orca ＋ opencode
 - **`pip3 install platformio` をホストの `python3 -m pytest` と同じ環境に入れると、依存の `anyio` が pytest プラグインとして自動登録され、`ModuleNotFoundError: No module named '_pytest.scope'` でテストが全滅する**（この環境の `pytest` は 6.2.5）。`python3 -m pytest -p no:anyio ...` で回避できる（th-system 2026-09-05）。
 - **リポジトリ直下から `.venv/bin/python -m hve_camera` を動かすには `camera/` を編集可能で入れておく**（`pip install -e camera`）。入れないと `No module named hve_camera` になる（`pytest.ini` の `pythonpath = camera` は pytest だけにも効く）。2026-09-29 WP-CAM-02。
 - **`pkill -f <パターン>` は自分のシェルを殺すことがある**（パターンが自分のコマンドラインにマッチする）。PID 指定で止める。
-- **カメラ部のラズパイは Raspberry Pi OS Lite（64-bit）Trixie。pigpio は使えない**（公式リポジトリに無い）。GPIO は カーネル PWM・`lgpio`（OS 同梱。pip に Python 3.13 向けが無い）・`smbus2` で扱う。仮想環境は `--system-site-packages` 付きで作る（[DetailedDesign.md](docs/plan/detailed/DetailedDesign.md) §4.4）。
+- **カメラ部のラズパイは Raspberry Pi OS Lite（64-bit）Trixie。pigpio は使えない**（公式リポジトリに無い）。GPIO は カーネル PWM・`lgpio`（OS 同梱。pip に Python 3.13 向けが無い）・`smbus2` で扱う。仮想環境は `--system-site-packages` 付きで作る（[DetailedDesign.md](docs/plan/archive/v1/detailed/DetailedDesign.md) §4.4）。
 - **ホストの Python は 3.10 で `tomllib` が無い。カメラ部の試験はリポジトリ内の `.venv/` で回す**（§4.5）。システムの `python3 -m pytest` を使うと上の anyio の問題を踏む。
 - **この PC には PlatformIO Core が複数入っている**（`pio run` のたびに「Obsolete PIO Core v6.1.19 is used」と出る）。ビルドは通るので無視してよい。ファームの platform は `espressif32@7.0.1` に固定する（2026-09-25 に先行試作がこの版でビルドできることを確認。`ledcSetup` 等の API が版で変わる）。
