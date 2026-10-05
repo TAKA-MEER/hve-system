@@ -44,7 +44,7 @@
 ### 2.1 シールド基板
 
 元資料: 沼津高専 MIRS「RaspberryPi シールド基板の製作」（MIRSMG5D-ELEC-0003）と「RaspberryPi へのデバイス接続」（MIRSMG5D-SYST-0005）。
-[source/README.md](../source/README.md) にリンクがある。
+[source/README.md](../../../source/README.md) にリンクがある。
 
 | 元資料の中身 | 本システムでの扱い |
 | --- | --- |

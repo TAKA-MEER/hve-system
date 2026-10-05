@@ -29,7 +29,7 @@
 | --- | --- |
 | `H-V8` | 実測（`WP-MEAS-01`・`-04`）で [-names.md](DetailedDesign-names.md) §5 の仮値を置き換える |
 | `H-A8` | `WP-MEAS-03` |
-| `H-V6` | `WP-MEAS-02`（**ズーム込み**。取り込みの解像度ごとのラズパイの負荷と遅延も測る）。遅延が大きければ寸動（[operation-ideas.md](../operation-ideas.md) 案 3）を spec に上げる |
+| `H-V6` | `WP-MEAS-02`（**ズーム込み**。取り込みの解像度ごとのラズパイの負荷と遅延も測る）。遅延が大きければ寸動（[operation-ideas.md](../../../operation-ideas.md) 案 3）を spec に上げる |
 
 ## 4. レビュー指摘管理表
 

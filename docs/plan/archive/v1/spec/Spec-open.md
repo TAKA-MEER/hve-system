@@ -19,9 +19,9 @@ th-system 側の関連項目と、この決定による扱い:
 
 | th-system の ID | 内容 | 本システム側の扱い | 出典 |
 | --- | --- | --- | --- |
-| `O-a1` | カメラ昇降が要求する位置決め許容差 | **答えるのは本システム**（`H-V2`）。独立させても、盤前にどこまで正確に止まってほしいかは伝える必要がある（文書で伝える。信号ではない） | th-system [Spec-open.md](../../../../th-system/docs/plan/spec/Spec-open.md) §5.1 |
-| `O-a6` | 昇降・撮影側との正式インターフェース | **通信しない**（本書 §4）。th-system の「作業中」ボタンは試験員の手操作のまま残る。正式な信号に置き換えるかは th-system 側の判断 | th-system [Spec-onsite.md](../../../../th-system/docs/plan/spec/Spec-onsite.md) §7.2 |
-| — | 昇降機が上がったまま機体が動くと、機構損傷・転倒に影響しうる | **走行禁止などの連動は設けない**（本書 §4）。th-system の作業中ボタンも昇降状態とは連動しない（OFF にすればジョグも移動も通る。th-system [Spec-modes.md](../../../../th-system/docs/plan/spec/Spec-modes.md) `SM-3.1.2-062`〜`-066`）。**既知のリスクとして残る** | th-system `th_system_mobility_design_detail.md` §4.4 |
+| `O-a1` | カメラ昇降が要求する位置決め許容差 | **答えるのは本システム**（`H-V2`）。独立させても、盤前にどこまで正確に止まってほしいかは伝える必要がある（文書で伝える。信号ではない） | th-system [Spec-open.md](../../../../../../th-system/docs/plan/spec/Spec-open.md) §5.1 |
+| `O-a6` | 昇降・撮影側との正式インターフェース | **通信しない**（本書 §4）。th-system の「作業中」ボタンは試験員の手操作のまま残る。正式な信号に置き換えるかは th-system 側の判断 | th-system [Spec-onsite.md](../../../../../../th-system/docs/plan/spec/Spec-onsite.md) §7.2 |
+| — | 昇降機が上がったまま機体が動くと、機構損傷・転倒に影響しうる | **走行禁止などの連動は設けない**（本書 §4）。th-system の作業中ボタンも昇降状態とは連動しない（OFF にすればジョグも移動も通る。th-system [Spec-modes.md](../../../../../../th-system/docs/plan/spec/Spec-modes.md) `SM-3.1.2-062`〜`-066`）。**既知のリスクとして残る** | th-system `th_system_mobility_design_detail.md` §4.4 |
 
 ---
 
@@ -52,7 +52,7 @@ th-system 側の関連項目と、この決定による扱い:
 | `H-V3` | 昇降のストローク・速度・全行程の所要時間 | 機構の仕様 ／ 実測 |
 | `H-V4` | 昇降機を最も高くしたときの重心高さと、転倒しない傾き・加速度 | 実測 |
 | `H-V5` | ピッチの可動範囲と、必要な角度の細かさ（ヨーは 360° 回し続けられると決定） | 機構 ／ 撮影要件 |
-| **`H-V6`** | **映像の遅延**（撮ってから画面に出るまで） | 実測。**映像を見て止める操作では、遅延のぶんだけ行き過ぎる**（[operation-ideas.md](../operation-ideas.md)） |
+| **`H-V6`** | **映像の遅延**（撮ってから画面に出るまで） | 実測。**映像を見て止める操作では、遅延のぶんだけ行き過ぎる**（[operation-ideas.md](../../../operation-ideas.md)） |
 | `H-V7` | カメラ部のモバイルバッテリで何時間動くか | 実測。1 日の運用（th-system `Spec.md` G5）に足りるか |
 
 ### 2.4 安全
@@ -65,7 +65,7 @@ th-system 側の関連項目と、この決定による扱い:
 
 ## 3. 先行試作から分かっていること
 
-先行試作はどちらも**動作確認用の単体試作**で、仕様の正ではない。詳細は [source/README.md](../source/README.md)。
+先行試作はどちらも**動作確認用の単体試作**で、仕様の正ではない。詳細は [source/README.md](../../../source/README.md)。
 
 | 分かっていること | 出典 |
 | --- | --- |
@@ -81,14 +81,14 @@ th-system 側の関連項目と、この決定による扱い:
 
 | 日付 | ID | 決定 | 反映先 |
 | --- | --- | --- | --- |
-| 2026-09-25 | — | 開発体制を th-system と同じにする（文書の役割分担・herdr ＋ opencode・受け入れ検査・git 運用） | `CLAUDE.md` ／ [ImplementationPlan.md](../ImplementationPlan.md) §2 |
+| 2026-09-25 | — | 開発体制を th-system と同じにする（文書の役割分担・herdr ＋ opencode・受け入れ検査・git 運用） | `CLAUDE.md` ／ [ImplementationPlan.md](../../../ImplementationPlan.md) §2 |
 | 2026-09-25 | `H-A1` | **th-system から独立させる。通信は最低限、できればしない。**仕様変更を互いに波及させないため | [Spec.md](Spec.md) §4 `HD-1` ／ 本書 §1 |
 | 2026-09-25 | `H-S1` | **操作画面は th-system と別にする** | [Spec.md](Spec.md) §4 `HD-2` |
 | 2026-09-25 | `H-X1` | **走行禁止などの連動は設けない。**hve と th は互いに干渉しない | 本書 §1 ／ [Spec.md](Spec.md) §4 `HD-1` |
 | 2026-09-25 | `H-A2` | **昇降機は専用の ESP32 ＋ MD10C で動かす** | [Spec.md](Spec.md) §5 |
 | 2026-09-25 | `H-A3`・`H-A4` | **カメラ部はラズパイ 4・ヨー＝ステッピングモータ・ピッチ＝サーボ・Web カメラ・モバイルバッテリの無線ユニット** | [Spec.md](Spec.md) §5 |
 | 2026-09-25 | — | **無線は `th-rpi-ap` 経由**（将来名前を変える予定） | [Spec.md](Spec.md) §5 |
-| 2026-09-25 | `H-A5` | `elevator-motor-control` は昇降機の仮動作用プログラム。取り込まず参照に留める | [source/README.md](../source/README.md) |
+| 2026-09-25 | `H-A5` | `elevator-motor-control` は昇降機の仮動作用プログラム。取り込まず参照に留める | [source/README.md](../../../source/README.md) |
 | 2026-09-25 | — | **高さは、操作者がカメラ映像を見ながら上昇させ、よいと思ったところで止める** | [Spec.md](Spec.md) §6 |
 | 2026-09-25 | `H-X2` | **下端はリミットスイッチ。上端は昇降機の下部から上向きの超音波距離計。カメラ部のラズパイに上向きの超音波距離計を付けて天井との衝突を防ぐ** | [Spec-safety.md](Spec-safety.md) §1 |
 | 2026-09-25 | — | **速度は可変でスライダーで変える。設定画面で上昇・下降・ピッチ・ヨー別々に下限・上限・初期値を設定できる** | [Spec-ui.md](Spec-ui.md) |
@@ -106,7 +106,7 @@ th-system 側の関連項目と、この決定による扱い:
 | 2026-09-25 | — | デジタルズームの倍率が全端末で共通になること（画面を開くと他の端末も 1 倍に戻る）は問題なし | [Spec-ui.md](Spec-ui.md) §1.5 |
 | 2026-09-25 | `P-3` | 複数の端末で開いたときは**最後の操作が勝つ**。画面に接続台数を出す | [Spec-ui.md](Spec-ui.md) §1.6 |
 | 2026-09-28 | — | **部品の決定**: 天井の超音波は SRF02（I2C）、高さの超音波は HC-SR04、ピッチは SG90、ヨーは 28BYJ-48 ＋ ULN2003。カメラ部の基板は沼津高専 MIRS のシールド基板（MIRSMG5D-ELEC-0003）を元に作る。Web カメラは未定 | [Spec.md](Spec.md) §5 ／ [DetailedDesign-hardware.md](../detailed/DetailedDesign-hardware.md) |
-| 2026-09-28 | — | 揺れ対策は**実機で揺れを確認してから決める** | [stabilization.md](../stabilization.md) |
+| 2026-09-28 | — | 揺れ対策は**実機で揺れを確認してから決める** | [stabilization.md](../../../stabilization.md) |
 | 2026-09-28 | `H-X8` | 天井の距離計（SRF02）が近すぎて測れないときは「天井が近い」として上昇しない。反射が返らないときは「天井は遠い」として上昇を許し「天井: 範囲外」と出す | [Spec-safety.md](Spec-safety.md) §2 |
 | 2026-09-28 | `P-1` | 同じ方向への連続駆動に上限を設ける。上限は全行程の所要時間の約 1.5 倍、実測までは 10 秒 | [Spec-safety.md](Spec-safety.md) §2 #4b |
 | 2026-09-28 | `P-2` | 上端の閾値が未設定のときは**開発中の動作確認とみなして上昇を許す**（画面に常に出す） | [Spec-safety.md](Spec-safety.md) §2 #2a |

@@ -1,7 +1,7 @@
 # 作業パケット
 
 [DetailedDesign.md](DetailedDesign.md) §5 の詳細。**1 パケット ＝ 1 ブリーフ ＝ 1 ブランチ**
-（[ImplementationPlan.md](../ImplementationPlan.md) §2）。状態は ImplementationPlan §4 で管理する。
+（[ImplementationPlan.md](../../../ImplementationPlan.md) §2）。状態は ImplementationPlan §4 で管理する。
 
 ---
 

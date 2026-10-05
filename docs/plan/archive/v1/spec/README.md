@@ -38,10 +38,10 @@
 | 対象・用語・目標・範囲 | [Spec.md](Spec.md) |
 | **何が決まっていないか** | [Spec-open.md](Spec-open.md) §2 |
 | th-system との関係（独立・通信しない） | [Spec.md](Spec.md) §4 ／ [Spec-open.md](Spec-open.md) §1 |
-| 先行試作から分かっていること | [Spec-open.md](Spec-open.md) §3 ／ [source/README.md](../source/README.md) |
+| 先行試作から分かっていること | [Spec-open.md](Spec-open.md) §3 ／ [source/README.md](../../../source/README.md) |
 | ノード名・ピン・作業パケット | [詳細設計書](../detailed/README.md) |
-| 実装の順番・進捗 | [ImplementationPlan.md](../ImplementationPlan.md) |
-| デモ特例で省略・バイパスしたままの事項 | [EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md) |
+| 実装の順番・進捗 | [ImplementationPlan.md](../../../ImplementationPlan.md) |
+| デモ特例で省略・バイパスしたままの事項 | [EXCEPTION-LEDGER.md](../../../EXCEPTION-LEDGER.md) |
 
 ---
 

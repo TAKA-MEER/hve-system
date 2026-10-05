@@ -20,7 +20,7 @@
 | th-system | 保管場所⇔試験場の移動、盤前への移動・停止、盤前での位置の微調整、機体の非常停止 |
 
 th-system 側でも、カメラ昇降のピッチ・ヨー・高さは範囲外（別担当）とされている
-（th-system [Spec.md](../../../../th-system/docs/plan/spec/Spec.md) §1・[Spec-onsite.md](../../../../th-system/docs/plan/spec/Spec-onsite.md) §7.1）。
+（th-system [Spec.md](../../../../../../th-system/docs/plan/spec/Spec.md) §1・[Spec-onsite.md](../../../../../../th-system/docs/plan/spec/Spec-onsite.md) §7.1）。
 
 **撮影した画像の保存・一覧までを含むかは未定**（[Spec-open.md](Spec-open.md) `H-S2`）。
 
@@ -28,7 +28,7 @@ th-system 側でも、カメラ昇降のピッチ・ヨー・高さは範囲外�
 
 ## 2. 用語
 
-th-system [Spec.md](../../../../th-system/docs/plan/spec/Spec.md) §2 の用語（機体・試験員・試験場・盤 など）をそのまま使う。
+th-system [Spec.md](../../../../../../th-system/docs/plan/spec/Spec.md) §2 の用語（機体・試験員・試験場・盤 など）をそのまま使う。
 ここには本システムで新たに要る語だけを足す。
 
 | 用語 | 意味 |
@@ -44,11 +44,11 @@ th-system [Spec.md](../../../../th-system/docs/plan/spec/Spec.md) §2 の用語�
 
 **未定**（[Spec-open.md](Spec-open.md) `H-G1`）。
 
-th-system 側の目標で、本システムが関わるもの（出典: th-system [Spec.md](../../../../th-system/docs/plan/spec/Spec.md) §3）:
+th-system 側の目標で、本システムが関わるもの（出典: th-system [Spec.md](../../../../../../th-system/docs/plan/spec/Spec.md) §3）:
 
 | th-system の目標 | 本システムとの関係 |
 | --- | --- |
-| **G1** 人・物への接触 0 件、意図しない挙動 0 件 | 本システムにも同じ水準を課すかは未定（`H-G1`）。昇降機が載ることで重心が高くなる予想が th-system 側にある（th-system [Spec-safety.md](../../../../th-system/docs/plan/spec/Spec-safety.md) §3） |
+| **G1** 人・物への接触 0 件、意図しない挙動 0 件 | 本システムにも同じ水準を課すかは未定（`H-G1`）。昇降機が載ることで重心が高くなる予想が th-system 側にある（th-system [Spec-safety.md](../../../../../../th-system/docs/plan/spec/Spec-safety.md) §3） |
 | **G2** カメラ昇降が要求する許容差内に、手動微調整なしで停止できる | **許容差を決めるのは本システム**（`H-V2`）。ヨー・ピッチで向きを直せるぶん緩められる見込み |
 
 ---
@@ -97,7 +97,7 @@ AP の名前は将来変わるので、**名前を変えても設定の書き換
 5. 下降させてから、th-system 側で次の盤へ移動する
 
 操作を補う工夫（映像の遅延を踏まえた速度の切替・ガイド表示など）の案は
-[operation-ideas.md](../operation-ideas.md)（検討メモ。spec ではない）。
+[operation-ideas.md](../../../operation-ideas.md)（検討メモ。spec ではない）。
 
 ---
 
