@@ -63,7 +63,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
   **いま開いている方を環境変数で見分けて使う**:
   `TERM_PROGRAM=Orca`／`ORCA_TERMINAL_HANDLE` があれば orca（`orca worktree create --setup skip --agent opencode`）、
   `HERDR_PANE_ID`／`HERDR_ENV` があれば herdr（`ImplementAgent` タブ・`herdr pane split`）。
-- **何をやるかは ImplementationPlan §6。**先頭から取る（**再設計中は §6 は旧版のもの。v2 の spec が固まるまで新しく取らない**）。
+- **何をやるかは ImplementationPlan §6。**先頭から取る（2026-10-06 に v2 のパケットで書き直した）。
   **取る前に `git log --merges` と突き合わせ、マージ・実機確認・台帳の変更のたびに計画書を更新する**（§2.3「計画書を都度更新する」）。
 - **検証は必ず自分でやる**（§2.2）。**実装エージェントの「テストが緑」報告は信用しない。**
   テストを自分で回し、変異チェックを 1〜2 件は自分で再実行する。

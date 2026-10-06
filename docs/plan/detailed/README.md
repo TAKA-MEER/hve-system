@@ -3,7 +3,7 @@
 [完全設計書](../spec/README.md)（`docs/plan/spec/`）を入力とし、**実装できる形に落とした設計書。**
 
 **本体は [DetailedDesign.md](DetailedDesign.md)。2026-10-06 初版。**
-ユーザー判断待ちの提案が [-open.md](DetailedDesign-open.md) §1 にある。旧版は [archive/v1/detailed/](../archive/v1/detailed/README.md)。
+提案 `P-5`〜`P-10` は 2026-10-06 にすべて採用（[-open.md](DetailedDesign-open.md) §1）。旧版は [archive/v1/detailed/](../archive/v1/detailed/README.md)。
 
 **既存コードのコメントにある `docs/plan/detailed/…` への参照は旧版を指して書かれた。**v2 で同じファイル名を使っているので、
 パケットで触ったファイルから v2 に直していく（[-packets.md](DetailedDesign-packets.md) §0）。

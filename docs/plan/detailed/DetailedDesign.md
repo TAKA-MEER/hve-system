@@ -3,7 +3,7 @@
 [完全設計書](../spec/Spec.md) を実装できる形に落とす。読み方は [README.md](README.md)。旧版は [archive/v1/detailed/](../archive/v1/detailed/DetailedDesign.md)。
 
 **2026-10-06 初版。**ユーザーから詳細設計を任された。**spec に無い振る舞いは勝手に決めていない**
-——決める必要があったものは [-open.md](DetailedDesign-open.md) §1 に**提案**として置いた。
+——決める必要があったものは [-open.md](DetailedDesign-open.md) §1 に**提案**として置き、2026-10-06 にすべて採用された。
 
 > **既存コードのコメントにある `docs/plan/detailed/…` への参照は旧版（v1）を指す。**v1 と v2 で同じファイル名を使っているので、
 > コメントのリンクは黙って v2 の別の中身を指す。**パケットで触ったファイルは、コメントの参照を v2 に直す**（[-packets.md](DetailedDesign-packets.md) §0）。

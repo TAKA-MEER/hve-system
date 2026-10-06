@@ -90,3 +90,5 @@ ID の付け方は旧版と同じ `H-<分類><番号>`（[archive/v1/spec/Spec-o
 | 2026-10-06 | `H-X7` | 物理非常停止でカメラモジュールが止まらないのは問題なし（MG996R でも） | [Spec-safety.md](Spec-safety.md) §4 |
 | 2026-10-06 | `H-X9`（経過） | **距離計・スイッチとも実用的なハードが無いので、上端の検知は一時無効にする** | [Spec-safety.md](Spec-safety.md) §1.1 ／ [EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md) `W-1` |
 | 2026-10-06 | `H-V9` | デジタルズームの切り出し元は 1080p（UnitV2 のデータシート）の前提で進める | [Spec-ui.md](Spec-ui.md) §1.5 |
+| 2026-10-06 | — | 上端の検知が無効の間、高さは表示と配信だけに使う（確認） | [Spec-safety.md](Spec-safety.md) §1.1 |
+| 2026-10-06 | `P-5`・`P-8`・`P-9`・`P-10` | 詳細設計の提案を採用: 2 つ目の上部モジュールの接続は新しい方に置き換える ／ 途絶でピッチは保つ・再起動でピッチが初期角へ跳ぶのは受け入れる ／ 取って代わられた側が離しても止まらない ／ カメラモジュールの画面に昇降部の画面の接続数も出す | [Spec-module.md](Spec-module.md) §1・§4 ／ [Spec-safety.md](Spec-safety.md) §4 ／ [Spec-ui.md](Spec-ui.md) §1.6 |
