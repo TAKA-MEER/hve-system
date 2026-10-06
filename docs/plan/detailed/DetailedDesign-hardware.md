@@ -32,7 +32,7 @@ v2 で変わるのは **HC-SR04 の値を判定に使わない**ことだけ（`
 | --- | --- | --- |
 | SoC | SigmaStar SSD202D（Cortex-A7 2 コア 1.2 GHz） | M5 文書（製品ページ） |
 | メモリ・記憶 | 128 MB DDR3 ／ 512 MB NAND | 同 |
-| カメラ | GC2145「1080P」・画角 68° | 同（**実際に取り込める解像度と fps は要確認**） |
+| カメラ | GC2145「1080P」・画角 68° | 同（**実機では 1920×1080 が取れない**。§2.1.1） |
 | 無線 | 2.4 GHz 802.11 b/g/n | 同 |
 | 電源 | 5 V・500 mA（USB Type-C） | 同 |
 | Python | **3.8**（Jupyter Notebook 付き）。OpenCV が使える | M5 文書（Jupyter Notebook の頁） |
@@ -45,17 +45,27 @@ v2 で変わるのは **HC-SR04 の値を判定に使わない**ことだけ（`
 出典: <https://docs.m5stack.com/en/unit/unitv2>・<https://docs.m5stack.com/en/guide/ai_camera/unitv2/jupyter_notebook>・
 <https://docs.m5stack.switch-science.com/en/guide/ai_camera/unitv2/base_functions>（2026-10-06 に確認）。
 
-### 2.1.1 UnitV2 で要確認（`WP-MEAS-06`）
+### 2.1.1 UnitV2 の実機調査の結果（`WP-MEAS-06`。2026-10-06）
 
-| 項目 | なぜ要るか | 決まらなかったとき |
+PC から USB の有線（`10.254.239.1`）と SSH で調べた。**機器に残る変更はしていない**（組み込みのサービスは一度止めて、元どおり起動し直した）。
+
+| 項目 | 結果 | 設計への影響 |
 | --- | --- | --- |
-| **組み込みのサービスの止め方と自動起動の外し方** | サービスが `/dev/video0` と `/dev/ttyS1` を使う（UART へ JSON を出し続ける） | **設計を見直す（ユーザーに相談）** |
-| **既存の AP に繋ぐ（STA）設定のしかた** | `th-rpi-ap` に乗せる（spec） | **設計を見直す（ユーザーに相談）**。spec の無線の決定に関わる |
-| **Grove の UART の電圧とピンの並び** | **UNO の TX は 5 V。UnitV2 が 3.3 V なら直結で壊れる**（§2.3） | 確認できるまで分圧を入れる |
-| 1080p の取り込みの fps、1080p 取り込み＋切り出し＋480p の JPEG での CPU・メモリ | [DetailedDesign.md](DetailedDesign.md) §4.4 | 同節の順に下げる |
-| `pip` があるか・`aiohttp`・`zeroconf`・`pyserial` を入れられるか（インターネットのある無線で準備できるか） | アプリの依存 | 開発機から持ち込む。**C 拡張が入らず持ち込みでも動かなければ、設計を見直す（ユーザーに相談）** |
-| `.local` の名前解決ができるか | [DetailedDesign.md](DetailedDesign.md) §4.6（できなくてもアプリが自分で引く） | — |
-| 自動起動の仕組み（init の種類）・アプリを動かすユーザー・書ける場所と空き容量 | 配備（`WP-CAM-05`） | — |
+| OS・Python | Linux 4.9.84（armv7l）・glibc・BusyBox。**Python 3.8.6** | `DD-7` のとおり |
+| 入っている依存 | **`aiohttp` 3.6.2・`pyserial` 3.4・OpenCV 3.4.9・numpy 1.16.4・PyYAML 5.3.1**（`zeroconf`・`tomli` は無い） | **OS のものをそのまま使う**。ホストの `.venv38` も同じ版に揃える（[-names.md](DetailedDesign-names.md) §1） |
+| 依存の追加 | `m5stack` の `pip3` は権限エラーで動かない。**純 Python の wheel はアプリの置き場に展開して `PYTHONPATH` で読める**（`tomli` で確認）。UnitV2 からインターネットへは出ない（`th-rpi-ap` の既定経路の先が無い） | 足すのは純 Python のものだけ・開発機で落として展開して持ち込む。**C 拡張の追加は避ける** |
+| 権限 | **`/dev/video0`・`/dev/ttyS1`・`/dev/null` まで root だけ**が読み書きできる。`sudo` は `m5stack` のパスワードで通る | アプリは **root で動かす**（組み込みのサービスと同じ） |
+| 組み込みのサービス | `/etc/init.d/S85runpayload` が `python3 server.py` を起動し、その子の `server_core.py` が **:80（Flask）と `/dev/ttyS1`（115200）** を持つ。カメラは選んだ機能のときだけ `bin/` の別プログラムが使う。**`server.py`・`server_core.py` の 2 つを止めると :80 が空く**（確認） | 配備では `S85runpayload` を自動起動から外す（`WP-CAM-05`）。**`S85runpayload stop` は `killall -9 python3` で温度監視（`check_thermal.py`）まで止めるので使わない** |
+| 自動起動 | BusyBox の init が `/etc/init.d/S??*` を順に起動する | アプリの起動は `S86hve` のような init スクリプトにする |
+| 既存の AP（STA） | **すでに `th-rpi-ap` に繋がっている**（`wlan0`・DHCP で `192.168.5.129`・`/etc/wpa_supplicant.conf`）。aiohttp の HTTP・WS を :80 で出し、**PC から無線で届いた**（WS の往復 中央値 6.6 ms・最大 12.6 ms） | 決まり |
+| **自前の AP** | **同時に `hostapd` が AP `M5UV2_4afd` を `wlan1` で出している**（`th-rpi-ap` と同じ 1 ch・20 MHz） | **`th-rpi-ap` の帯域を食いうる（spec `H-A8`）。配備で止めるかをユーザーに確認**（[-open.md](DetailedDesign-open.md) `P-11`） |
+| `.local` の名前解決 | Python（glibc）からは `.local` を引けない（nss-mdns が無い）。`avahi-daemon` と `avahi-resolve-host-name` はあるが、**`/etc/avahi/avahi-daemon.conf` の `allow-interfaces=eth0, wlan1` で `wlan0`（`th-rpi-ap`）を見ていない** | `zeroconf` をやめ、**avahi の `allow-interfaces` に `wlan0` を足し、アプリは `avahi-resolve-host-name -4` で引く**（[DetailedDesign.md](DetailedDesign.md) §4.6・`P-12`） |
+| **カメラの解像度** | **1920×1080 は取れない**（要求すると 1280×720 になる）。取れたのは 640×480（約 15 fps）・**1280×720（約 20 fps）**・**1600×1200（約 4.7 fps）** | **spec `H-V9`（1080p の前提）が成り立たない。ユーザーに確認**（spec `H-V10`） |
+| 映像の負荷 | 1 スレッドで 取り込み → 中央の切り出し → 480p へ縮小 → JPEG（品質 60）: **1280×720 で 約 5〜13 fps**（縮小の方式による。取り込みの 1 枚に約 46 ms、処理に 33〜85 ms）。1600×1200 で 約 3.6〜5 fps。**そのあいだ CPU 1 コアが 100 %**。メモリは最大 74 MB・空き 75 MB。温度 72〜74 ℃ | 取り込みと処理を別スレッドにすれば 1280×720 で約 10 fps の見込み（未測定）。[DetailedDesign.md](DetailedDesign.md) §4.4 |
+| 温度 | `check_thermal.py` が 95 ℃ 以上で CPU を省電力にし、組み込みのサービスを止める（自前のアプリは止めない） | 長時間の負荷は `WP-MEAS-02`・`05` で見る |
+| 書ける場所 | ルート 117 MB 空き（UBIFS）・SD カード `/media/sdcard`（14.5 GB 空き。カードが挿さっていれば） | アプリはルートに置ける大きさ |
+| **Grove の UART の電圧とピンの並び** | **未確認**（テスタと UNO が要る。ユーザーに依頼） | **確認できるまで分圧を入れる**（§2.3） |
+| UNO との往復・115200 で化けないか | **未確認**（UNO をつないでから） | `IO_BAUD` は仮のまま |
 
 ### 2.2 Arduino UNO のピン
 

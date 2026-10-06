@@ -30,7 +30,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 | ID | 段階 | 内容 | 先に要るもの | 実機 |
 | --- | --- | --- | --- | --- |
-| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める） | — | 要（UnitV2・UNO） |
+| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める）。**2026-10-06 に UART の電圧・UNO との往復を除いて実施** | — | 要（UnitV2・UNO） |
 | `WP-BASE-02` | 0 | `.venv38`・`firmware/cam_io` の骨格・`CLAUDE.md` のビルドと試験の節 | — | 不要 |
 | `WP-LIFT-03` | 1 | `lift_core` v2（`ceiling_check`・`LiftArbiter`・`lift_settings`・判定の変更・`W-1`・`cmd_codec`） | BASE-02 | 不要 |
 | `WP-LIFTUI-01` | 1 | 昇降部の画面・`tools/fake_lift_server.py`・`tools/lift_probe.py` の v2 化 | LIFT-03（取り決めの確定） | 不要 |
@@ -45,6 +45,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
+**2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
 
 ## 2. パケットの中身
 
@@ -56,7 +57,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   2. `th-rpi-ap` に STA で繋がり、再起動しても繋がること
   3. **Grove の UART の電圧（テスタ）とピンの並び**。UNO と分圧を挟んでつなぎ、`M`・`C` 相当の行が往復すること（115200 で化けないか）
   4. OpenCV で 1920×1080 を取り込み、中央の切り出し＋480p の JPEG で何 fps 出るか・CPU・メモリ（旧版の `hve_video` を手で動かしてよい）
-  5. `aiohttp`・`pyserial`・`zeroconf` を Python 3.8 に入れられるか
+  5. `aiohttp`・`pyserial`（と名前解決の手段）を Python 3.8 で使えるか
 - 受け入れ: -hardware.md §2.1.1 の全行に結果か「できない」が書かれている。[DetailedDesign.md](DetailedDesign.md) §4.4 の「下げる順」をどこまで使ったかが書かれている
 
 ### `WP-BASE-02` 土台 v2

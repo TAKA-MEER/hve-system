@@ -30,9 +30,10 @@
 | `camera/hve_camera/uno_link.py` | `encode_io_cmd`・`parse_io_line`・`UnoClock`（[-protocol.md](DetailedDesign-protocol.md) §5） |
 | `camera/hve_camera/hw/uno_hw.py` | 実物の Arduino との UART（`pyserial`）。**旧版の `hw/rpi_hw.py` を置き換える**（`rpi_hw.py` と `test_rpi_hw.py` は消す。v1 の中身は git の履歴に残る） |
 | `camera/hve_camera/hw/fake_lift.py` | 偽の昇降部（v2 の取り決めを話す。プロセス内） |
-| `camera/hve_camera/lift_resolve.py` | 昇降部の名前を引く（`lift_host` が空なら `zeroconf` で `hve-lift.local`） |
-| `camera/requirements.txt` ／ `requirements-dev.txt` | UnitV2 で入れるもの（`aiohttp`・`pyserial`・`zeroconf`。**Python 3.8 で入る版に固定**） ／ ホストの試験用 |
-| `camera/deploy/` | UnitV2 の自動起動の設定（中身は `WP-MEAS-06` の結果で決める） |
+| `camera/hve_camera/lift_resolve.py` | 昇降部の名前を引く（`lift_host` が空なら `avahi-resolve-host-name -4` で `hve-lift.local`） |
+| `camera/requirements.txt` ／ `requirements-dev.txt` | UnitV2 の OS に入っている版（`aiohttp==3.6.2`・`pyserial==3.4`・numpy 1.16.4・OpenCV 3.4 系）に揃えて固定 ／ ホストの試験用（`pytest-aiohttp` も aiohttp 3.6 で動く版）。**UnitV2 へは入れない**（OS のものを使う） |
+| `camera/vendor/` | UnitV2 へ持ち込む純 Python の依存（wheel を展開したもの。いまは `tomli` だけ）。アプリは `PYTHONPATH` に足して読む |
+| `camera/deploy/` | UnitV2 の配備: `S86hve`（init スクリプト。root で `hve_camera` と `hve_video` を起動）・avahi の設定の差分（`P-12`）・組み込みのサービスを外す手順 |
 | `tools/fake_lift_server.py` | 偽の昇降部（単体のプロセス）。昇降部の画面・`/ws/ui`・`/ws/module`・設定 API を出す（[DetailedDesign.md](DetailedDesign.md) §4.2） |
 | `tools/lift_probe.py` | 旧版の道具を v2 の取り決め（`/ws/module`・`hello`・`hold`/`release`）に直す |
 | `.venv38/` | Python 3.8 の試験環境（gitignore。[DetailedDesign.md](DetailedDesign.md) §4.7） |
@@ -60,7 +61,7 @@
 | 名前 | 何か |
 | --- | --- |
 | `hve-lift` | 昇降部 ESP32 の mDNS 名（旧版と同じ） |
-| `hve-cam` | カメラモジュール（UnitV2）の名前。`hello` の `name` に使う。mDNS で名乗れるかは `WP-MEAS-06` |
+| `hve-cam` | カメラモジュール（UnitV2）の名前。`hello` の `name` に使う（UnitV2 の mDNS 名は `unitv2` のまま。変えるかは決めていない） |
 | `hve_cam_io` | Arduino のファームの名前（`B` 行の `fw` と一緒に出す） |
 
 **AP の SSID はコードに直書きしない**（ESP32 は `secrets.h`、UnitV2 は OS の無線設定）。
@@ -143,10 +144,10 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `pitch_min_deg` / `pitch_max_deg` | -45 / 45 | **仮**（`H-V5`・`H-X5`。MG996R で見直す） |
 | `axis_speed_abs_max_dps` | 60 | 旧版（28BYJ-48 の実用の上限の下側） |
 | `yaw_steps_per_rev` | 4096 | 旧版（半ステップ） |
-| `video_capture_width` / `video_capture_height` | 1920 / 1080 | spec `H-V9`（**UnitV2 で取れるかは `WP-MEAS-06`**） |
+| `video_capture_width` / `video_capture_height` | 1280 / 720 | **仮**（実機で 1920×1080 は取れない。spec `H-V10` の答えで決める） |
 | `video_out_height` | 480 | spec `H-V9` |
-| `video_fps` / `video_jpeg_quality` | 10 / 60 | **仮**（旧版。`WP-MEAS-06` で UnitV2 の負荷を見て決める） |
-| `settings_path` | `~/hve_data/settings.json` | 旧版（**ピッチ・ヨーの 2 軸だけを保存する**。書ける場所は `WP-MEAS-06`） |
+| `video_fps` / `video_jpeg_quality` | 10 / 60 | **仮**（旧版。1280×720 なら取り込みと処理を分けて約 10 fps の見込み。`WP-VIDEO-02` で測る） |
+| `settings_path` | `/home/m5stack/hve_data/settings.json` | 実機調査（root で動かすので `~` を使わない。ルートに 117 MB 空き）。**ピッチ・ヨーの 2 軸だけを保存する** |
 
 ### 5.4 Arduino（`firmware/cam_io/`）
 

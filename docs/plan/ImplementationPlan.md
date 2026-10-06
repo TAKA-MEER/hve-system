@@ -203,7 +203,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 
 | ID | 段階 | 状態 |
 | --- | --- | --- |
-| `WP-MEAS-06` | 0 | 未着手 |
+| `WP-MEAS-06` | 0 | **一部実施**（2026-10-06。UART の電圧・ピンの並び・UNO との往復が残り。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
 | `WP-BASE-02` | 0 | 未着手 |
 | `WP-LIFT-03` ／ `WP-LIFTUI-01` ／ `WP-LIFT-04` | 1 | 未着手 |
 | `WP-IO-01` ／ `WP-IO-02` | 2 | 未着手 |
@@ -229,7 +229,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 | # | 作業 | 状態 |
 | --- | --- | --- |
 | ~~0~~ | ~~v2 の spec・詳細設計の初版・提案 `P-5`〜`P-10`~~ | 2026-10-06 |
-| 1 | **`WP-MEAS-06`（UnitV2 の実機調査）** ／ `WP-BASE-02` ／ モバイルバッテリの選定（`D-9`） | 未着手 |
+| 1 | `WP-MEAS-06` の残り（UART の電圧・ピンの並び・UNO との往復）／ `WP-BASE-02` ／ モバイルバッテリの選定（`D-9`）／ **ユーザー判断: `H-V10`（取り込みの解像度）・`P-11`・`P-12`** | `WP-MEAS-06` は一部実施 |
 | 2 | `WP-LIFT-03` ／ `WP-IO-01` | 未着手 |
 | 3 | `WP-LIFTUI-01` ／ `WP-CAM-04`（`WP-MEAS-06` の 1・2・5 が通ってから） | 未着手 |
 | 4 | `WP-LIFT-04` ／ `WP-IO-02` ／ `WP-VIDEO-02` ／ `WP-UI-02` | 未着手 |
