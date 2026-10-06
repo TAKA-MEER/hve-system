@@ -46,7 +46,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 ### th-system との境界
 
 - **th-system から独立させる。通信しない・走行禁止などの連動も設けない**（ユーザー決定 2026-09-25。
-  [Spec.md](docs/plan/archive/v1/spec/Spec.md) §4 `HD-1`）。互いの仕様変更を波及させないため。
+  旧版 [Spec.md](docs/plan/archive/v1/spec/Spec.md) §4 `HD-1`。v2 にも引き継ぐ: [Spec-open.md](docs/plan/spec/Spec-open.md) §1）。互いの仕様変更を波及させないため。
   **th-system と信号をやり取りする設計・実装を持ち込まない。**要りそうになったら、先にユーザーに確認して spec を直す。
 - 共有するのは機体と無線 AP（`th-rpi-ap`。将来名前が変わる）だけ。**AP 名をコードに直書きしない。**
 - **th-system のリポジトリは、ユーザーの指示があるときだけ編集する。**別の正本と運用ルールを持つので、
@@ -63,7 +63,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
   **いま開いている方を環境変数で見分けて使う**:
   `TERM_PROGRAM=Orca`／`ORCA_TERMINAL_HANDLE` があれば orca（`orca worktree create --setup skip --agent opencode`）、
   `HERDR_PANE_ID`／`HERDR_ENV` があれば herdr（`ImplementAgent` タブ・`herdr pane split`）。
-- **何をやるかは ImplementationPlan §6。**先頭から取る。
+- **何をやるかは ImplementationPlan §6。**先頭から取る（**再設計中は §6 は旧版のもの。v2 の spec が固まるまで新しく取らない**）。
   **取る前に `git log --merges` と突き合わせ、マージ・実機確認・台帳の変更のたびに計画書を更新する**（§2.3「計画書を都度更新する」）。
 - **検証は必ず自分でやる**（§2.2）。**実装エージェントの「テストが緑」報告は信用しない。**
   テストを自分で回し、変異チェックを 1〜2 件は自分で再実行する。
