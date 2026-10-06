@@ -39,9 +39,10 @@
 | `press` | 押し始めごとに送り手が 1 増やす整数（接続ごとに独立）。**その接続で前に見た値より大きければ「新しい押し始め」**（§3.3） |
 | `dir` | `up` / `down` / `stop` |
 | `duty` | 0〜100 の整数 [%]。MD10C の PWM デューティ比。**昇降部は設定の下限〜上限に丸めない**（丸めは送り手の画面の役。昇降部は 0〜`LIFT_DUTY_ABS_MAX_PCT` に丸める） |
-| `ceiling` | **距離計を持つ接続の `hold` だけ**意味を持つ。`status` は `MEASURED` / `TOO_NEAR` / `NO_ECHO` / `READ_ERROR`。`mm` は `MEASURED` のときだけ。`age_ms` は送るその瞬間の読み値の古さ。**欠けている・読めない・知らない `status` は `CEILING_STALE`** |
+| `ceiling` | **距離計を持つ接続の `hold` だけ**意味を持つ。`status` は `MEASURED` / `TOO_NEAR` / `NO_ECHO` / `READ_ERROR`。`mm` は `MEASURED` のときだけ。`age_ms` は送るその瞬間の読み値の古さ。**欠けている・読めない・知らない `status`・型の違う中身は、`hold` を捨てずに `MISSING`（→ `CEILING_STALE`）として受け取る**（捨てると前の `hold` の値で最長 `LIFT_CMD_TIMEOUT_MS` 動き続けるので、その場で止める） |
 
-**読めない JSON・知らない `t`・型の違うフィールドを含む `hold` は捨てる**（持ち主の `hold` が途絶えれば `LIFT_CMD_TIMEOUT_MS` で止まる）。
+**読めない JSON・知らない `t`・`ceiling` 以外のフィールドが欠けている・型の違う `hold` は捨てる**（持ち主の `hold` が途絶えれば `LIFT_CMD_TIMEOUT_MS` で止まる）。
+**`/ws/ui` で `hello` を受けたら、昇降部はその接続を閉じる**（[DetailedDesign.md](DetailedDesign.md) §3.1）。
 **読めない `release` も捨てる。**読めない `hello` は「`ceiling_sensor: true`」として扱う（その接続で `hello` を受けたことにする）。
 
 ### 2.2 昇降部 → 画面・上部モジュール
@@ -111,3 +112,4 @@ ASCII の 1 行 1 メッセージ。区切りは空白 1 つ、行末は `\n`。
 **古さの測り方（`UnoClock`）**: 行を受け取るたびに `d = 受け取った時刻 − uno_ms` を記録し、直近 `uno_clock_window` 行の `d` の最小を `offset` とする。
 読み値の古さ ＝ 今 −（`uno_ms` ＋ `offset`）。`uno_ms` が前の行より小さくなった・`B` を受けたら、記録を捨ててやり直す。
 **読むたびに受信バッファを全部読み出し**、天井は最も新しい `uno_ms` の行だけを使う。
+**前回読んでから `ceiling_read_stale_ms` より長く空いたら、その回の行はすべて捨てる**（次の回に読めた行が来るまで `READ_ERROR`。[DetailedDesign.md](DetailedDesign.md) §3.5）。

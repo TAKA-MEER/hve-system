@@ -131,7 +131,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | 名前 | 値 | 出どころ |
 | --- | --- | --- |
 | **`lift_host`** | `""`（空なら mDNS で `lift_mdns_name` を引く） | [DetailedDesign.md](DetailedDesign.md) §4.6 |
-| **`lift_mdns_name`** / **`lift_port`** / **`lift_ws_path`** | `hve-lift` / 80 / `/ws/module` | 同・[-protocol.md](DetailedDesign-protocol.md) §1 |
+| **`lift_mdns_name`** / **`lift_port`** | `hve-lift` / 80 | 同・[-protocol.md](DetailedDesign-protocol.md) §1 |
+| **`LIFT_WS_MODULE_PATH`** | `camera/hve_camera/lift_link.py` の定数 | `/ws/module`。**`params.toml` に置かない**（[DetailedDesign.md](DetailedDesign.md) §3.1。書き間違えて `/ws/ui` に繋ぐと天井の守りが外れる） |
 | **`module_name`** / **`module_ceiling_sensor`** | `hve-cam` / `true` | [DetailedDesign.md](DetailedDesign.md) §3.1（**常に `true`。センサの調子から計算しない**） |
 | **`io_device`** / **`io_baud`** | `/dev/ttyS1` / 115200 | M5 文書（[-hardware.md](DetailedDesign-hardware.md) §2.1）。`io_baud` は Arduino の `IO_BAUD` と揃える |
 | **`io_cmd_period_ms`** | 50 | **仮** |
@@ -176,6 +177,6 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `LIFT_WS_PATH` | `/ws` | `LIFT_WS_UI_PATH` / `LIFT_WS_MODULE_PATH` |
 | `ceiling_permission` | カメラ部の天井の許可の計算 | 廃止（昇降部の `ceiling_check`） |
 | `ceiling_margin_mm` / `ceiling_stale_ms` | カメラ部のパラメータ | `CEILING_MARGIN_MM` / `CEILING_STALE_MS`（昇降部） |
-| `lift_ws_url` | 昇降部の WS の URL | `lift_host` / `lift_mdns_name` / `lift_port` / `lift_ws_path` |
+| `lift_ws_url` | 昇降部の WS の URL | `lift_host` / `lift_mdns_name` / `lift_port`（パラメータ）と `LIFT_WS_MODULE_PATH`（定数） |
 | `rpi_hw.py` の定数（`SG90_*`・`YAW_*`・`SRF02_*`・`LGPIO_CHIP`・`PWM_BASE` 等） | ラズパイの実物 | 廃止（ヨー・ピッチ・天井は Arduino） |
 | `srf02_i2c_addr` / `srf02_ranging_wait_ms` | カメラ部のパラメータ | Arduino の `SRF02_ADDR` / `SRF02_PERIOD_MS` |

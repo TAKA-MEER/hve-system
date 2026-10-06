@@ -37,13 +37,14 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-04` | 1 | ESP32 の実物 v2（WS の 2 つの口・HTTP の設定 API・NVS・画面の埋め込み） | LIFT-03・LIFTUI-01 | 要（昇降部） |
 | `WP-IO-01` | 2 | `io_core`（行・ウォッチドッグ・丸め・刻み）とホスト試験 | BASE-02 | 不要 |
 | `WP-IO-02` | 2 | UNO の実物（Timer2・`Servo`・`Wire`・ウォッチドッグ） | IO-01 | 要（UNO・モータ・SRF02） |
-| `WP-CAM-04` | 3 | カメラモジュールのアプリを Python 3.8 へ移し、v2 の取り決めにする（`uno_link`・`uno_hw`・`lift_link`・設定の中継・偽物のモード） | BASE-02・LIFT-03 | 不要 |
+| `WP-CAM-04` | 3 | カメラモジュールのアプリを Python 3.8 へ移し、v2 の取り決めにする（`uno_link`・`uno_hw`・`lift_link`・設定の中継・偽物のモード） | BASE-02・LIFT-03・**MEAS-06 の 1・2・5** | 不要 |
 | `WP-VIDEO-02` | 3 | 映像を UnitV2 の取り込みに合わせる | MEAS-06 | 要（UnitV2） |
 | `WP-UI-02` | 3 | カメラモジュールの画面を v2 にする | CAM-04 | 不要（偽物のモード） |
 | `WP-CAM-05` | 3 | UnitV2 への配備・自動起動・実機の結合 | MEAS-06・CAM-04・VIDEO-02・UI-02・IO-02・LIFT-04 | 要（全部） |
 | `WP-MEAS-01`〜`05` | 4 | 旧版と同じ（ストローク・遅延・無線の圧迫・古さと天井の余裕・電池） | 各実物 | 要 |
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
+**`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
 
 ## 2. パケットの中身
 
@@ -79,6 +80,9 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   8. ※ 持ち主が替わったら連続駆動の時間を数え直す
   9. `validate_lift_settings` が `min > init` を通す
   10. ※ `/ws/ui` の接続の上昇で天井の値を求める（spec #4c に反して単体操作で上昇できなくなる）
+  11. `/ws/ui` で `hello` を受けても接続を続ける
+  12. ※ 途絶（`CMD_TIMEOUT`）・`release`・`OWNER_GONE` で止まったあと、同じ接続の同じ `press` の `hold` で動き出す
+  13. ※ `ceiling` が型の違う `hold` を捨てる（前の `hold` の値で動き続ける）
 
 ### `WP-LIFTUI-01` 昇降部の画面
 
@@ -108,8 +112,10 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §3・§4.3・§4.6、[-protocol.md](DetailedDesign-protocol.md) §2・§4・§5、[-names.md](DetailedDesign-names.md) 全部
 - 作るもの: 3.8 への書き直し・`classify_srf02`・`uno_link.py`・`hw/uno_hw.py`・`lift_link.py` v2・`lift_resolve.py`・設定の中継・偽物のモード v2。`hw/rpi_hw.py` と `test_rpi_hw.py` を消す
+- **`press` を増やすきっかけ**: 昇降部へ送る昇降の操作が「押し始め」になったとき＝`control.py` の動かす軸が `lift_*` 以外から `lift_*` に替わったとき、`lift_up` と `lift_down` が入れ替わったとき、別の画面（ブラウザの接続）の `hold` に替わったとき
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` が成功。**次の変異が赤**:
   1. `UnoClock` を使わず、受け取った時刻を読み値の時刻にする（溜まった古い行が新しく見える試験で縛る）
+  1b. 前回の読み出しから `ceiling_read_stale_ms` より空いたときに、その回の行を捨てない（**受信バッファが溢れて新しい側の行が無い**場合の試験で縛る。窓の全行が遅れた行でも赤になること）
   2. 読むたびの全部の読み出しをやめ 1 行ずつ処理する
   3. `hello` の `ceiling_sensor` を天井の読み値の調子から計算する
   4. 昇降を離したときに `release` を送らない
