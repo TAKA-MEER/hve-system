@@ -48,7 +48,7 @@
 | **[Spec.md](Spec.md)** | **本体。**対象・用語・目標・設計思想・全体構成・目次 | 初版 |
 | **[Spec-open.md](Spec-open.md)** | **未確定事項・決定の記録・旧版からの引き継ぎ** | 更新中 |
 | [Spec-module.md](Spec-module.md) | 昇降部と上部モジュールの取り決め | 初版 |
-| [Spec-safety.md](Spec-safety.md) | 上下端と天井（検知手段・止め方） | 初版（上端 `H-X9` が未定） |
+| [Spec-safety.md](Spec-safety.md) | 上下端と天井（検知手段・止め方） | 初版（上端の検知は一時無効・`H-X9` 未定） |
 | [Spec-ui.md](Spec-ui.md) | 操作画面（カメラモジュールの画面・昇降部の画面） | 初版 |
 | [mockup/index.html](mockup/index.html) | カメラモジュールの画面の見た目（旧版から写した） | 旧版のまま |
 
