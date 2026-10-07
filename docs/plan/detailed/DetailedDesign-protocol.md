@@ -13,7 +13,8 @@
 | カメラモジュール → 昇降部 | WS `/ws/module` | `hello`（繋いだら 1 度）・`hold` / `release` | 昇降を動かしている間 `lift_cmd_period_ms` ごと。**止まっている間は送らない** | 同上 |
 | 昇降部 → 両方 | `/ws/ui`・`/ws/module` | `state` | `LIFT_STATE_PERIOD_MS` | 画面: `ui_state_timeout_ms`、カメラモジュール: `lift_state_timeout_ms` 届かなければ「接続切れ」／`LINK_LOST` |
 | ブラウザ ⇔ カメラモジュール | WS `/ws` | 旧版と同じ（`hold` / `release` / `zoom` ／ `state`） | 旧版と同じ | 旧版と同じ |
-| カメラモジュール → ブラウザ | HTTP `:8080`（`hve_video`） | 映像（MJPEG） | `video_fps` | — |
+| カメラモジュール → ブラウザ | HTTP `:8080/stream`（`hve_video`） | 映像（MJPEG・480p） | `video_fps` | — |
+| カメラモジュール → ブラウザ | HTTP `GET :8080/snapshot`（`hve_video`） | **静止画**（カメラの JPEG 1280×720 そのまま。spec `H-U9`） | 静止画のボタンを押したときだけ | 無ければ 503 |
 | UnitV2 → Arduino | UART（`/dev/ttyS1`・`IO_BAUD`） | `M` 行 | **常に `io_cmd_period_ms` ごと**（止まっている間も。生存確認を兼ねる） | Arduino: `IO_CMD_TIMEOUT_MS` 届かなければヨーを止める（[DetailedDesign.md](DetailedDesign.md) §3.4） |
 | Arduino → UnitV2 | 同上 | `C` 行（天井の測定ごと）・`B` 行（起動時） | 測定ごと（`SRF02_PERIOD_MS`） | UnitV2: `UnoClock` で直した古さ（§5） |
 

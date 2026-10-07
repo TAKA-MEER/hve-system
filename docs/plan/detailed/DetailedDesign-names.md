@@ -55,6 +55,10 @@
 | `encode_io_cmd` ／ `parse_io_line` | `camera/hve_camera/uno_link.py` | `M` 行を作る ／ `C`・`B` 行を読む（読めなければ `None`） |
 | `UnoClock` | 同 | Arduino の時計を UnitV2 の時計へ直す（[-protocol.md](DetailedDesign-protocol.md) §5） |
 | `resolve_lift_host` | `camera/hve_camera/lift_resolve.py` | 昇降部の IP を返す（引けなければ `None`） |
+| **`MjpegPipeSource`** | `camera/hve_video/sources.py` | 実物のカメラ。`v4l2-ctl … --stream-mmap=4 --stream-to=-` を子プロセスで動かし、区切った最新の 1 枚を持つ（[DetailedDesign.md](DetailedDesign.md) §4.4）。**旧版の `V4L2Source`（OpenCV）を置き換える** |
+| **`split_mjpeg`** | 同 | `split_mjpeg(buf)` → `(区切れた JPEG のリスト, 残りのバイト列)`。`FFD8` より前のバイト（`v4l2-ctl` の文字など）は捨てる。純関数（ホストで試験） |
+| **`latest_jpeg`** | 同（`MjpegPipeSource`・`FakeSource` のメソッド） | 最後の 1 枚をカメラの JPEG のまま返す（無ければ `None`）。`FakeSource` は絵をその場で JPEG にする |
+| **`/snapshot`** | `camera/hve_video/server.py` | `GET`。`latest_jpeg()` をそのまま返す（`image/jpeg`・`Cache-Control: no-store`）。無ければ 503（[-protocol.md](DetailedDesign-protocol.md) §1） |
 
 ## 2. 機器・ホスト名
 
@@ -144,9 +148,11 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `pitch_min_deg` / `pitch_max_deg` | -45 / 45 | **仮**（`H-V5`・`H-X5`。MG996R で見直す） |
 | `axis_speed_abs_max_dps` | 60 | 旧版（28BYJ-48 の実用の上限の下側） |
 | `yaw_steps_per_rev` | 4096 | 旧版（半ステップ） |
-| `video_capture_width` / `video_capture_height` | 1280 / 720 | **仮**（実機で 1920×1080 は取れない。spec `H-V10` の答えで決める） |
+| `video_capture_width` / `video_capture_height` | 1280 / 720 | spec `H-V10`（カメラの MJPEG の最大。[-hardware.md](DetailedDesign-hardware.md) §2.1.1） |
+| **`video_capture_fps`** | 10 | **仮**（カメラの MJPEG 720p で選べるのは 30・15・10・8・6・2。30 で受けると区切るだけで CPU を食う） |
+| **`video_device`** | `/dev/video0` | 実機調査 |
 | `video_out_height` | 480 | spec `H-V9` |
-| `video_fps` / `video_jpeg_quality` | 10 / 60 | **仮**（旧版。1280×720 なら取り込みと処理を分けて約 10 fps の見込み。`WP-VIDEO-02` で測る） |
+| `video_fps` / `video_jpeg_quality` | 10 / **80** | **仮**（spec `H-V10`「帯域の数割に収まる範囲で画質を上げる」。1 コアで約 10 fps。上限は `WP-MEAS-03`） |
 | `settings_path` | `/home/m5stack/hve_data/settings.json` | 実機調査（root で動かすので `~` を使わない。ルートに 117 MB 空き）。**ピッチ・ヨーの 2 軸だけを保存する** |
 
 ### 5.4 Arduino（`firmware/cam_io/`）
