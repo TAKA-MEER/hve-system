@@ -30,7 +30,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 | ID | 段階 | 内容 | 先に要るもの | 実機 |
 | --- | --- | --- | --- | --- |
-| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める）。**2026-10-06・07 に実施**（UART の電圧・UNO との双方向も済み。残りは 2 の再起動後の STA） | — | 要（UnitV2・UNO） |
+| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める）。**2026-10-06・07 に実施**（UART の電圧・UNO との双方向も済み。2 の再起動後の STA は繋がらないことがあり、対策 `P-13` を `WP-CAM-05` で確かめる） | — | 要（UnitV2・UNO） |
 | `WP-BASE-02` | 0 | `.venv38`・`firmware/cam_io` の骨格・`CLAUDE.md` のビルドと試験の節 | — | 不要 |
 | `WP-LIFT-03` | 1 | `lift_core` v2（`ceiling_check`・`LiftArbiter`・`lift_settings`・判定の変更・`W-1`・`cmd_codec`） | BASE-02 | 不要 |
 | `WP-LIFTUI-01` | 1 | 昇降部の画面・`tools/fake_lift_server.py`・`tools/lift_probe.py` の v2 化 | LIFT-03（取り決めの確定） | 不要 |

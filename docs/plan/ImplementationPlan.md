@@ -185,7 +185,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 
 | 段階 | 残るもの | 状態 |
 | --- | --- | --- |
-| 0 土台・調査 | UnitV2 で何ができるかが分かる。Python 3.8 の試験環境・Arduino の骨格 | `WP-BASE-02` 済み・`WP-MEAS-06` は再起動後の STA が残り |
+| 0 土台・調査 | UnitV2 で何ができるかが分かる。Python 3.8 の試験環境・Arduino の骨格 | 済み（2026-10-07） |
 | 1 昇降部 | 昇降部が単体で自分の画面から動く。上部モジュールの口がある | 未着手 |
 | 2 Arduino | UNO がヨー・ピッチ・天井を扱い、途絶で止まる | 未着手 |
 | 3 カメラモジュール | 偽物のモードで v2 の取り決めが通る → UnitV2 の実物・映像 | 未着手 |
@@ -203,7 +203,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 
 | ID | 段階 | 状態 |
 | --- | --- | --- |
-| `WP-MEAS-06` | 0 | **大半を実施**（2026-10-06・07。UART の電圧・ピンの並び・UNO との双方向 115200 も実機確認済み。残りは再起動後に `th-rpi-ap` へ繋がり直すか。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
+| `WP-MEAS-06` | 0 | **実機確認済み**（2026-10-06・07。UART の電圧・ピンの並び・UNO との双方向 115200 も。再起動後に `th-rpi-ap` へ繋がらないことがある → 対策 `P-13` を `WP-CAM-05` で確かめる。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
 | `WP-BASE-02` | 0 | **配線済み**（`9ff6a1d`。`.venv38`・`firmware/cam_io` の骨格。旧版の `camera/tests` は 3.8 で 8 failed・25 errors → `WP-CAM-04` で直す） |
 | `WP-LIFT-03` ／ `WP-LIFTUI-01` ／ `WP-LIFT-04` | 1 | 未着手 |
 | `WP-IO-01` ／ `WP-IO-02` | 2 | 未着手 |
@@ -229,7 +229,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | # | 作業 | 状態 |
 | --- | --- | --- |
 | ~~0~~ | ~~v2 の spec・詳細設計の初版・提案 `P-5`〜`P-10`~~ | 2026-10-06 |
-| 1 | `WP-MEAS-06` の残り（**再起動後に `th-rpi-ap` へ繋がり直さない**。2026-10-07 調査中）／ ~~`WP-BASE-02`~~（`9ff6a1d`）／ モバイルバッテリの選定（`D-9`）／ **ユーザー判断: `P-11`・`P-12`**（`H-V10` は 2026-10-07 に決定） | `WP-MEAS-06` は大半を実施 |
+| 1 | ~~`WP-MEAS-06`~~（2026-10-07。再起動後に繋がらないことがある原因は `grace.ko` と分かり、対策 `P-13` は `WP-CAM-05` で入れて確かめる）／ ~~`WP-BASE-02`~~（`9ff6a1d`）／ モバイルバッテリの選定（`D-9`）／ ~~ユーザー判断 `P-11`・`P-12`・`P-13`~~（2026-10-07 すべて採用） | `D-9` が残り |
 | 2 | `WP-LIFT-03` ／ `WP-IO-01` | 2026-10-07 に opencode へ投げた |
 | 3 | `WP-LIFTUI-01` ／ `WP-CAM-04`（`WP-MEAS-06` の 1・2・5 が通ってから） | 未着手 |
 | 4 | `WP-LIFT-04` ／ `WP-IO-02` ／ `WP-VIDEO-02` ／ `WP-UI-02` | 未着手 |
