@@ -14,7 +14,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 
 **2026-10-06 から、使用できる機器が増えたため設計から見直している（ブランチ `redesign/v2`）。**
 上の実装と構成は旧版（v1）で、その spec・detailed は `docs/plan/archive/v1/` に移した。
-`docs/plan/spec/`・`detailed/` は v2 の骨格から書き直す。**既存コードのコメントにある spec・detailed への参照は旧版を指す**（[spec/README.md](docs/plan/spec/README.md)）。
+`docs/plan/spec/`・`detailed/` は v2 で書き直した。v2 の実装は 2026-10-07 から（進み具合は [ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1・§6）。**v2 で触っていない旧版のコードのコメントにある spec・detailed への参照は旧版を指す**（触ったら v2 に直す。[spec/README.md](docs/plan/spec/README.md)）。
 
 ## 作業開始前のルール
 
