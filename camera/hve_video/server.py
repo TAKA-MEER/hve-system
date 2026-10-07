@@ -41,7 +41,8 @@ async def _stream(request: web.Request) -> web.StreamResponse:
     try:
         while True:
             # JPEG の処理は重いので、ループを止めないよう別スレッドに任せる
-            jpeg = await asyncio.to_thread(pipeline.jpeg_bytes)
+            # （Python 3.8 には asyncio.to_thread が無いので run_in_executor を使う）
+            jpeg = await loop.run_in_executor(None, pipeline.jpeg_bytes)
             if jpeg is not None:
                 await response.write(
                     b"--"

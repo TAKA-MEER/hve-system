@@ -1,13 +1,11 @@
-# カメラ部ラズパイのパラメータ。名前と値は DetailedDesign-names.md §5 の「カメラ部」の行のとおり。
+# カメラ部（UnitV2）のパラメータ。名前と値は DetailedDesign-names.md §5 の「カメラ部」の行のとおり。
 # `仮` は根拠の無い仮置き。実測（WP-MEAS-*）で置き換えたら `仮` を外し、出どころを書き直す。
+# v2 で昇降部へ移ったもの（ceiling_margin_mm・ceiling_stale_ms）と
+# Arduino へ移ったもの（srf02_i2c_addr・srf02_ranging_wait_ms）・旧版の lift_ws_url は廃止（names §6）。
 
-# 天井の余裕
-ceiling_margin_mm = 500         # 仮（H-V8）
-# 天井の読み値が古いとみなす時間
-ceiling_stale_ms = 600           # 仮（spec Spec-safety.md §2）
 # 画面からの操作が途絶えてから「押していない」扱いになるまでの時間
 hold_timeout_ms = 400            # 仮
-# 昇降部への指令を送る周期（止まっている間も stop を送る）
+# 昇降を動かしている間、昇降部へ hold を送る周期（止まっている間は送らない。protocol §1）
 lift_cmd_period_ms = 100         # 仮
 # 昇降部からの state が途絶えてから LINK_LOST になるまでの時間
 lift_state_timeout_ms = 600     # 仮
@@ -17,20 +15,16 @@ state_period_ms = 100            # 仮
 axis_speed_abs_max_dps = 60      # 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。実測で確定
 # 28BYJ-48 の半ステップで一周するステップ数
 yaw_steps_per_rev = 4096         # 資料により 4076 とも。実測で確定
-# SRF02 の I2C アドレス（7 bit）
-srf02_i2c_addr = 0x70            # 7 bit。SRF02 の工場出荷値（8 bit 表記で 0xE0）
-# SRF02 の測定できる距離。扱いは spec Spec-safety.md §2 #3a・#3b
+# SRF02 の測定できる距離。扱いは classify_srf02（protocol §5）
 srf02_min_range_mm = 150         # SRF02 のデータシート
 srf02_max_range_mm = 6000        # SRF02 のデータシート
-# 測定の発信から結果を読むまでの待ち時間
-srf02_ranging_wait_ms = 70       # SRF02 のデータシート（測定に約 66 ms）
 # ピッチの可動範囲
-pitch_min_deg = -45              # 仮（H-V5・H-X5。SG90 自体は約 ±90°）
-pitch_max_deg = 45               # 仮（H-V5・H-X5。SG90 自体は約 ±90°）
+pitch_min_deg = -45              # 仮（H-V5・H-X5。MG996R で見直す）
+pitch_max_deg = 45               # 仮（H-V5・H-X5。MG996R で見直す）
 # デジタルズーム
 zoom_max = 4                     # spec Spec-ui.md §1.5（2026-09-25 決定）
 zoom_step = 0.5                  # spec Spec-ui.md §1.5（2026-09-25 決定）
-# 取り込みの大きさ（hve_video）。カメラの型番が未定
+# 取り込みの大きさ（hve_video）。WP-VIDEO-02 の範囲なのでここでは変えない
 video_capture_width = 1920       # 仮（カメラの型番未定。DetailedDesign-hardware.md §2）
 video_capture_height = 1080      # 仮（カメラの型番未定。DetailedDesign-hardware.md §2）
 # 出力の高さ（幅は取り込みの縦横比に合わせる。倍率によらず一定）
@@ -38,18 +32,32 @@ video_out_height = 480           # 仮（H-A8）
 # 配信のフレームレートと JPEG の品質
 video_fps = 10                   # 仮（H-A8）
 video_jpeg_quality = 60          # 仮（H-A8）
-# 設定の保存先
-settings_path = "~/hve_data/settings.json"
-# 昇降部（ESP32）の WS。名前は names §5 にある。アドレスの決め方は DetailedDesign-open.md D-1
-lift_ws_url = "ws://hve-lift.local/ws"
+# 設定の保存先。ピッチ・ヨーの 2 軸だけを保存する（昇降は昇降部へ中継）
+settings_path = "/home/m5stack/hve_data/settings.json"
+# 昇降部（ESP32）の見つけ方（DetailedDesign §4.6）。lift_host が空なら lift_mdns_name を引く
+lift_host = ""
+lift_mdns_name = "hve-lift"
+lift_port = 80
+# hello の name。常に true（センサの調子から計算しない。DetailedDesign §3.1）
+module_name = "hve-cam"
+module_ceiling_sensor = true
+# Arduino（UNO）との UART
+io_device = "/dev/ttyS1"
+io_baud = 115200
+# Arduino へ M 行を送る周期（止まっている間も送る。生存確認を兼ねる）
+io_cmd_period_ms = 50            # 仮
+# Arduino から行が来ないと IO_LOST になるまでの時間
+io_lost_ms = 600                 # 仮
+# これより古い天井の読み値は READ_ERROR として送る（昇降部の CEILING_STALE_MS と揃える）
+ceiling_read_stale_ms = 600      # 仮
+# UnoClock が覚える d の直近の行数（C 行が約 70 ms ごとなので約 1.4 秒分）
+uno_clock_window = 20            # 仮
 # 映像の配信プロセス hve_video のポート（倍率の送り先。127.0.0.1 だけ）
 video_port = 8080
 # 仮値のまま動いているパラメータ名の一覧（DD-3、画面に出す）。DetailedDesign-names.md §5 の
 # 「カメラ部」と「hve_video」の行のうち「仮」と書いてあるもの全部。実測（WP-MEAS-*）で
 # 置き換えたらここから外す。
 provisional = [
-  "ceiling_margin_mm",
-  "ceiling_stale_ms",
   "hold_timeout_ms",
   "lift_cmd_period_ms",
   "lift_state_timeout_ms",
@@ -61,4 +69,8 @@ provisional = [
   "video_out_height",
   "video_fps",
   "video_jpeg_quality",
+  "io_cmd_period_ms",
+  "io_lost_ms",
+  "ceiling_read_stale_ms",
+  "uno_clock_window",
 ]
