@@ -12,7 +12,7 @@ from typing import Any
 from aiohttp import web
 
 from hve_camera import __main__ as cli
-from hve_camera.ceiling import CeilingStatus, ceiling_permission
+from hve_camera.ceiling import CeilingStatus, classify_srf02
 from hve_camera.hw.fake_hw import FakeHardware
 from hve_camera.params import load_params
 
@@ -40,9 +40,9 @@ async def test_fake_mode_starts_with_a_high_measured_ceiling(monkeypatch) -> Non
     assert reading.status is CeilingStatus.MEASURED, "反射が返ったのと同じ扱いにする"
     assert reading.distance_mm == cli.FAKE_CEILING_MM
 
-    # 実際に上昇が許されるか（「天井 値なし」で薄いままにならないこと）
-    ok, reason = ceiling_permission(reading, now_ms=float(reading.at_ms or 0), params=load_params())
-    assert (ok, reason) == (True, "NONE"), "起動直後から上昇できる"
+    # 汎用の 4 状態に直すと MEASURED（許可の計算は昇降部がする）
+    status, mm = classify_srf02(0, reading.distance_mm // 10, 0, load_params())
+    assert (status, mm) == (CeilingStatus.MEASURED, cli.FAKE_CEILING_MM), "起動直後から上昇できる"
 
 
 async def test_fake_ceiling_stays_fresh_and_can_be_replaced(monkeypatch) -> None:

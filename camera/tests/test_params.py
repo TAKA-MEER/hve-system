@@ -6,19 +6,14 @@ from hve_camera.params import load_params
 
 # DetailedDesign-names.md §5 の「カメラ部」の行（名前 → 値）
 EXPECTED = {
-    "ceiling_margin_mm": 500,
-    "ceiling_stale_ms": 600,
     "hold_timeout_ms": 400,
     "lift_cmd_period_ms": 100,
     "lift_state_timeout_ms": 600,
     "state_period_ms": 100,
     "axis_speed_abs_max_dps": 60,
     "yaw_steps_per_rev": 4096,
-    # names §5 は 0x70 と書いてある。TOML は 16 進が書けるので params.toml もその表記。
-    "srf02_i2c_addr": 0x70,
     "srf02_min_range_mm": 150,
     "srf02_max_range_mm": 6000,
-    "srf02_ranging_wait_ms": 70,
     "pitch_min_deg": -45,
     "pitch_max_deg": 45,
     "zoom_max": 4,
@@ -28,13 +23,20 @@ EXPECTED = {
     "video_out_height": 480,
     "video_fps": 10,
     "video_jpeg_quality": 60,
-    "settings_path": "~/hve_data/settings.json",
-    # names §5「偽物 API の `provisional`」（WP-CAM-02 で追加）
-    "lift_ws_url": "ws://hve-lift.local/ws",
+    "settings_path": "/home/m5stack/hve_data/settings.json",
+    "lift_host": "",
+    "lift_mdns_name": "hve-lift",
+    "lift_port": 80,
+    "module_name": "hve-cam",
+    "module_ceiling_sensor": True,
+    "io_device": "/dev/ttyS1",
+    "io_baud": 115200,
+    "io_cmd_period_ms": 50,
+    "io_lost_ms": 600,
+    "ceiling_read_stale_ms": 600,
+    "uno_clock_window": 20,
     "video_port": 8080,
     "provisional": [
-        "ceiling_margin_mm",
-        "ceiling_stale_ms",
         "hold_timeout_ms",
         "lift_cmd_period_ms",
         "lift_state_timeout_ms",
@@ -46,6 +48,10 @@ EXPECTED = {
         "video_out_height",
         "video_fps",
         "video_jpeg_quality",
+        "io_cmd_period_ms",
+        "io_lost_ms",
+        "ceiling_read_stale_ms",
+        "uno_clock_window",
     ],
 }
 
