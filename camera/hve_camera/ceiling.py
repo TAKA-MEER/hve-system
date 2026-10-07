@@ -1,11 +1,11 @@
-"""天井の許可を判定する純関数。
+"""天井の読み値を汎用の 4 状態に直す。
 
-spec [Spec-safety.md](../../docs/plan/spec/Spec-safety.md) §2 の #3・#3a・#3b・#4
-と [DetailedDesign.md](../../docs/plan/detailed/DetailedDesign.md) §3 の仕組み。
-ここで受け取るのは**状態だけ**。SRF02 の生の値（I2C の返り値）を状態へ変換するのは
-後のパケット（`hw/rpi_hw.py`）の仕事で、ここは判断だけする。
+[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §5。
+**許可の計算はしない**（昇降部の `ceiling_check` が決める。
+[DetailedDesign.md](../../docs/plan/detailed/DetailedDesign.md) §4.3）。
+ここは SRF02 の生の値（`C` 行の `st`・`cm`）と読み値の古さを 4 状態に直すだけ。
 
-**`READ_ERROR`（I2C で読めなかった）と `NO_ECHO`（反射が返らない）は別の状態。**
+**`READ_ERROR`（読めない）と `NO_ECHO`（反射が返らない）は別の状態。**
 取り違えると、センサが死んだときに「天井は遠い」とみなし天井へ突っ込む。
 """
 
@@ -13,66 +13,64 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Any
+from typing import Any, Mapping, Optional, Tuple
 
 
 class CeilingStatus(str, Enum):
-    """天井の読み値の状態。DetailedDesign-names.md §1。"""
+    """天井の読み値の状態。[-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §2.1。"""
 
-    #: 距離を測れた。`distance_mm` がある。
+    #: 測れた（`mm` 付き）。
     MEASURED = "MEASURED"
-    #: 反射が返らない（測定範囲より遠い）。spec §2 #3b。上昇を許す。
+    #: 近すぎて測れない（`SRF02` の最小測定距離より近い）。
+    TOO_NEAR = "TOO_NEAR"
+    #: 反射が返らない（遠い）。上昇を許す。
     NO_ECHO = "NO_ECHO"
-    #: I2C の読み取り失敗。spec §2 #4。上昇を許さない。
+    #: 距離計が読めない。上昇を許さない。
     READ_ERROR = "READ_ERROR"
 
 
 @dataclass(frozen=True)
 class CeilingReading:
-    """天井の読み値。時刻は単調増加の時計の ms。"""
+    """天井の読み値。`at_ms` は `UnoClock` で UnitV2 の時計に直した測定時刻。"""
 
     status: CeilingStatus
-    distance_mm: int | None = None
-    at_ms: int | None = None
+    distance_mm: Optional[int] = None
+    at_ms: Optional[float] = None
 
 
-def ceiling_permission(
-    reading: CeilingReading | None,
-    now_ms: float,
+#: `SRF02` が反射なしを返す生の値（`C` 行の `cm`。protocol §5）。
+SRF02_NO_ECHO_RAW = 0
+
+
+def classify_srf02(
+    st: Optional[int],
+    cm: Optional[int],
+    age_ms: Optional[float],
     params: Mapping[str, Any],
-) -> tuple[bool, str]:
-    """天井の許可を `(ok, 理由)` で返す。
+) -> Tuple[CeilingStatus, Optional[int]]:
+    """SRF02 の生の値と読み値の古さを汎用の 4 状態と `mm` に直す。
 
-    **上から順に、最初に当たったもの**を返す。
+    **上から順に、最初に当たったもの**を返す（protocol §5）。
 
-    | # | 条件 | 結果 |
-    | --- | --- | --- |
-    | 1 | 読み値が無い・I2C の読み取り失敗・時刻から `ceiling_stale_ms` 超 | `(False, "CEILING_STALE")` |
-    | 2 | 反射なし | `(True, "OUT_OF_RANGE")` |
-    | 3 | 距離 < `srf02_min_range_mm` | `(False, "CEILING_NEAR")` |
-    | 4 | 距離 ≦ `ceiling_margin_mm` | `(False, "CEILING_NEAR")` |
-    | 5 | それ以外 | `(True, "NONE")` |
+    | 入力 | 状態 |
+    | --- | --- |
+    | `st` が `1`、または古さが `ceiling_read_stale_ms` を超えた、または行が来ていない | `READ_ERROR` |
+    | `cm` が `SRF02_NO_ECHO_RAW`（0） | `NO_ECHO` |
+    | `cm × 10` が `srf02_min_range_mm` 未満 | `TOO_NEAR` |
+    | それ以外 | `MEASURED`（`mm` ＝ `cm × 10`） |
 
-    #3 の「近すぎて測れない」（spec §2 #3a）と #4 の余裕の 2 つを別々に判定する。
-    #5 の `None` は「反射なし」。`distance_mm` が無いので #3・#4 にはかからない。
+    行が来ていないときは `st`・`cm`・`age_ms` のどれかを `None` で渡す。
+    `mm` は `MEASURED` のときだけ値が入り、それ以外は `None`。
     """
-    if reading is None:
-        return False, "CEILING_STALE"
-    if reading.status is CeilingStatus.READ_ERROR:
-        return False, "CEILING_STALE"
-    if reading.at_ms is None:
-        return False, "CEILING_STALE"
-
-    if now_ms - reading.at_ms > params["ceiling_stale_ms"]:
-        return False, "CEILING_STALE"
-
-    if reading.status is CeilingStatus.NO_ECHO:
-        return True, "OUT_OF_RANGE"
-
-    distance = reading.distance_mm
-    if distance < params["srf02_min_range_mm"]:
-        return False, "CEILING_NEAR"
-    if distance <= params["ceiling_margin_mm"]:
-        return False, "CEILING_NEAR"
-
-    return True, "NONE"
+    if st is None or cm is None or age_ms is None:
+        return CeilingStatus.READ_ERROR, None
+    if st == 1:
+        return CeilingStatus.READ_ERROR, None
+    if age_ms > float(params["ceiling_read_stale_ms"]):
+        return CeilingStatus.READ_ERROR, None
+    if cm == SRF02_NO_ECHO_RAW:
+        return CeilingStatus.NO_ECHO, None
+    distance_mm = int(cm) * 10
+    if distance_mm < int(params["srf02_min_range_mm"]):
+        return CeilingStatus.TOO_NEAR, None
+    return CeilingStatus.MEASURED, distance_mm
