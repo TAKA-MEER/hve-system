@@ -91,6 +91,43 @@ test('停止理由の文言（names §3 → 画面に出る日本語）', () => 
   assert.match(unknown.text, /SOMETHING_NEW/);
 });
 
+test('IO_LOST・OWNER_GONE の文言（names §3）', () => {
+  assert.deepEqual(app.reasonText('IO_LOST'), {
+    cls: 'ng', text: 'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません',
+  });
+  assert.deepEqual(app.reasonText('OWNER_GONE'), {
+    cls: 'warn', text: '操作していた画面が閉じたため停止しました',
+  });
+  // 知らない理由の文言（「理由が分かりません」）に落ちていない
+  assert.doesNotMatch(app.reasonText('IO_LOST').text, /分かりません/);
+  assert.doesNotMatch(app.reasonText('OWNER_GONE').text, /分かりません/);
+});
+
+test('上端の検知: top_detect が true でなければ「一時無効」（W-1）', () => {
+  assert.equal(app.topDetectText({top_detect: false}), '上端の検知: 一時無効');
+  assert.equal(app.topDetectText({}), '上端の検知: 一時無効');   // 値が無いときも有効とは言わない
+  assert.equal(app.topDetectText(null), '上端の検知: 一時無効');
+  assert.equal(app.topDetectText({top_detect: true}), null);
+});
+
+test('持ち主・昇降部の画面の数・昇降部へのリンク', () => {
+  assert.equal(app.ownerText('module'), '持ち主 カメラモジュール');
+  assert.equal(app.ownerText('ui'), '持ち主 昇降部の画面');
+  assert.equal(app.ownerText(null), '持ち主 なし');
+  assert.equal(app.liftUiText(2), '昇降部の画面 2');
+  assert.equal(app.liftUiText(0), '昇降部の画面 0');
+  assert.equal(app.liftUiText(undefined), '昇降部の画面 —');
+  assert.deepEqual(app.liftLink('192.168.5.20'), {href: 'http://192.168.5.20/', text: '昇降部 192.168.5.20'});
+  assert.equal(app.liftLink(null), null);
+  assert.equal(app.liftLink(''), null);
+  assert.equal(app.liftLink('a"><script>'), null); // 属性に入れる値なので変な文字は受けない
+});
+
+test('静止画の URL は宿主＝画面と同じ・ポート＝映像と同じ・パスは /snapshot（spec §1.5.1）', () => {
+  assert.equal(app.snapshotUrl('http:', '192.168.5.10', 8080), 'http://192.168.5.10:8080/snapshot');
+  assert.equal(app.snapshotUrl('http:', 'hve-cam.local', 8080), 'http://hve-cam.local:8080/snapshot');
+});
+
 test('天井のバッジは距離・値なし・範囲外を出す（spec Spec-safety.md §2 #3b）', () => {
   assert.deepEqual(app.ceilingText({mm: 1450, reason: 'NONE', ok: true}), {cls: '', text: '天井 1450 mm'});
   assert.deepEqual(app.ceilingText({mm: null, reason: 'CEILING_STALE', ok: false}), {cls: 'ng', text: '天井 値なし'});

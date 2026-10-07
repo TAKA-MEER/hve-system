@@ -33,6 +33,7 @@ header{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:
 .badge.warn{border-color:var(--warn);color:var(--warn-tx)} .badge.warn .dot{background:var(--warn)}
 .badge.ng{border-color:var(--ng);color:var(--ng-tx)} .badge.ng .dot{background:var(--ng)}
 .badge.fake{border-color:var(--mock);color:#d7c2f3}
+.badge.link{color:var(--brand);text-decoration:none}
 .spacer{flex:1}
 .hbtn{padding:6px 12px;border-radius:var(--r);border:1px solid var(--bd-hi);background:var(--ctrl);cursor:pointer;white-space:nowrap}
 .hbtn:hover{background:var(--ctrl-hi)}
@@ -54,12 +55,18 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .guide .h{left:0;right:0;top:50%;height:1px}
 .guide .v{top:0;bottom:0;left:50%;width:1px}
 .guide .box{position:absolute;left:25%;top:25%;width:50%;height:50%;border:1px dashed rgba(127,180,238,.45)}
-.osd{position:absolute;left:6px;top:6px;right:80px;display:flex;gap:4px;flex-wrap:wrap}
+.osd{position:absolute;left:6px;top:6px;right:150px;display:flex;gap:4px;flex-wrap:wrap}
 .osd span{background:rgba(0,0,0,.6);padding:1px 7px;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums}
 .stopbar{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.75);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px}
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
 .stopbar.show{display:block}
 .guidebtn{position:absolute;right:6px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
+.snapbtn{position:absolute;right:80px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
+.snapshot{position:absolute;inset:0;display:none;background:#000;z-index:3;align-items:center;justify-content:center}
+.snapshot.show{display:flex}
+.snapshot img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;visibility:hidden}
+.snapmsg{position:relative;color:var(--mut)}
+.snapclose{position:absolute;right:6px;top:6px;padding:2px 8px;font-size:12px}
 .zoom{position:absolute;right:6px;top:36px;display:flex;flex-direction:column;gap:4px;z-index:1}
 .zoombtn{width:40px;height:36px;padding:0;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:16px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums}
 .zoombtn.lvl{font-size:12px}
