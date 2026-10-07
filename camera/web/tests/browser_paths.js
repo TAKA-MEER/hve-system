@@ -431,6 +431,25 @@ test('9 静止画が取れないときは案内を出す（壊れた画像を見
   }
 });
 
+/* --- 10. 止まっている間の天井のバッジと上昇ボタン（2026-10-07 実機） ------------------ */
+test('10 止まっている間も天井のバッジは自分で測った値を出し、上昇ボタンは薄くならない', async (browser) => {
+  const stopKeep = keepCeiling();
+  const {page, errors, cleanup} = await openScreen(browser);
+  try {
+    await allowUp();
+    await page.waitForFunction(
+      () => document.getElementById('bCeil').textContent.includes('2600'), null, {timeout: 3000});
+    assert.equal((await page.locator('#bCeil').innerText()).trim(), '天井 2600 mm');
+    assert.equal(
+      await page.locator('[data-axis=lift_up]').evaluate((el) => el.classList.contains('blocked')),
+      false, '止まっているだけで上昇ボタンを薄くしない');
+    assert.deepEqual(errors, []);
+  } finally {
+    stopKeep();
+    await cleanup();
+  }
+});
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
