@@ -71,6 +71,8 @@
 | `LiftAxisSettings`・`LiftSettings` ／ `validate_lift_settings`・`lift_settings_from_json`・`lift_settings_to_json` | `lift_settings.h` | 昇降の設定 |
 | `LiftController::on_hello`・`on_hold`・`on_release`・`on_close`・`set_ui_clients`・`step` | `lift_controller.h` | 接続ごとの受け口と、判定をモータに効かせる 1 周期 |
 
+| `PendingEvent`・`PendingType`・`ConnSlot`・`kSettingsNvsKey`（`"settings"`） | `firmware/lift/src/main.cpp`（`WP-LIFT-04`） | WS のタスクから `loop()` へ渡すイベントの列・WS の接続と `LiftController` の接続番号の対応・設定を置く NVS の鍵 |
+
 ### 1.2 `cam_io` の実物の名前（`WP-IO-02` で足した。2026-10-07 に管理担当が登録）
 
 | 名前 | 置き場 | 中身 |
