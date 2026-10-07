@@ -70,6 +70,10 @@ class LiftController {
   bool has_owner_cmd_ = false;  // 持ち主の命令の中身を持っているか
   StopReason idle_reason_ = StopReason::CMD_TIMEOUT;  // 持ち主がいないときの停止理由
   bool had_owner_ = false;
+  // 上部モジュール（MODULE）の最後の hold に載っていた天井の値。持ち主がいないときの表示用
+  // （判定には使わない）。無ければ has_last_module_ceiling_ が偽
+  CeilingReport last_module_ceiling_;
+  bool has_last_module_ceiling_ = false;
   ConnInfo conns_[kMaxConns];
   int ui_clients_ = 0;
   uint32_t run_ms_;     // 現在の方向について実際にモータを回した時間

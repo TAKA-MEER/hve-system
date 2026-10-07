@@ -122,6 +122,10 @@ void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t n
     owner_cmd_.ceiling.age_ms = 0;
     owner_cmd_.ceiling.received_at_ms = now_ms;
   }
+  if (conn.kind == ConnKind::MODULE) {
+    last_module_ceiling_ = owner_cmd_.ceiling;
+    has_last_module_ceiling_ = true;
+  }
   has_owner_cmd_ = true;
   had_owner_ = true;
 }
@@ -220,18 +224,27 @@ LiftState LiftController::step(uint32_t now_ms) {
   // 天井は持ち主の最後の hold の値。持ち主がいなければ上部モジュールの
   // 最後の hold の値（無ければ null）
   state_.ceiling_used = has_owner && owner_has_sensor;
-  state_.ceiling_present = has_owner_cmd_;
-  if (has_owner_cmd_) {
-    state_.ceiling_status = owner_cmd_.ceiling.status;
-    state_.ceiling_mm = owner_cmd_.ceiling.mm;
-    const int32_t transit = elapsed_ms(now_ms, owner_cmd_.ceiling.received_at_ms);
-    const int64_t age =
-        static_cast<int64_t>(owner_cmd_.ceiling.age_ms) + (transit > 0 ? transit : 0);
+  const bool show_last = !has_owner_cmd_ && has_last_module_ceiling_;
+  state_.ceiling_present = has_owner_cmd_ || show_last;
+  if (state_.ceiling_present) {
+    // 持ち主がいなければ上部モジュールの最後の hold の値（古さは増え続ける）
+    const CeilingReport& shown = has_owner_cmd_ ? owner_cmd_.ceiling : last_module_ceiling_;
+    state_.ceiling_status = shown.status;
+    state_.ceiling_mm = shown.mm;
+    const int32_t transit = elapsed_ms(now_ms, shown.received_at_ms);
+    const int64_t age = static_cast<int64_t>(shown.age_ms) + (transit > 0 ? transit : 0);
     state_.ceiling_age_ms = age < 0 ? 0u : static_cast<uint32_t>(age);
-    const CeilingVerdict verdict =
-        ceiling_check(owner_cmd_.ceiling, now_ms, has_owner ? owner_has_sensor : false);
-    state_.ceiling_ok = verdict.ok;
-    state_.ceiling_reason = verdict.reason;
+    if (has_owner_cmd_) {
+      const CeilingVerdict verdict =
+          ceiling_check(owner_cmd_.ceiling, now_ms, has_owner ? owner_has_sensor : false);
+      state_.ceiling_ok = verdict.ok;
+      state_.ceiling_reason = verdict.reason;
+    } else {
+      // 表示だけ。持ち主がいないので判定は無い（上部モジュールは owner が module の
+      // ときだけ ok/reason を使う）
+      state_.ceiling_ok = false;
+      state_.ceiling_reason = StopReason::CEILING_STALE;
+    }
   }
   state_.has_owner = has_owner;
   state_.owner_kind = has_owner && owner.kind == ConnKind::MODULE ? 1 : 0;
