@@ -40,6 +40,8 @@ class FakeHardware(HardwareBase):
         self.ceiling_history: list[CeilingReading] = []
         #: 差し込みが無いとき毎回返す「いつもの読み値」（偽物のモードの起動用。試験は使わない）
         self._steady: tuple[CeilingStatus, int | None] | None = None
+        #: `True` の間は行が来ない（`POST /api/fake` の `io_lost`。`IO_LOST` を再現する）
+        self._io_lost = False
         self.closed = False
 
     # --- 外から天井の読み値を差し替える ----------------------------------------------------------
@@ -61,10 +63,19 @@ class FakeHardware(HardwareBase):
         self._pending = None
         self._steady = None
 
+    def set_io_lost(self, lost: bool) -> None:
+        """Arduino から行が来ない状態にする・戻す（`POST /api/fake` の `io_lost`）。"""
+        self._io_lost = bool(lost)
+        if lost:
+            self._pending = None
+            self._steady = None
+
     # --- HardwareBase -------------------------------------------------------------------------
 
     async def read_ceiling(self) -> CeilingReading | None:
         """差し込まれた測定値を 1 回返す。無いなら `None`（呼び出し側が保持する）。"""
+        if self._io_lost:
+            return None
         if self._pending is not None:
             status, distance_mm = self._pending.status, self._pending.distance_mm
             self._pending = None

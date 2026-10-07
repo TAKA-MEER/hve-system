@@ -58,7 +58,8 @@ def test_parse_rejects_broken_lines():
 def test_uno_clock_measures_the_age():
     clock = UnoClock(window=20)
     assert clock.age_ms(1000, 1100.0) is None, "まだ 1 行も見ていない"
-    clock.observe(received_ms=1100.0, uno_ms=1000)
+    age, restarted = clock.observe(received_ms=1100.0, uno_ms=1000)
+    assert (age, restarted) == (0.0, False), "最初の 1 行の古さは分からない"
     assert clock.age_ms(1000, 1100.0) == pytest.approx(0.0)
     assert clock.age_ms(1000, 1200.0) == pytest.approx(100.0)
 
@@ -67,15 +68,20 @@ def test_uno_clock_uses_the_minimum_offset():
     """遅れて読んだ行の d は大きいので、直近の最小が基準になる（§3.5）。"""
     clock = UnoClock(window=20)
     clock.observe(received_ms=1100.0, uno_ms=1000)  # d=100
-    clock.observe(received_ms=1500.0, uno_ms=1000)  # d=500（溜まった行を遅れて読んだ）
-    assert clock.age_ms(1000, 1500.0) == pytest.approx(400.0)
+    age, restarted = clock.observe(received_ms=1500.0, uno_ms=1000)  # d=500（溜まった行を遅れて読んだ）
+    assert restarted is False
+    assert age == pytest.approx(400.0)
 
 
-def test_uno_clock_resets_when_uno_ms_goes_back():
+def test_uno_clock_measures_before_restarting_on_rewind():
+    """巻き戻り（再起動か遅れた古い行）は、捨てる前の窓で古さを測ってからやり直す。"""
     clock = UnoClock(window=20)
     clock.observe(received_ms=1100.0, uno_ms=1000)
-    clock.observe(received_ms=1200.0, uno_ms=10)  # 再起動して millis が戻った
-    assert clock.age_ms(10, 1200.0) == pytest.approx(0.0)
+    age, restarted = clock.observe(received_ms=1200.0, uno_ms=10)
+    assert restarted is True
+    assert age == pytest.approx(1090.0), "古い窓では uno=1000 の 990 ms 前の行＋経過 100 ms"
+    age, restarted = clock.observe(received_ms=1250.0, uno_ms=20)
+    assert (restarted, age) == (False, pytest.approx(60.0))
 
 
 def test_uno_clock_reset():
