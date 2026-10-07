@@ -89,10 +89,31 @@ async def _zoom(request: web.Request) -> web.Response:
     return web.json_response({"level": pipeline.level})
 
 
+async def _snapshot(request: web.Request) -> web.Response:
+    """静止画（spec `H-U9`）。最後に受けたカメラの JPEG をそのまま返す。無ければ 503。
+
+    倍率に関わらず、作り直さない・切り出さない。接続元は問わない（外の端末から受ける）。
+    """
+    pipeline: VideoPipeline = request.app["pipeline"]
+    loop = asyncio.get_running_loop()
+    jpeg = await loop.run_in_executor(None, pipeline.latest_jpeg)
+    if jpeg is None:
+        return web.json_response({"error": "まだ 1 枚も受けていない"}, status=503)
+    return web.Response(
+        body=jpeg, content_type="image/jpeg", headers={"Cache-Control": "no-store"}
+    )
+
+
 def create_app(pipeline: VideoPipeline, video_fps: float) -> web.Application:
-    """`GET /stream`（MJPEG）と `POST /zoom` を持つアプリを作る。"""
+    """`GET /stream`（MJPEG）・`GET /snapshot`・`POST /zoom` を持つアプリを作る。"""
     app = web.Application()
     app["pipeline"] = pipeline
     app["video_fps"] = float(video_fps)
-    app.add_routes([web.get("/stream", _stream), web.post("/zoom", _zoom)])
+    app.add_routes(
+        [
+            web.get("/stream", _stream),
+            web.get("/snapshot", _snapshot),
+            web.post("/zoom", _zoom),
+        ]
+    )
     return app

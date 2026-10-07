@@ -24,14 +24,16 @@ pitch_max_deg = 45               # 仮（H-V5・H-X5。MG996R で見直す）
 # デジタルズーム
 zoom_max = 4                     # spec Spec-ui.md §1.5（2026-09-25 決定）
 zoom_step = 0.5                  # spec Spec-ui.md §1.5（2026-09-25 決定）
-# 取り込みの大きさ（hve_video）。WP-VIDEO-02 の範囲なのでここでは変えない
-video_capture_width = 1920       # 仮（カメラの型番未定。DetailedDesign-hardware.md §2）
-video_capture_height = 1080      # 仮（カメラの型番未定。DetailedDesign-hardware.md §2）
+# 取り込み（hve_video）。カメラの MJPEG 720p を v4l2-ctl で受ける（DetailedDesign.md §4.4）
+video_capture_width = 1280       # spec H-V10（カメラの MJPEG の最大）
+video_capture_height = 720       # spec H-V10
+video_capture_fps = 10           # 仮（30 で受けると区切るだけで CPU を食う）
+video_device = "/dev/video0"     # 実機調査
 # 出力の高さ（幅は取り込みの縦横比に合わせる。倍率によらず一定）
 video_out_height = 480           # 仮（H-A8）
 # 配信のフレームレートと JPEG の品質
 video_fps = 10                   # 仮（H-A8）
-video_jpeg_quality = 60          # 仮（H-A8）
+video_jpeg_quality = 80          # 仮（H-A8）
 # 設定の保存先。ピッチ・ヨーの 2 軸だけを保存する（昇降は昇降部へ中継）
 settings_path = "/home/m5stack/hve_data/settings.json"
 # 昇降部（ESP32）の見つけ方（DetailedDesign §4.6）。lift_host が空なら lift_mdns_name を引く
@@ -64,8 +66,7 @@ provisional = [
   "state_period_ms",
   "pitch_min_deg",
   "pitch_max_deg",
-  "video_capture_width",
-  "video_capture_height",
+  "video_capture_fps",
   "video_out_height",
   "video_fps",
   "video_jpeg_quality",
