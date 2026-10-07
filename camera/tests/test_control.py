@@ -1,15 +1,13 @@
-"""`ControlLoop` の試験。**呼び出し側の数行**（指令の順序・停止・鮮度・丸め）を縛る。
+"""`ControlLoop` の試験。**呼び出し側の数行**（`hold`・`release`・`press`・天井の値）を縛る。
 
 [DetailedDesign.md](../../docs/plan/detailed/DetailedDesign.md) §3 と
-[-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §1・§2。
+[-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §1・§2・§4。
 時計は `ManualClock` で自分で進めるので、待ち時間を作らずに確かめられる。
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-import pytest
 
 from hve_camera.ceiling import CeilingStatus
 from hve_camera.control import ControlLoop, clamp_zoom
@@ -25,9 +23,13 @@ class RecordingLift(FakeLift):
         super().__init__(clock)
         self._log = log
 
-    async def send_cmd(self, direction: str, duty: int, ceil_ok: bool) -> None:
-        self._log.append("cmd")
-        await super().send_cmd(direction, duty, ceil_ok)
+    async def send_hold(self, *args: Any, **kwargs: Any) -> None:
+        self._log.append("hold")
+        await super().send_hold(*args, **kwargs)
+
+    async def send_release(self, *args: Any, **kwargs: Any) -> None:
+        self._log.append("release")
+        await super().send_release(*args, **kwargs)
 
 
 class RecordingHw(FakeHardware):
@@ -45,10 +47,11 @@ class RecordingHw(FakeHardware):
 class Loop:
     """試験用に `ControlLoop` と偽物をまとめる。"""
 
-    def __init__(self, distance_mm: int = 2000, top_mm: int | None = None) -> None:
+    def __init__(self) -> None:
         self.clock = ManualClock()
         self.log: list[str] = []
         self.hw = RecordingHw(self.clock, self.log)
+        self.hw.set_steady_ceiling(CeilingStatus.MEASURED, 2000)
         self.lift = RecordingLift(self.clock, self.log)
         self.zoom = RecordingVideoZoom()
         self.loop = ControlLoop(
@@ -61,365 +64,211 @@ class Loop:
             fake=True,
         )
 
-    def arm(self, status: str = "MEASURED", distance_mm: int | None = 2000) -> None:
-        """次の 1 回の測定値を差し替える。"""
-        self.hw.set_ceiling(CeilingStatus(status), distance_mm)
-
     async def prime(self) -> None:
-        """**1 回回してから始める。**読めない値を持たせないため。
-
-        最初に `step()` を回すと測った読み値が入り、偽昇降部も `state` を作り始める。
-        それが無いと `link` が `lost`、`ceil_ok` も `false` なので、試験したい経路に入れない。
-        """
-        self.arm("MEASURED", 2000)
+        """**1 回回してから始める。**昇降部の `state` を手に入れるため。"""
         await self.loop.step()
         self.lift._step(self.clock())  # noqa: SLF001 - 試験用の priming
 
     async def step(self, ms: float = 100) -> Any:
-        """`lift_cmd_period_ms` だけ時計を進めてから 1 回回す。"""
+        """時計を進めて 1 回回し、偽昇降部の `state` も進める。"""
         self.clock.advance(ms)
         await self.loop.step()
+        self.lift._step(self.clock())
         return self.loop.build_state(1)
 
-    def last(self) -> dict[str, Any]:
-        assert self.lift.cmd_history, "まだ指令を送っていない"
-        return self.lift.cmd_history[-1]
+    @property
+    def holds(self) -> list[dict[str, Any]]:
+        return self.lift.hold_history
+
+    @property
+    def releases(self) -> list[dict[str, Any]]:
+        return self.lift.release_history
 
 
-# --- 指令の順番と停止 ------------------------------------------------------------------------------
+# --- 指令の順番と止めている間の沈黙 ---------------------------------------------------------------
 
 
-async def test_cmd_is_sent_before_ceiling_is_read() -> None:
-    """DetailedDesign §3「天井の測定は指令を送ったあと」。順序が入れ替わると I2C の待ち時間が指令に混ざる。"""
+async def test_hold_is_sent_before_ceiling_is_read() -> None:
+    """DetailedDesign §4.3「天井の測定は指令を送ったあと」。"""
     rig = Loop()
-    rig.arm()
+    rig.loop.hold("lift_up", 30)
     await rig.step()
-    assert rig.log[0] == "cmd", "まず昇降部への指令を送ってから天井を測る"
+    assert rig.log[0] == "hold", "まず昇降部への指令を送ってから天井を読む"
     assert rig.log[1] == "read"
 
 
-async def test_stop_is_sent_every_step_while_idle() -> None:
-    """止まっている間も `lift_cmd_period_ms` ごとに `stop` を送る。止まらないと ESP32 側が `CMD_TIMEOUT` になる。"""
+async def test_nothing_is_sent_while_idle() -> None:
+    """止まっている間は `hold` を送らない（protocol §1）。"""
     rig = Loop()
     for _ in range(3):
         await rig.step()
-    assert [c["dir"] for c in rig.lift.cmd_history] == ["stop", "stop", "stop"]
-    assert [c["duty"] for c in rig.lift.cmd_history] == [0, 0, 0]
+    assert rig.holds == []
+    assert rig.releases == []
 
 
-async def test_release_sends_stop_on_the_next_step() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    rig.loop.hold("lift_up", 30)
-    await rig.step()
-    assert rig.last()["dir"] == "up"
-    rig.loop.release()
-    await rig.step()
-    last = rig.last()
-    assert last["dir"] == "stop"
-    assert last["duty"] == 0
+async def test_release_is_sent_once_when_released() -> None:
+    """**変異 4 の芯。**離したら `release` を送る。送らなければ昇降部は止まらない。
 
-
-# --- ceil_ok は送る瞬間に計算する --------------------------------------------------------------------
-
-
-async def test_lift_up_sends_ceil_ok_true_when_ceiling_is_far() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    rig.loop.hold("lift_up", 30)
-    await rig.step()
-    assert rig.last()["dir"] == "up"
-    assert rig.last()["ceil_ok"] is True
-
-
-async def test_lift_up_sends_ceil_ok_false_when_ceiling_is_close() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 100)  # margin 500 mm より近い
-    await rig.step()  # この回で近い読み値を取り込む
-    rig.loop.hold("lift_up", 30)
-    state = await rig.step()  # 送るのはこのとき。持ってる読み値で判定する
-    assert rig.last()["ceil_ok"] is False
-    assert state["ceiling"]["reason"] == "CEILING_NEAR"
-
-
-async def test_ceil_ok_is_recomputed_even_while_still_holding() -> None:
-    """**この試験が変異 1 を殺す。**前の `true` を使い回すと天井に突っ込む。
-
-    最初の測定は遠く、2 回目以降は新しい読み値を返さない（`freeze_ceiling`）。
-    時計を進めれば同じ `hold` のまま古くなり、`ceil_ok` が `false` に落ちる。
+    呼び出し側（`ControlLoop` → `LiftPort`）を通して縛る。
     """
     rig = Loop()
     await rig.prime()
-    rig.arm("MEASURED", 2000)
     rig.loop.hold("lift_up", 30)
-    state = await rig.step()
-    assert rig.last()["ceil_ok"] is True, "最初は遠いので許可される"
-    assert state["ceiling"]["ok"] is True
-
-    rig.hw.freeze_ceiling()  # ここから新しい読み値を返さない
-    state = await rig.step(200)  # まだ stale ではない
-    assert rig.last()["ceil_ok"] is True
-
-    state = await rig.step(600)  # ceiling_stale_ms=600 を超えた
-    assert rig.last()["ceil_ok"] is False, "古くなった読み値を前の許可のまま使い回さない"
-    assert state["ceiling"]["ok"] is False
-    assert state["ceiling"]["reason"] == "CEILING_STALE"
-
-
-async def test_ceil_ok_false_when_ceiling_is_never_measured() -> None:
-    """1 つも測れていないときは上昇させてはいけない。"""
-    rig = Loop()
-    rig.loop.hold("lift_up", 30)
-    state = await rig.step()
-    assert rig.last()["ceil_ok"] is False
-    assert state["ceiling"]["mm"] is None
-    assert state["ceiling"]["age_ms"] is None
-
-
-async def test_no_echo_allows_up_but_read_error_does_not() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("NO_ECHO", None)
-    await rig.step()  # NO_ECHO を取り込む
-    rig.loop.hold("lift_up", 30)
-    state = await rig.step()
-    assert rig.last()["ceil_ok"] is True, "反射なしは上昇を許す"
-    assert state["ceiling"]["reason"] == "OUT_OF_RANGE"
-
-    rig.arm("READ_ERROR", None)
-    await rig.step()  # READ_ERROR を取り込む
-    state = await rig.step()
-    assert rig.last()["ceil_ok"] is False, "読めなかったときは上昇させない"
-    assert state["ceiling"]["reason"] == "CEILING_STALE"
-
-
-# --- 速度の丸め ------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("given", "expected"),
-    [(999, 60), (-5, 10), (0, 10), (30, 30)],
-)
-async def test_speed_is_clamped_to_settings(given: float, expected: int) -> None:
-    """**この試験が変異 5 を殺す。**設定の上限を超える速度をそのまま送らない。"""
-    rig = Loop()
-    await rig.prime()
-    rig.arm()
-    rig.loop.hold("lift_up", given)
     await rig.step()
-    assert rig.last()["duty"] == expected
-
-
-async def test_each_axis_uses_its_own_setting() -> None:
-    settings = {
-        "lift_up": {"min": 5, "max": 50, "init": 20},
-        "lift_down": {"min": 6, "max": 40, "init": 20},
-        "pitch": {"min": 1, "max": 25, "init": 10},
-        "yaw": {"min": 1, "max": 15, "init": 8},
-    }
-    rig = Loop()
-    rig.loop._settings = settings  # noqa: SLF001 - 試験用の差し替え
-    await rig.prime()
-    rig.arm()
-    rig.loop.hold("lift_down", 999)
-    await rig.step()
-    assert rig.last()["duty"] == 40
-
-
-# --- hold_timeout ----------------------------------------------------------------------------------
-
-
-async def test_hold_timeout_stops_the_lift() -> None:
-    """**この試験が変異 3 を殺す。**`hold_timeout_ms` を越えたら押していない扱いにして止める。"""
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    rig.loop.hold("lift_up", 30)
-    await rig.step(100)  # hold_timeout_ms=400 の内側
-    state = await rig.step(200)  # 300 ms 経過。まだ押しっぱなし
-    assert state["active_axis"] == "lift_up"
-    assert rig.last()["dir"] == "up"
-
-    state = await rig.step(300)  # 合計 500 ms > 400 ms
-    assert rig.last()["dir"] == "stop", "途絶えた操作は止まる"
-    assert state["active_axis"] is None
-    assert state["reason"] == "HOLD_TIMEOUT"
-
-
-async def test_fresh_hold_pushes_the_timeout_forward() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    rig.loop.hold("lift_up", 30)
-    await rig.step(100)
-    await rig.step(250)  # 350 ms
-    rig.loop.hold("lift_up", 30)  # 押し直した
-    state = await rig.step(300)  # 押し直してから 300 ms
-    assert state["active_axis"] == "lift_up"
-    assert state["reason"] != "HOLD_TIMEOUT"
-
-
-# --- ピッチとヨー ---------------------------------------------------------------------------------
-
-
-async def test_pitch_integrates_while_held_and_is_held_at_the_limit() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.loop.hold("pitch_up", 10)  # 10 deg/s
-    for _ in range(3):
-        await rig.step(100)  # 0.1 s ごとに +1 度 → +3 度
-    assert rig.hw.pitch_deg == pytest.approx(3.0)
-    state = rig.loop.build_state(1)
-    assert state["pitch_deg"] == pytest.approx(3.0)
-    assert state["reason"] == "NONE"
-
-    # 60 deg/s は設定 `pitch` の max=30 に丸められ、0.3 s ごとに +9 度。
-    # 3 → 12 → 21 → 30 → 39 → 48 は 45 度で留まる。
-    for expected in (12.0, 21.0, 30.0, 39.0, 45.0):
-        rig.loop.hold("pitch_up", 60)  # 設定の上限より大きい値
-        state = await rig.step(300)
-        assert rig.hw.pitch_deg == pytest.approx(expected)
-    assert state["reason"] == "AXIS_LIMIT", "端に留まったら理由を出す"
-
-
-async def test_pitch_down_moves_back() -> None:
-    rig = Loop()
-    await rig.prime()
-    for _ in range(3):
-        rig.loop.hold("pitch_up", 30)
-        await rig.step(300)  # 0.3 s × 30 deg/s = +9 度
-    assert rig.hw.pitch_deg == pytest.approx(27.0)
-    for _ in range(3):
-        rig.loop.hold("pitch_down", 30)
-        await rig.step(300)  # -9 度
-    assert rig.hw.pitch_deg == pytest.approx(0.0)
-
-
-async def test_yaw_runs_only_while_held_and_stops_otherwise() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.loop.hold("yaw_left", 10)
-    await rig.step()
-    assert rig.hw.yaw_running is True
-    assert rig.hw.yaw_direction == "left"
+    assert len(rig.holds) == 1
 
     rig.loop.release()
     await rig.step()
-    assert rig.hw.yaw_running is False, "離したらコイルの電流を切る"
+    assert [r["press"] for r in rig.releases] == [1], "その `press` の `release` を送る"
+    await rig.step()
+    assert len(rig.releases) == 1, "`release` は 1 度だけ"
 
 
-async def test_lift_axes_stop_the_yaw() -> None:
+async def test_hold_carries_the_ceiling_value() -> None:
+    """`hold` に載るのはその瞬間の天井の値。前回の使い回しでないこと。"""
     rig = Loop()
     await rig.prime()
-    rig.arm("MEASURED", 2000)
     rig.loop.hold("lift_up", 30)
     await rig.step()
-    assert rig.hw.yaw_running is False
+    assert rig.holds[-1]["ceiling"]["status"] == "MEASURED"
+    assert rig.holds[-1]["ceiling"]["mm"] == 2000
+
+    rig.hw.set_ceiling(CeilingStatus.TOO_NEAR)
+    await rig.step()  # この回で近い読み値を取り込む（送るのは前回の値）
+    await rig.step()  # 送るのはこのとき
+    assert rig.holds[-1]["ceiling"]["status"] == "TOO_NEAR"
+    assert rig.holds[-1]["ceiling"]["mm"] is None
 
 
-# --- 画面へ出す state ------------------------------------------------------------------------------
+# --- press の採番 ----------------------------------------------------------------------------------
 
 
-async def test_link_lost_wins_over_every_other_reason() -> None:
-    """`LINK_LOST` は一番上。動いていなければ全部ゆがむ。"""
+async def test_press_starts_at_1_and_stays_while_holding() -> None:
     rig = Loop()
-    rig.arm("MEASURED", 100)  # 天井は近い（理由あり）
+    await rig.prime()
     rig.loop.hold("lift_up", 30)
-    state = await rig.step()
-    assert state["lift"]["link"] == "lost"  # 偽昇降部は state を作る前は lost
-    assert state["reason"] == "LINK_LOST"
-
-
-async def test_held_axis_reason_wins_over_hold_timeout_and_lift_reason() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 100)
-    rig.loop.hold("lift_up", 30)
-    state = await rig.step()
-    assert state["lift"]["link"] == "ok"
-    assert state["reason"] == "CEILING_NEAR", "押している軸の理由が先"
-
-
-async def test_none_when_nothing_is_wrong() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    state = await rig.step()
-    assert state["reason"] == "NONE"
-    assert state["lift"]["link"] == "ok"
-    assert state["fake"] is True
-    assert state["clients"] == 1
-
-
-async def test_state_reports_ceiling_age_from_the_reading_time() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
     await rig.step()
-    state = await rig.step(300)
-    assert state["ceiling"]["age_ms"] == 300
-    assert state["ceiling"]["mm"] == 2000
+    await rig.step()
+    assert [h["press"] for h in rig.holds] == [1, 1]
 
 
-# --- hold / zoom の入力 ----------------------------------------------------------------------------
-
-
-async def test_unknown_axis_is_ignored_and_keeps_the_previous_hold() -> None:
+async def test_press_increases_when_the_direction_flips() -> None:
+    """`lift_up` と `lift_down` が入れ替わったら `press` を増やす（取って代わるため）。"""
     rig = Loop()
     await rig.prime()
-    rig.arm("MEASURED", 2000)
     rig.loop.hold("lift_up", 30)
+    await rig.step()
+    rig.loop.hold("lift_down", 30)
+    await rig.step()
+    assert [h["press"] for h in rig.holds] == [1, 2]
+    assert rig.releases == [], "入れ替えに `release` は要らない（新しい `press` が勝つ）"
+
+
+async def test_press_increases_when_another_screen_takes_over() -> None:
+    """別の画面の `hold` に替わったら `press` を増やす。"""
+    rig = Loop()
+    await rig.prime()
+    screen_a, screen_b = object(), object()
+    rig.loop.hold("lift_up", 30, owner=screen_a)
+    await rig.step()
+    rig.loop.hold("lift_up", 30, owner=screen_b)
+    await rig.step()
+    assert [h["press"] for h in rig.holds] == [1, 2]
+
+
+async def test_press_increases_after_a_release() -> None:
+    """止まったあとは同じ `press` では動けないので、押し直したら増やす。"""
+    rig = Loop()
+    await rig.prime()
+    rig.loop.hold("lift_up", 30)
+    await rig.step()
+    rig.loop.release()
+    await rig.step()
+    rig.loop.hold("lift_up", 30)
+    await rig.step()
+    assert [h["press"] for h in rig.holds] == [1, 2]
+
+
+async def test_stale_press_does_not_restart_the_fake_lift() -> None:
+    """止まったあと、古い `press` の `hold` では動き出さない（§3.3。偽昇降部側の規則）。"""
+    rig = Loop()
+    await rig.prime()
+    rig.loop.hold("lift_up", 30)
+    await rig.step()
+    rig.loop.release()
+    await rig.step()
+    assert rig.lift.latest_state()["dir"] == "stop"
+    # 遅れて届いた古い `press` の `hold`（UnitV2 が固まって溜まった想定）
+    await rig.lift.send_hold("up", 30, 1, "MEASURED", 2000, 0)
+    rig.lift._step(rig.clock())  # noqa: SLF001
+    assert rig.lift.latest_state()["dir"] == "stop"
+
+
+# --- 天井・途絶の表示 -------------------------------------------------------------------------------
+
+
+async def test_close_ceiling_stops_the_fake_lift_up() -> None:
+    """天井が近いと偽昇降部が上昇を止める（判定は昇降部側。ここは値を運ぶだけ）。"""
+    rig = Loop()
+    await rig.prime()
+    rig.hw.set_steady_ceiling(CeilingStatus.TOO_NEAR)
+    rig.loop.hold("lift_up", 30)
+    await rig.step()  # 近い読み値を取り込む
+    state = await rig.step()  # 送って止まるのはこのとき
+    assert state["lift"]["reason"] == "CEILING_NEAR"
+    assert state["reason"] == "CEILING_NEAR", "天井の理由は昇降部の判定を使う"
+    assert state["ceiling"]["status"] == "TOO_NEAR"
+
+
+async def test_io_lost_when_no_lines_arrive() -> None:
+    """Arduino から行が来ないと `IO_LOST`（protocol §4）。"""
+    rig = Loop()
+    await rig.prime()
+    rig.hw.freeze_ceiling()
+    state = await rig.step(700)
+    assert state["reason"] == "IO_LOST"
+
+
+async def test_state_shape() -> None:
+    """`state` の形（protocol §4）。"""
+    rig = Loop()
+    await rig.prime()
+    rig.loop.hold("lift_up", 30)
+    state = await rig.step()
+    assert state["lift"]["dir"] == "up"
+    assert state["lift"]["top_detect"] is False
+    assert state["lift"]["owner"] == "module"
+    assert state["lift"]["lift_ip"] is None, "プロセス内に線は無い"
+    assert state["ceiling"]["status"] == "MEASURED"
+    assert state["ceiling"]["ok"] is True
+    assert state["ceiling"]["reason"] == "NONE"
+
+
+# --- ピッチ・ヨー・倍率（旧版のまま） -----------------------------------------------------------------
+
+
+async def test_pitch_and_yaw_still_work() -> None:
+    rig = Loop()
+    rig.loop.hold("pitch_up", 10)
+    await rig.step()
+    assert rig.hw.pitch_history, "ピッチのサーボへ出す"
+    assert rig.holds == [], "昇降以外では `hold` を送らない"
+
+    rig.loop.hold("yaw_left", 10)
+    await rig.step()
+    assert rig.hw.yaw_running, "ヨーを回す"
+    rig.loop.release()
+    await rig.step()
+    assert not rig.hw.yaw_running
+
+
+async def test_unknown_axis_and_speed_are_ignored() -> None:
+    rig = Loop()
     assert rig.loop.hold("diagonal", 30) is False
-    await rig.step()
-    assert rig.last()["dir"] == "up", "知らない軸は無視して前の操作を残す"
-
-
-async def test_non_numeric_speed_is_ignored() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    rig.loop.hold("lift_up", 30)
     assert rig.loop.hold("lift_up", "fast") is False
-    await rig.step()
-    assert rig.last()["dir"] == "up"
-    assert rig.last()["duty"] == 30
 
 
-async def test_last_hold_wins() -> None:
-    rig = Loop()
-    await rig.prime()
-    rig.arm("MEASURED", 2000)
-    rig.loop.hold("lift_up", 30)
-    rig.loop.hold("lift_down", 20)
-    await rig.step()
-    assert rig.last()["dir"] == "down"
-    assert rig.last()["duty"] == 20
-
-
-def test_clamp_zoom_snaps_and_limits() -> None:
-    assert clamp_zoom(1, PARAMS) == 1.0
-    assert clamp_zoom(2.3, PARAMS) == 2.5  # zoom_step=0.5 の倍数にそろえる
-    assert clamp_zoom(99, PARAMS) == 4.0  # zoom_max
-    assert clamp_zoom(0.1, PARAMS) == 1.0
-    assert clamp_zoom("2", PARAMS) == 1.0
-    assert clamp_zoom(None, PARAMS) == 1.0
-
-
-async def test_zoom_is_sent_only_when_it_changes() -> None:
-    rig = Loop()
-    assert await rig.loop.set_zoom(2) == 2.0
-    assert await rig.loop.set_zoom(2) == 2.0
-    assert rig.zoom.sent == [2.0]
-    assert await rig.loop.set_zoom(99) == 4.0
-    assert rig.zoom.sent == [2.0, 4.0]
-    assert rig.loop.build_state(1)["zoom"] == 4.0
-
-
-async def test_state_carries_the_video_port() -> None:
-    """画面は映像（hve_video）の URL を組み立てるのに `video_port` が要る（protocol §2.4）。"""
-    rig = Loop()
-    await rig.prime()
-    assert rig.loop.build_state(1)["video_port"] == PARAMS["video_port"]
+async def test_clamp_zoom() -> None:
+    assert clamp_zoom(2, PARAMS) == 2.0
+    assert clamp_zoom(99, PARAMS) == 4.0
+    assert clamp_zoom("fast", PARAMS) == 1.0

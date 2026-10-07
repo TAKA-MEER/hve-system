@@ -27,6 +27,16 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
+
+def _host_of(url: str) -> Optional[str]:
+    """`ws://ホスト:ポート/道` からホストだけを抜く。読めなければ `None`。"""
+    try:
+        rest = url.split("://", 1)[1]
+        host = rest.split("/", 1)[0].rsplit(":", 1)[0]
+        return host.strip("[]") or None
+    except (IndexError, AttributeError):
+        return None
+
 #: 上部モジュール用の WS の口。**`params.toml` に置かない**
 #: （書き間違えて `/ws/ui` に繋ぐと天井の守りが外れる。DetailedDesign §3.1）。
 #: 昇降部の `LIFT_WS_MODULE_PATH` と同じ値。
@@ -107,8 +117,15 @@ class LiftLink(LiftPort):
         self._stopping = False
         self._state: Optional[Dict[str, Any]] = None
         self._state_at_ms: Optional[float] = None
+        #: 繋いだ先のホスト（`state.lift.lift_ip` 用。画面に昇降部へのリンクを出す）
+        self._remote_host: Optional[str] = None
         #: 受けた `state` の履歴（試験用）
         self.state_history: list = []
+
+    @property
+    def current_host(self) -> Optional[str]:
+        """今繋いでいる（最後に繋いだ）昇降部のホスト。繋いだことが無ければ `None`。"""
+        return self._remote_host
 
     @property
     def connected(self) -> bool:
@@ -229,6 +246,7 @@ class LiftLink(LiftPort):
             self._session = aiohttp.ClientSession()
         async with self._session.ws_connect(url) as ws:
             self._ws = ws
+            self._remote_host = _host_of(url)
             log.info("昇降部 %s に繋がった", url)
             with contextlib.suppress(Exception):
                 await ws.send_str(self._hello())

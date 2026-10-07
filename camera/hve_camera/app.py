@@ -31,7 +31,13 @@ from aiohttp import web
 from hve_camera.control import ControlLoop
 from hve_camera.hw.base import HardwareBase
 from hve_camera.lift_link import LiftPort
-from hve_camera.settings import save_settings, validate_settings
+from hve_camera.lift_resolve import resolve_lift_host
+from hve_camera.settings import (
+    LIFT_AXES,
+    OWN_AXES,
+    save_settings,
+    validate_settings,
+)
 
 log = logging.getLogger(__name__)
 
@@ -232,7 +238,7 @@ class CameraApp:
 
         kind = data.get("t")
         if kind == "hold":
-            if self.control.hold(data.get("axis"), data.get("speed")):
+            if self.control.hold(data.get("axis"), data.get("speed"), owner=ws):
                 self._owner = ws
             return
         if kind == "release":
@@ -253,16 +259,28 @@ class CameraApp:
             self._owner = None
             self.control.release()
 
-    # --- 設定 API ---------------------------------------------------------------------------------
+    # --- 設定 API（昇降は昇降部へ中継。protocol §4） ----------------------------------------------------
 
     async def get_settings(self, request: web.Request) -> web.Response:
-        """`GET /api/settings`。現在の設定と、既定値で動いているかを返す。"""
-        return web.json_response(
-            {"settings": self._settings, "using_defaults": self._using_defaults}
-        )
+        """`GET /api/settings`。自分のピッチ・ヨーと、昇降部から取った昇降をまとめて返す。
+
+        昇降部に繋がらないときは `503`（形は旧版と同じ 4 軸）。
+        """
+        lift = await self._fetch_lift_settings()
+        if lift is None:
+            return web.json_response({"errors": ["昇降部に繋がらない"]}, status=503)
+        merged = {axis: self._settings[axis] for axis in OWN_AXES}
+        merged.update(lift)
+        self._settings.update(lift)
+        return web.json_response({"settings": merged, "using_defaults": self._using_defaults})
 
     async def put_settings(self, request: web.Request) -> web.Response:
-        """`PUT /api/settings`。**検証に通らなければ 400 と理由の一覧を返し、保存しない。**"""
+        """`PUT /api/settings`。4 軸をまとめて受ける。
+
+        先に 4 軸とも自分で検証 → 昇降部へ `PUT`（昇降の 2 軸）→
+        成功したら自分の 2 軸を保存。昇降部が `400` ならその `errors` を返し、
+        自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない。
+        """
         try:
             data = await request.json()
         except ValueError:
@@ -272,17 +290,79 @@ class CameraApp:
         if errors:
             return web.json_response({"errors": errors}, status=400)
 
+        lift_body = {axis: data[axis] for axis in LIFT_AXES}
+        status, lift_errors = await self._put_lift_settings(lift_body)
+        if status is None:
+            return web.json_response({"errors": ["昇降部に繋がらない"]}, status=503)
+        if status == 400:
+            return web.json_response({"errors": lift_errors}, status=400)
+
+        own = {axis: data[axis] for axis in OWN_AXES}
         try:
-            save_settings(data, self._settings_path, self._params)
+            save_settings(own, self._settings_path, self._params, axes=OWN_AXES)
         except OSError as exc:
             log.error("設定を保存できなかった: %s", exc)
             return web.json_response({"errors": [f"保存できない: {exc}"]}, status=500)
 
         # 制御ループと同じ辞書の中身を入れ替える（参照を渡すので中身の入れ替えだけにする）
         self._settings.clear()
-        self._settings.update(data)
+        self._settings.update(own)
+        self._settings.update(lift_body)
         self._using_defaults = False
-        return web.json_response({"settings": self._settings, "using_defaults": False})
+        return web.json_response({"settings": dict(self._settings), "using_defaults": False})
+
+    async def _lift_http_base(self) -> str | None:
+        """昇降部の設定 API の起点（`http://ホスト:ポート`）。引けなければ `None`。"""
+        loop = asyncio.get_running_loop()
+        host = await loop.run_in_executor(
+            None, resolve_lift_host, self._params.get("lift_host", ""), self._params.get("lift_mdns_name", "")
+        )
+        if not host:
+            return None
+        return "http://%s:%d" % (host, int(self._params.get("lift_port", 80)))
+
+    async def _fetch_lift_settings(self) -> dict | None:
+        """昇降部から昇降の 2 軸を取る。取れなければ `None`。"""
+        base = await self._lift_http_base()
+        if base is None:
+            return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(base + "/api/settings") as response:
+                    if response.status != 200:
+                        return None
+                    payload = await asyncio.wait_for(response.json(), timeout=5)
+        except Exception as exc:  # noqa: BLE001 - 繋がらないのは 503 にするだけ
+            log.info("昇降部の設定を取れない: %s", exc)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        settings = payload.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        body = {axis: settings[axis] for axis in LIFT_AXES if axis in settings}
+        if validate_settings(body, self._params, axes=LIFT_AXES):
+            return None
+        return body
+
+    async def _put_lift_settings(self, body: dict) -> tuple:
+        """昇降部へ昇降の 2 軸を `PUT`。`(状態, 理由の一覧)`。繋がらなければ `(None, None)`。"""
+        base = await self._lift_http_base()
+        if base is None:
+            return None, None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(base + "/api/settings", json=body) as response:
+                    payload = await asyncio.wait_for(response.json(), timeout=5)
+                    if response.status == 400:
+                        errors = payload.get("errors") if isinstance(payload, dict) else None
+                        return 400, errors if isinstance(errors, list) else ["昇降部が設定を拒否した"]
+                    if response.status != 200:
+                        return None, None
+                    return 200, []
+        except Exception as exc:  # noqa: BLE001 - 繋がらないのは 503 にするだけ
+            log.info("昇降部の設定を変えられない: %s", exc)
+            return None, None
 
     # --- 偽物のモード専用 -------------------------------------------------------------------------
 
@@ -306,6 +386,14 @@ class CameraApp:
 
         if "ceiling" in data:
             errors += self._apply_fake_ceiling(data["ceiling"])
+        if "io_lost" in data:
+            value = data["io_lost"]
+            if not isinstance(value, bool):
+                errors.append("io_lost: 真偽値でない")
+            elif hasattr(self._hw, "set_io_lost"):
+                self._hw.set_io_lost(value)
+            else:
+                errors.append("io_lost: 偽物の機構でない")
         if "height_mm" in data or "bottom" in data:
             # 昇降部の偽物（`hw/fake_lift.py`）だけが这些を受け取る。実物には無いので、
             # うっかり付けた時に 500 にしないよう理由として返す。

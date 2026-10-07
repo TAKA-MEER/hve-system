@@ -1,13 +1,14 @@
 """設定の検証・読み込み・保存。
 
-[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §3。
-画面（`WP-UI-01`）の設定画面と設定 API（`WP-CAM-02`）が使う。
-検証の規則:
+[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §4。
+画面の設定画面と設定 API が使う。検証の規則:
 
 - 4 項目（`lift_up`・`lift_down`・`pitch`・`yaw`）すべてが揃う
 - `min ≦ init ≦ max`
 - `lift_*` は 0〜100（PWM デューティ比 [%]）・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
 
+**ピッチ・ヨーはここで保存、昇降は昇降部へ中継する**（v2）。
+そのため読み書きは軸を絞れる（`axes`）。`PUT /api/settings` の検証は 4 軸のまま。
 保存は**一時ファイルに書いてから置き換える。**書き込み途中の電源断で壊れたファイルを
 読ませないため（[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §3）。
 """
@@ -47,18 +48,30 @@ _DEFAULT_SETTINGS: dict[str, dict[str, float]] = {
 }
 
 
+#: 自分で保存する軸（ピッチ・ヨー）。昇降の 2 軸は昇降部へ中継する（protocol §4）。
+OWN_AXES = ("pitch", "yaw")
+
+#: 昇降部へ中継する軸（昇降の 2 軸）。
+LIFT_AXES = ("lift_up", "lift_down")
+
+
 def validate_settings(
     data: Any,
     params: Mapping[str, Any] | None = None,
+    *,
+    axes: tuple = _SPEED_AXES,
 ) -> list[str]:
-    """設定の検証。**通らなかった理由の一覧**を返す（空のリスト = 問題なし）。"""
+    """設定の検証。**通らなかった理由の一覧**を返す（空のリスト = 問題なし）。
+
+    `axes` を絞るとその軸だけを見る（自分の 2 軸の保存用）。`PUT` の検証は 4 軸のまま。
+    """
     if params is None:
         params = load_params()
     if not isinstance(data, dict):
         return [f"設定はオブジェクトでない（{type(data).__name__}）"]
 
     errors: list[str] = []
-    for axis in _SPEED_AXES:
+    for axis in axes:
         entry = data.get(axis)
         if not isinstance(entry, dict):
             errors.append(f"{axis}: min/max/init のオブジェクトが無い")
@@ -84,10 +97,13 @@ def validate_settings(
 def load_settings(
     path: str | os.PathLike[str] | None = None,
     params: Mapping[str, Any] | None = None,
+    *,
+    axes: tuple = _SPEED_AXES,
 ) -> tuple[dict[str, dict[str, float]], bool]:
     """設定を読み込んで `(設定, 既定値で動いているか)` を返す。
 
     ファイルが無い・壊れている・検証を通らないときは、既定値と「既定値で動いている」印。
+    `axes` を絞るとその軸だけを返す（旧版の 4 軸ファイルが残っていても絞った分だけ）。
     """
     if params is None:
         params = load_params()
@@ -97,32 +113,35 @@ def load_settings(
         with target.open(encoding="utf-8") as fp:
             data = json.load(fp)
     except (OSError, ValueError):  # ValueError に JSON の読み違い（json.JSONDecodeError）も入る
-        return _default_settings(), True
+        return _default_settings(axes), True
 
-    if validate_settings(data, params):
-        return _default_settings(), True
-    return data, False
+    if validate_settings(data, params, axes=axes):
+        return _default_settings(axes), True
+    return {axis: data[axis] for axis in axes}, False
 
 
 def save_settings(
     data: Any,
     path: str | os.PathLike[str] | None = None,
     params: Mapping[str, Any] | None = None,
+    *,
+    axes: tuple = _SPEED_AXES,
 ) -> None:
     """検証を通る設定だけを原子的に保存する。通らないものは**保存しない**。
 
     一時ファイルに書いてから `os.replace` で置き換える。途中で失敗しても元のファイルは残る。
     通らない設定は `ValueError`（メッセージに理由の一覧）。
+    `axes` を絞るとその軸だけを検証・保存する（自分の 2 軸用）。
     """
     if params is None:
         params = load_params()
-    errors = validate_settings(data, params)
+    errors = validate_settings(data, params, axes=axes)
     if errors:
         raise ValueError("; ".join(errors))
 
     target = _target_path(path, params)
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    payload = json.dumps({axis: data[axis] for axis in axes}, ensure_ascii=False, indent=2) + "\n"
 
     fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
@@ -136,9 +155,9 @@ def save_settings(
         raise
 
 
-def _default_settings() -> dict[str, dict[str, float]]:
+def _default_settings(axes: tuple = _SPEED_AXES) -> dict[str, dict[str, float]]:
     """既定値のコピーを返す（戻った辞書を書き換えても `_DEFAULT_SETTINGS` を壊さない）。"""
-    return copy.deepcopy(_DEFAULT_SETTINGS)
+    return {axis: copy.deepcopy(_DEFAULT_SETTINGS[axis]) for axis in axes}
 
 
 def _target_path(
