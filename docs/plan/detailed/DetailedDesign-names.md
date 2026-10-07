@@ -75,7 +75,7 @@
 
 | 名前 | 置き場 | 中身 |
 | --- | --- | --- |
-| `HalUno`（`begin`・`srf02_poll`・`isr_step`） | `src/hal_uno.h` | `io_hal.h` の実物。`begin` は Timer2・`Servo`・`Wire` の準備、`srf02_poll` は待たずに 1 回の測定を進める、`isr_step` は Timer2 の割り込みから呼ぶ刻み |
+| `HalUno`（`begin`・`srf02_poll`・`isr_step`） | `src/hal_uno.h` | `io_hal.h` の実物。`begin` は Timer2・サーボの PWM（Timer1）・`Wire` の準備、`srf02_poll` は待たずに 1 回の測定を進める、`isr_step` は Timer2 の割り込みから呼ぶ刻み |
 | `kFwName` | `src/main.cpp` | `B` 行の `fw` の頭（`hve_cam_io-` ＋ `io_core_version()`） |
 
 ## 2. 機器・ホスト名
@@ -188,7 +188,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `IO_STEP_TICK_US` | `config.h` | 100 | **仮**（680 半ステップ毎秒なら約 1.47 ms ごとに刻む。その 1/14 の細かさ） |
 | `YAW_PINS` / `YAW_HALF_STEP_SEQUENCE` | `config.h` | D4〜D7 ／ 旧版と同じ並び | [-hardware.md](DetailedDesign-hardware.md) §2.2・旧版の実機確認 |
 | `SERVO_PIN` | `config.h` | 9 | **仮** |
-| `SRF02_ADDR` | `config.h` | 0x70 | SRF02 の工場出荷値 |
+| `SRF02_ADDR` | `config.h` | 0x72 | **この個体の値**（工場出荷は 0x70。2026-10-07 実機。旧版の実機でも 0x72）。個体を替えたら確かめる |
 | `SRF02_PERIOD_MS` | `config.h` | 70 | SRF02（1 回 約 66 ms。65 ms より早く始めない） |
 | `SRF02_WIRE_TIMEOUT_US` | `config.h` | 25000 | **仮** |
 | `IO_WDT_TIMEOUT` | `config.h` | `WDTO_500MS` | **仮** |

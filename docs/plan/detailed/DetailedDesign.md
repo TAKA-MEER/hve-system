@@ -213,7 +213,7 @@ spec §0.1（スクロールさせない）を守る。検査は旧版の `check
 | `io_codec` | 行の読み取り（`M`）・組み立て（`C`・`B`）。**読めない行は捨てる**（指令が途絶えれば止まる） | ○ |
 | `IoController` | 指令の受付・`IO_CMD_TIMEOUT_MS` のウォッチドッグ・ピッチの角度を `PITCH_MIN_DEG`〜`PITCH_MAX_DEG` に丸める（**UnitV2 側の可動範囲とは別の、2 つ目の守り**）・ヨーの速さを上限で丸める。ハードウェアは `io_hal.h` の抽象を通す | ○（偽 HAL） |
 | `StepRate` | 一定周期の割り込みで、半ステップの速さ（1 秒あたり）を刻みに直す（位相の足し算） | ○ |
-| `hal_uno` ／ `main.cpp` | Timer2 の割り込みで 28BYJ-48 を刻む・`Servo` で MG996R・`Wire` で SRF02（**時間切れ付き**）・AVR のウォッチドッグ | × |
+| `hal_uno` ／ `main.cpp` | Timer2 の割り込みで 28BYJ-48 を刻む・Timer1 のハードウェア PWM で MG996R・`Wire` で SRF02（**時間切れ付き**）・AVR のウォッチドッグ | × |
 
 **SRF02 を Arduino に付ける理由**: UNO は 5 V で、5 V の I2C の SRF02 をレベル変換なしで直結できる（旧版はラズパイの 3.3 V のため I2C-LVL01 が要った）。
 

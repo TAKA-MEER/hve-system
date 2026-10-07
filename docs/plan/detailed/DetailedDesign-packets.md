@@ -36,7 +36,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFTUI-01` | 1 | 昇降部の画面・`tools/fake_lift_server.py`・`tools/lift_probe.py` の v2 化 | LIFT-03（取り決めの確定） | 不要 |
 | `WP-LIFT-04` | 1 | ESP32 の実物 v2（WS の 2 つの口・HTTP の設定 API・NVS・画面の埋め込み） | LIFT-03・LIFTUI-01 | 要（昇降部） |
 | `WP-IO-01` | 2 | `io_core`（行・ウォッチドッグ・丸め・刻み）とホスト試験 | BASE-02 | 不要 |
-| `WP-IO-02` | 2 | UNO の実物（Timer2・`Servo`・`Wire`・ウォッチドッグ） | IO-01 | 要（UNO・モータ・SRF02） |
+| `WP-IO-02` | 2 | UNO の実物（Timer2・Timer1 の PWM・`Wire`・ウォッチドッグ） | IO-01 | 要（UNO・モータ・SRF02） |
 | `WP-CAM-04` | 3 | カメラモジュールのアプリを Python 3.8 へ移し、v2 の取り決めにする（`uno_link`・`uno_hw`・`lift_link`・設定の中継・偽物のモード） | BASE-02・LIFT-03・**MEAS-06 の 1・2・5** | 不要 |
 | `WP-VIDEO-02` | 3 | 映像を UnitV2 の取り込みに合わせる | MEAS-06 | 要（UnitV2） |
 | `WP-UI-02` | 3 | カメラモジュールの画面を v2 にする | CAM-04 | 不要（偽物のモード） |
