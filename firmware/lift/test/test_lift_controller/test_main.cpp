@@ -59,13 +59,18 @@ void assert_reason(StopReason expected, const LiftState& state) {
 }
 
 // 持ち主の hold を出し直しながら回し続ける（天井は新しいまま）
-void hold_until(uint32_t end_ms, LiftController* ctrl, FakeHal* hal, const ConnId& conn,
-                int press) {
-  for (uint32_t t = 0; t <= end_ms; t += 100) {
+void hold_from_to(uint32_t start_ms, uint32_t end_ms, LiftController* ctrl, FakeHal* hal,
+                  const ConnId& conn, int press) {
+  for (uint32_t t = start_ms; t <= end_ms; t += 100) {
     hal->set_height(500, true, t);
     ctrl->on_hold(conn, up_hold(press, 40, t), t);
     ctrl->step(t);
   }
+}
+
+void hold_until(uint32_t end_ms, LiftController* ctrl, FakeHal* hal, const ConnId& conn,
+                int press) {
+  hold_from_to(0, end_ms, ctrl, hal, conn, press);
 }
 
 }  // namespace
@@ -239,7 +244,7 @@ void test_owner_change_does_not_reset_max_run() {
   hold_until(9000, &ctrl, &hal, ui(1), 1);
   TEST_ASSERT_TRUE(hal.motor_moving());
   // 持ち主が替わっても同じ方向が続く限り数え続ける（上限を逃れられない）
-  hold_until(11100, &ctrl, &hal, module(2), 9);
+  hold_from_to(9100, 11100, &ctrl, &hal, module(2), 9);
   const LiftState state = ctrl.step(11100);
   TEST_ASSERT_FALSE(hal.motor_moving());
   assert_reason(StopReason::MAX_RUN, state);
