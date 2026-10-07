@@ -72,6 +72,14 @@
 | `LiftController::on_hello`・`on_hold`・`on_release`・`on_close`・`set_ui_clients`・`step` | `lift_controller.h` | 接続ごとの受け口と、判定をモータに効かせる 1 周期 |
 | `PendingEvent`・`PendingType`・`ConnSlot`・`kSettingsNvsKey`（`"settings"`） | `firmware/lift/src/main.cpp`（`WP-LIFT-04`） | WS のタスクから `loop()` へ渡すイベントの列・WS の接続と `LiftController` の接続番号の対応・設定を置く NVS の鍵 |
 
+### 1.3 カメラモジュールのアプリの名前（`WP-CAM-04` で足した。2026-10-07 に管理担当が登録）
+
+| 名前 | 置き場 | 中身 |
+| --- | --- | --- |
+| `OWN_AXES`・`LIFT_AXES` ／ `validate_settings`・`load_settings`・`save_settings` の `axes=` 引数 | `camera/hve_camera/settings.py` | 自分で保存する軸（ヨー・ピッチ）と、昇降部へ中継する軸の区別 |
+| `LiftLink.current_host` | `camera/hve_camera/lift_link.py` | いま繋いでいる昇降部のホスト（画面に昇降部の IP とリンクを出すため） |
+| `FakeHardware.set_io_lost` | `camera/hve_camera/hw/` の偽物 | 偽物のモードで Arduino から行が来ない状態を作る |
+
 ### 1.2 `cam_io` の実物の名前（`WP-IO-02` で足した。2026-10-07 に管理担当が登録）
 
 | 名前 | 置き場 | 中身 |
