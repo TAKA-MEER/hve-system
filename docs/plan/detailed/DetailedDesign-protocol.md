@@ -88,7 +88,8 @@
 | `GET /api/settings` | 自分のピッチ・ヨーの設定と、**昇降部から取った**昇降の設定をまとめて返す（形は旧版と同じ 4 軸）。昇降部に繋がらないときは `503` |
 | `PUT /api/settings` | 4 軸をまとめて受ける。**先に 4 軸とも自分で検証 → 昇降部へ `PUT`（昇降の 2 軸）→ 成功したら自分の 2 軸を保存**。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
 | `state.lift` | 昇降部の `state` のうち `dir`・`duty`・`reason`・`bottom`・`height_mm`・`height_ok`・`top_detect`・`owner`・`ui_clients` を載せる。**昇降部の IP**（`lift_ip`）も載せる（画面に昇降部へのリンクを出す。[DetailedDesign.md](DetailedDesign.md) §4.6） |
-| `state.ceiling` | 自分で測った値（`status`・`mm`・`age_ms`）と、**昇降部が返した判定**（`ok`・`reason`）。カメラモジュールは許可を計算しない |
+| `state.ceiling` | 自分で測った値（`status`・`mm`・`age_ms`）と、**昇降部が返した判定**（`ok`・`reason`）。カメラモジュールは許可を計算しない。**判定は、カメラモジュールが持ち主で昇降部が判定を返しているときだけ載せ、それ以外（止まっている・別の画面が持ち主・昇降部が `ceiling` を返さない）は `ok`・`reason` を `null` にする**（昇降部と切れているときは `ok: false`・`reason: LINK_LOST`）。2026-10-07 実機: 判定が無いのに `CEILING_STALE` を入れていたので、止まっている間ずっと画面が「天井 値なし」になり、上昇ボタンも薄くなっていた |
+| 画面の天井のバッジ | **判定（`reason`）があればそれで出す。無ければ自分で測った `status` で出す**（`MEASURED` → 距離・`TOO_NEAR` → 近すぎ・`NO_ECHO` → 範囲外・`READ_ERROR`／値が無い → 値なし）。**上昇ボタンを薄くするのは、昇降部と切れているときと、判定が `ok: false` のときだけ**（判定が無いだけでは薄くしない。上昇してよいかは昇降部が決める） |
 | `state.reason` | 旧版の選び方のうち、天井の理由は昇降部の `ceiling.reason` を使う。`IO_LOST`（Arduino から行が来ない）を `LINK_LOST` の次に足す |
 
 ## 5. UART（UnitV2 ⇔ Arduino）
