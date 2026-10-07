@@ -118,15 +118,23 @@ function reasonText(reason) {
   return {cls: 'warn', text: `止まりました（理由が分かりません: ${reason}）`};
 }
 
-/** 天井のバッジの `{色, 文言}`。距離・値なし・範囲外（spec Spec-safety.md §2 #3b） */
+/**
+ * 天井のバッジの `{色, 文言}`。昇降部の判定（`reason`）があればそれで出し、
+ * 無ければ自分で測った `status` で出す（protocol §4）
+ */
 function ceilingText(ceiling) {
   const value = ceiling || {};
-  if (value.reason === 'OUT_OF_RANGE') return {cls: '', text: '天井 範囲外'};
-  if (value.reason === 'CEILING_STALE' || value.mm === null || value.mm === undefined) {
-    return {cls: 'ng', text: '天井 値なし'};
+  const hasMm = value.mm !== null && value.mm !== undefined;
+  if (value.reason !== null && value.reason !== undefined) {
+    if (value.reason === 'OUT_OF_RANGE') return {cls: '', text: '天井 範囲外'};
+    if (value.reason === 'CEILING_STALE' || !hasMm) return {cls: 'ng', text: '天井 値なし'};
+    if (value.reason === 'CEILING_NEAR') return {cls: 'warn', text: `天井 ${value.mm} mm`};
+    return {cls: '', text: `天井 ${value.mm} mm`};
   }
-  if (value.reason === 'CEILING_NEAR') return {cls: 'warn', text: `天井 ${value.mm} mm`};
-  return {cls: '', text: `天井 ${value.mm} mm`};
+  if (value.status === 'MEASURED' && hasMm) return {cls: '', text: `天井 ${value.mm} mm`};
+  if (value.status === 'TOO_NEAR') return {cls: 'warn', text: '天井 近すぎ'};
+  if (value.status === 'NO_ECHO') return {cls: '', text: '天井 範囲外'};
+  return {cls: 'ng', text: '天井 値なし'};
 }
 
 /** 上端の検知の表示。`top_detect` が `true` でなければ「一時無効」（`W-1`）。出さないときは `null` */
@@ -169,13 +177,14 @@ function heightText(lift) {
 
 /**
  * その軸のボタンを薄くするか。
- * 昇降部と切れている・天井の `ok` が `false` のときは上昇、下端のときは下降
+ * 昇降部と切れている・天井の判定が `ok: false` のときは上昇（判定が無いだけでは薄くしない）、
+ * 下端のときは下降
  */
 function holdBlocked(state, axis) {
   const value = state || {};
   const lift = value.lift || {};
   const ceiling = value.ceiling || {};
-  if (axis === 'lift_up') return lift.link !== 'ok' || ceiling.ok !== true;
+  if (axis === 'lift_up') return lift.link !== 'ok' || ceiling.ok === false;
   if (axis === 'lift_down') return lift.bottom === true;
   return false;
 }

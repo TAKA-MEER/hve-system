@@ -133,6 +133,13 @@ test('天井のバッジは距離・値なし・範囲外を出す（spec Spec-s
   assert.deepEqual(app.ceilingText({mm: null, reason: 'CEILING_STALE', ok: false}), {cls: 'ng', text: '天井 値なし'});
   assert.deepEqual(app.ceilingText({mm: 120, reason: 'CEILING_NEAR', ok: false}), {cls: 'warn', text: '天井 120 mm'});
   assert.deepEqual(app.ceilingText({mm: null, reason: 'OUT_OF_RANGE', ok: true}), {cls: '', text: '天井 範囲外'});
+  // 判定が無いとき（止まっている間）は自分で測った status で出す
+  const own = (status, mm) => ({status, mm, ok: null, reason: null});
+  assert.deepEqual(app.ceilingText(own('MEASURED', 2400)), {cls: '', text: '天井 2400 mm'});
+  assert.deepEqual(app.ceilingText(own('TOO_NEAR', null)), {cls: 'warn', text: '天井 近すぎ'});
+  assert.deepEqual(app.ceilingText(own('NO_ECHO', null)), {cls: '', text: '天井 範囲外'});
+  assert.deepEqual(app.ceilingText(own('READ_ERROR', null)), {cls: 'ng', text: '天井 値なし'});
+  assert.deepEqual(app.ceilingText({}), {cls: 'ng', text: '天井 値なし'});
 });
 
 test('高さの OSD は読めない値と値なしを区別する', () => {
@@ -156,6 +163,11 @@ test('ボタンを薄くする条件（昇降部と切断・天井の ok が fal
 
   const stale = {lift: {link: 'ok', bottom: false}, ceiling: {mm: 2200, ok: false, reason: 'CEILING_STALE'}};
   assert.equal(app.holdBlocked(stale, 'lift_up'), true);
+
+  // 判定が無いだけ（止まっている間）では薄くしない。判定が ok:false のときだけ薄くする
+  const idle = {lift: {link: 'ok', bottom: false}, ceiling: {status: 'MEASURED', mm: 2200, ok: null, reason: null}};
+  assert.equal(app.holdBlocked(idle, 'lift_up'), false);
+  assert.equal(app.holdBlocked({lift: {link: 'ok'}, ceiling: {ok: false, reason: 'LINK_LOST'}}, 'lift_up'), true);
 
   const bottom = {lift: {link: 'ok', bottom: true}, ceiling: {mm: 2200, ok: true, reason: 'NONE'}};
   assert.equal(app.holdBlocked(bottom, 'lift_down'), true);
