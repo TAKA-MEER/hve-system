@@ -11,6 +11,7 @@
 // 5. 映像が無いときと途絶えたとき「映像がありません」が見え、壊れた画像（アイコン・alt 文字）が見えない
 //    ※5 は `hve_video` を立てて**いない**ときに始める（試験の中で立てたり止めたりする）
 // 純関数の試験（web.test.js）ではこの 4 本の経路は縛れないので、ブラウザで通す。
+// 6〜9: 上端の検知の表示・IO_LOST の文言・静止画（WP-UI-02）。
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -344,6 +345,91 @@ test('5 映像が無いときと途絶えたとき「映像がありません」
       await cleanup();
     }
   });
+
+/* --- 6. 上端の検知・IO_LOST・静止画 ------------------------------------------ */
+test('6 top_detect が false のあいだ「上端の検知: 一時無効」が見える（偽の昇降部は false）', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  try {
+    const badge = page.locator('#bTop');
+    await badge.waitFor({state: 'visible', timeout: 3000});
+    assert.equal((await badge.innerText()).trim(), '上端の検知: 一時無効');
+    // 持ち主・昇降部の画面の数も state から出ている（偽の昇降部は持ち主なし・0 台）
+    assert.match(await page.locator('#bOwner').innerText(), /^持ち主 /);
+    assert.equal((await page.locator('#bLiftUi').innerText()).trim(), '昇降部の画面 0');
+    // 偽の昇降部は IP を持たないのでリンクは出さない
+    assert.equal(await page.locator('#bLiftLink').isVisible(), false);
+    assert.deepEqual(errors, []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('7 IO_LOST のとき停止の帯に文言が出る', async (browser) => {
+  await postFake({io_lost: true});
+  const {page, cleanup} = await openScreen(browser);
+  try {
+    const bar = page.locator('#stopbar');
+    await bar.waitFor({state: 'visible', timeout: 3000});
+    assert.equal((await bar.innerText()).trim(),
+      'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません');
+  } finally {
+    await postFake({io_lost: false});
+    await cleanup();
+  }
+});
+
+// 1×1 の PNG（静止画の代わりに返す）
+const PNG_1PX = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64');
+
+test('8 静止画のボタンで :8080/snapshot を取り寄せ、重ねて出し、閉じると戻る', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  const requests = [];
+  try {
+    const port = await page.evaluate(() => Number(new URL(document.getElementById('videoImage').src).port));
+    await page.route('**/snapshot', (route) => {
+      requests.push(route.request().url());
+      route.fulfill({status: 200, contentType: 'image/png', body: PNG_1PX});
+    });
+    assert.equal(await page.locator('#snapshot').isVisible(), false, '押す前は出ていない');
+    await page.click('#snapBtn');
+    await page.locator('#snapshot').waitFor({state: 'visible', timeout: 3000});
+    await page.waitForFunction(() => document.getElementById('snapImage').complete
+      && document.getElementById('snapImage').naturalWidth > 0, null, {timeout: 3000});
+    assert.equal(requests.length, 1, `/snapshot を 1 回取り寄せた（${JSON.stringify(requests)}）`);
+    const url = new URL(requests[0]);
+    assert.equal(url.port, '8080', 'ポートは 8080');
+    assert.equal(Number(url.port), port, '映像と同じポート');
+    assert.equal(url.pathname, '/snapshot');
+    assert.equal(url.hostname, new URL(BASE).hostname, '宿主は画面と同じ');
+    assert.equal(await page.locator('#snapImage').isVisible(), true, '静止画が見える');
+    // 映像の枠の中に重なっている
+    const inside = await page.evaluate(() => document.getElementById('video').contains(document.getElementById('snapshot')));
+    assert.equal(inside, true, '映像の上に重ねている');
+    // 表示中も操作できる（昇降のボタンが映像の外で押せる）
+    assert.equal(await page.locator('[data-axis=lift_up]').isVisible(), true);
+
+    await page.click('#snapClose');
+    await page.locator('#snapshot').waitFor({state: 'hidden', timeout: 3000});
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('9 静止画が取れないときは案内を出す（壊れた画像を見せない）', async (browser) => {
+  const {page, cleanup} = await openScreen(browser);
+  try {
+    await page.route('**/snapshot', (route) => route.fulfill({status: 503, body: ''}));
+    await page.click('#snapBtn');
+    await page.locator('#snapMsg').waitFor({state: 'visible', timeout: 3000});
+    assert.equal((await page.locator('#snapMsg').innerText()).trim(), '静止画を取得できません');
+    assert.equal(await page.locator('#snapImage').isVisible(), false);
+  } finally {
+    await cleanup();
+  }
+});
 
 (async () => {
   const browser = await chromium.launch({

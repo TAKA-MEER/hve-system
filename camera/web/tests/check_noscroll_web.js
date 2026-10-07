@@ -5,7 +5,7 @@
 //
 // docs/plan/spec/mockup/check_noscroll.js を、実装の画面（モックアップではない）向けに
 // 作り直したもの。状態の作り方は URL 引数ではなく POST /api/fake で偽物を操作する。
-// 17 の画面サイズ × 3 状態（通常・天井の値なし・設定画面）で、
+// 17 の画面サイズ × 4 状態（通常・天井の値なし・設定画面・静止画の重ね表示）で、
 // ページ・要素のスクロールと中身のはみ出し、操作部品の画面外・カード外・小さすぎを検出する。
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -23,6 +23,7 @@ const states = [
   {name: '通常', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200}},
   {name: '天井の値なし', fake: {ceiling: {status: 'READ_ERROR'}, height_mm: 1200}},
   {name: '設定画面', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200}, settings: true},
+  {name: '静止画の重ね表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200}, snapshot: true},
 ];
 
 async function setFake(fake) {
@@ -56,7 +57,7 @@ const MEASURE = () => {
       bad.push(`overflow ${el.tagName}.${el.id || el.className} ${el.scrollWidth}x${el.scrollHeight}>${el.clientWidth}x${el.clientHeight}`);
     }
   }
-  const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings, .zoombtn')];
+  const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings, .zoombtn, #snapBtn')];
   const overlay = document.querySelector('.overlay.show');
   if (overlay) must.push(...overlay.querySelectorAll('input, button'));
   for (const el of must) {
@@ -91,6 +92,10 @@ const MEASURE = () => {
       if (state.settings) {
         await page.click('#openSettings');
         await page.waitForSelector('#settings.show');
+      }
+      if (state.snapshot) {
+        await page.click('#snapBtn');
+        await page.waitForSelector('#snapshot.show');
       }
       await page.waitForTimeout(120);
       const bad = await page.evaluate(MEASURE);

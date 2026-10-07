@@ -175,6 +175,11 @@ async function saveSettingsOverlay() {
         : '保存できません（理由が分かりませんでした）';
       return;
     }
+    if (response.status === 503) {
+      // 昇降の設定は昇降部へ中継する。繋がらないときはカメラ部も保存しない（protocol §4）
+      document.getElementById('stErr').textContent = '昇降部に繋がらないため保存できません（何も保存していません）';
+      return;
+    }
     if (!response.ok) {
       document.getElementById('stErr').textContent = '保存できません（サーバーのエラー）';
       return;

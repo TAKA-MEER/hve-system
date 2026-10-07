@@ -14,7 +14,10 @@
   <span class="badge" id="bCeil"><span class="dot"></span><span>天井 —</span></span>
   <span class="badge" id="bClients"><span>端末 —</span></span>
   <span class="badge warn" id="bProv" style="display:none" title="仮値のまま動いているパラメータがあります"><span class="dot"></span><span>仮値</span></span>
-  <span class="badge warn" id="bTop" style="display:none" title="上端の閾値が未設定のため上端で止まりません"><span class="dot"></span><span>上端 未設定（開発中）</span></span>
+  <span class="badge warn" id="bTop" style="display:none" title="上端を検知しないため、上端で止まりません。目で見て操作してください"><span class="dot"></span><span>上端の検知: 一時無効</span></span>
+  <span class="badge" id="bOwner" title="いま昇降を操作している画面"><span>持ち主 —</span></span>
+  <span class="badge" id="bLiftUi" title="昇降部の画面を開いている台数"><span>昇降部の画面 —</span></span>
+  <a class="badge link" id="bLiftLink" style="display:none" target="_blank" rel="noopener" title="昇降部の画面を開く"></a>
   <span class="badge fake" id="bFake" style="display:none"><span>偽物のモード</span></span>
   <span class="badge ng" id="bWs" style="display:none" title="カメラ部から状態が届きません。再接続を試みています"><span class="dot"></span><span>接続切れ</span></span>
   <span class="spacer"></span>
@@ -27,6 +30,7 @@
     <img class="frame" id="videoImage" alt="カメラ映像">
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
     <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ —</span></div>
+<button class="snapbtn" id="snapBtn" title="静止画を取り寄せて重ねて表示する">静止画</button>
     <button class="guidebtn" id="toggleGuide" title="ガイド線の表示を切り替える">ガイド線</button>
     <div class="zoom" aria-label="デジタルズーム">
       <button class="zoombtn" id="zIn" title="拡大">＋</button>
@@ -36,6 +40,12 @@
     <!-- フレームが来るまで出す（フレームが来たら app.js が隠す） -->
     <div class="nosig show" id="nosig">映像がありません</div>
     <div class="stopbar" id="stopbar"></div>
+    <!-- 静止画（押した端末だけ。映像の上に重ねる。操作ボタンは映像の外なので表示中も効く） -->
+    <div class="snapshot" id="snapshot">
+      <img id="snapImage" alt="静止画">
+      <div class="snapmsg" id="snapMsg">取得中…</div>
+      <button class="hbtn snapclose" id="snapClose">閉じる</button>
+    </div>
   </div>
 
   <div class="panel">
