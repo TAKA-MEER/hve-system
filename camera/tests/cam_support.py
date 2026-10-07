@@ -1,4 +1,4 @@
-"""`WP-CAM-02` の試験で共有する道具。
+"""`WP-CAM-04` の試験で共有する道具。
 
 ファイル名が `test_` で始まらないので pytest には収集されず、他のモジュールを
 `from tests.cam_support import ...` として読み込んで使う。
@@ -29,8 +29,6 @@ SETTINGS: dict[str, dict[str, float]] = {
 
 #: 試験が使う params.toml の部分。値は DetailedDesign-names.md §5 に合わせる。
 PARAMS: dict[str, Any] = {
-    "ceiling_margin_mm": 500,
-    "ceiling_stale_ms": 600,
     "hold_timeout_ms": 400,
     "lift_cmd_period_ms": 100,
     "lift_state_timeout_ms": 600,
@@ -39,15 +37,23 @@ PARAMS: dict[str, Any] = {
     "yaw_steps_per_rev": 4096,
     "srf02_min_range_mm": 150,
     "srf02_max_range_mm": 6000,
-    "srf02_i2c_addr": 0x70,
-    "srf02_ranging_wait_ms": 70,
     "pitch_min_deg": -45,
     "pitch_max_deg": 45,
     "zoom_max": 4,
     "zoom_step": 0.5,
-    "lift_ws_url": "ws://hve-lift.local/ws",
+    "lift_host": "",
+    "lift_mdns_name": "hve-lift",
+    "lift_port": 80,
+    "module_name": "hve-cam",
+    "module_ceiling_sensor": True,
+    "io_device": "/dev/ttyS1",
+    "io_baud": 115200,
+    "io_cmd_period_ms": 50,
+    "io_lost_ms": 600,
+    "ceiling_read_stale_ms": 600,
+    "uno_clock_window": 20,
     "video_port": 8080,
-    "provisional": ["ceiling_margin_mm", "ceiling_stale_ms"],
+    "provisional": ["hold_timeout_ms", "lift_cmd_period_ms"],
 }
 
 
@@ -101,40 +107,55 @@ class RecordingVideoZoom:
 
 
 class FakeEsp32:
-    """偽の ESP32 の WS サーバ。`cmd` を受けて覚えられる。
+    """偽の昇降部の WS サーバ。v2 の取り決め（`hello`・`hold`・`release`・`state`）を話す。
 
-    aiohttp で立てる本物の WS なので `LiftLink` は本物の経路を通る
-    （DetailedDesign §4.2「偽 ESP32 サーバ」）。
+    aiohttp で立てる本物の WS なので `LiftLink` は本物の経路を通る。
+    設定 API（`/api/settings`）も出し、設定の中継の試験にも使う。
     """
 
     def __init__(self, clock: Callable[[], float], state_period_ms: int = 50) -> None:
         self._clock = clock
         self._state_period_ms = state_period_ms
-        self.cmd_history: list[dict[str, Any]] = []
+        self.hello_history: list[dict[str, Any]] = []
+        self.hold_history: list[dict[str, Any]] = []
+        self.release_history: list[dict[str, Any]] = []
         self.state_history: list[dict[str, Any]] = []
-        self.height_mm = 0
-        self.bottom = False
-        self.top_mm: int | None = None
+        #: 昇降の設定（`GET /api/settings` が返す・`PUT /api/settings` が置き換える）
+        self.lift_settings: dict[str, dict[str, float]] = {
+            "lift_up": {"min": 10, "max": 60, "init": 30},
+            "lift_down": {"min": 10, "max": 60, "init": 30},
+        }
+        #: `True` にすると `PUT /api/settings` を `400` で返す（中継の変異 5 用）
+        self.fail_put = False
         #: `True` にすると `state` を出し止める。途絶えを再現する。
         self.silent = False
         self._ws: web.WebSocketResponse | None = None
         self._runner: web.AppRunner | None = None
         self._task: asyncio.Task[None] | None = None
-        self._cmd_at_ms: list[float] = []
         self._seq = 0
 
     @property
-    def last_cmd(self) -> dict[str, Any] | None:
-        return self.cmd_history[-1] if self.cmd_history else None
+    def holds(self) -> list[dict[str, Any]]:
+        return self.hold_history
+
+    @property
+    def last_hold(self) -> dict[str, Any] | None:
+        return self.hold_history[-1] if self.hold_history else None
 
     @property
     def connected(self) -> bool:
         return self._ws is not None and not self._ws.closed
 
     async def start(self) -> str:
-        """立ち上げて `ws://` の URL を返す。"""
+        """立ち上げて `/ws/module` の URL を返す。"""
         app = web.Application()
-        app.add_routes([web.get("/ws", self._handler)])
+        app.add_routes(
+            [
+                web.get("/ws/module", self._handler),
+                web.get("/api/settings", self._get_settings),
+                web.put("/api/settings", self._put_settings),
+            ]
+        )
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "127.0.0.1", 0)
@@ -142,7 +163,14 @@ class FakeEsp32:
         assert self._runner is not None
         host, port = self._runner.addresses[0][:2]
         self._task = asyncio.create_task(self._send_states())
-        return f"ws://{host}:{port}/ws"
+        return f"ws://{host}:{port}/ws/module"
+
+    @property
+    def http_base(self) -> str:
+        """設定 API の起点（`http://127.0.0.1:ポート`）。`start()` のあとに使う。"""
+        assert self._runner is not None
+        host, port = self._runner.addresses[0][:2]
+        return f"http://{host}:{port}"
 
     async def stop(self) -> None:
         if self._task is not None:
@@ -166,42 +194,79 @@ class FakeEsp32:
         return ws
 
     def _accept(self, raw: str) -> None:
-        """`cmd` を受けて覚える。読めないものは無視する。"""
+        """`hello`・`hold`・`release` を受けて覚える。読めないものは無視する。"""
         with contextlib.suppress(ValueError):
             data = json.loads(raw)
-            if isinstance(data, dict) and data.get("t") == "cmd":
-                self.cmd_history.append(data)
-                self._cmd_at_ms.append(self._clock())
+            if not isinstance(data, dict):
+                return
+            kind = data.get("t")
+            if kind == "hello":
+                self.hello_history.append(data)
+            elif kind == "hold":
+                self.hold_history.append(data)
+            elif kind == "release":
+                self.release_history.append(data)
+
+    async def _get_settings(self, request: web.Request) -> web.Response:
+        return web.json_response(
+            {"settings": self.lift_settings, "using_defaults": False}
+        )
+
+    async def _put_settings(self, request: web.Request) -> web.Response:
+        try:
+            data = await request.json()
+        except ValueError:
+            return web.json_response({"errors": ["JSON が読めない"]}, status=400)
+        if self.fail_put:
+            return web.json_response({"errors": ["lift_up.min: だめ"]}, status=400)
+        if not isinstance(data, dict):
+            return web.json_response({"errors": ["オブジェクトでない"]}, status=400)
+        for axis in ("lift_up", "lift_down"):
+            entry = data.get(axis)
+            if not isinstance(entry, dict):
+                return web.json_response({"errors": [f"{axis}: 無い"]}, status=400)
+            self.lift_settings[axis] = {
+                key: entry[key] for key in ("min", "max", "init") if key in entry
+            }
+        return web.json_response({"settings": self.lift_settings, "using_defaults": False})
 
     async def _send_states(self) -> None:
-        """`LIFT_STATE_PERIOD_MS` ごとに `state` を出す。"""
+        """`state` を v2 の形で出す（持ち主なし・天井なしの止まった状態）。"""
         period = self._state_period_ms / 1000.0
         while True:
             await asyncio.sleep(period)
             ws = self._ws
             if ws is None or ws.closed or self.silent:
                 continue
-            last = self.cmd_history[-1] if self.cmd_history else None
             self._seq += 1
-            if last is None:
-                reason, direction, duty = "NONE", "stop", 0
-                cmd_age_ms = 0
-            else:
-                direction, duty = last["dir"], last["duty"]
-                reason = "CMD_STOP" if direction == "stop" else "NONE"
-                cmd_age_ms = int(self._clock() - self._cmd_at_ms[-1])
             state = {
                 "t": "state",
                 "seq": self._seq,
-                "dir": direction,
-                "duty": duty,
-                "reason": reason,
-                "bottom": self.bottom,
-                "height_mm": self.height_mm,
+                "dir": "stop",
+                "duty": 0,
+                "reason": "CMD_STOP",
+                "bottom": False,
+                "height_mm": 0,
                 "height_ok": True,
-                "top_mm": self.top_mm,
-                "cmd_age_ms": cmd_age_ms,
-                "fw": "fake-esp32-0.1.0",
+                "top_detect": False,
+                "ceiling": {
+                    "used": False,
+                    "status": "MISSING",
+                    "mm": None,
+                    "age_ms": 0,
+                    "ok": False,
+                    "reason": "CEILING_STALE",
+                },
+                "owner": None,
+                "ui_clients": 0,
+                "module": {
+                    "connected": True,
+                    "ceiling_sensor": True,
+                    "ip": "127.0.0.1",
+                    "name": "hve-cam",
+                },
+                "provisional": [],
+                "fw": "fake-esp32-0.2.0",
             }
             self.state_history.append(state)
             with contextlib.suppress(Exception):
@@ -215,6 +280,6 @@ def make_fake_hw(clock: Callable[[], float], distance_mm: int = 2000) -> FakeHar
     return hw
 
 
-def make_fake_lift(clock: Callable[[], float], top_mm: int | None = None) -> FakeLift:
-    """偽の昇降部。上端の閾値は未設定（DetailedDesign-names.md §5 の `LIFT_TOP_MM`）。"""
-    return FakeLift(clock, top_mm=top_mm)
+def make_fake_lift(clock: Callable[[], float]) -> FakeLift:
+    """偽の昇降部（プロセス内）。"""
+    return FakeLift(clock)

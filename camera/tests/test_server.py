@@ -48,9 +48,26 @@ def pipeline_of(app) -> VideoPipeline:
     return app["pipeline"]
 
 
+async def _read_until(content, sep: bytes) -> bytes:
+    """`sep` まで読み、`sep` を含めて返す。余分に読んだ分は戻す。
+
+    aiohttp 3.6 の `StreamReader` には `readuntil` が無いための代替。
+    """
+    buf = b""
+    while sep not in buf:
+        chunk = await content.readany()
+        if not chunk:
+            raise AssertionError("区切りが来る前に配信が切れた")
+        buf += chunk
+    head, _, rest = buf.partition(sep)
+    if rest:
+        content.unread_data(rest)
+    return head + sep
+
+
 async def first_jpeg(response) -> tuple[dict[str, str], bytes]:
     """MJPEG の最初の 1 フレームを `(区切りのヘッダ, JPEG)` で返す。"""
-    head = await response.content.readuntil(b"\r\n\r\n")
+    head = await _read_until(response.content, b"\r\n\r\n")
     fields = {}
     for line in head.decode().splitlines():
         name, _, value = line.partition(":")
@@ -96,8 +113,9 @@ def request_from(peer: str, body: bytes = b"") -> object:
         return None
 
     transport.get_extra_info.side_effect = get_extra_info
+    # aiohttp 3.6 の StreamReader は (protocol, *, limit, ...) なので limit は名前で渡す
     payload = streams.StreamReader(
-        mock.Mock(_reading_paused=False), 2**16, loop=asyncio.get_event_loop()
+        mock.Mock(_reading_paused=False), limit=2**16, loop=asyncio.get_event_loop()
     )
     payload.feed_data(body)
     payload.feed_eof()
@@ -120,7 +138,7 @@ async def test_stream_is_multipart_x_mixed_replace(aiohttp_client):
         content_type = response.headers["Content-Type"]
         assert content_type.startswith("multipart/x-mixed-replace; boundary=")
         boundary = content_type.split("boundary=")[1]
-        head = await response.content.readuntil(b"\r\n\r\n")
+        head = await _read_until(response.content, b"\r\n\r\n")
     assert head.startswith(f"--{boundary}".encode())
 
 

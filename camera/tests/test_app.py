@@ -1,11 +1,10 @@
 """`CameraApp` の試験。**本物の経路**を通す。
 
 - 画面は aiohttp の WS クライアント（ブラウザ役）
-- 昇降部は [`FakeEsp32`](cam_support.py)（本物の WS サーバ）＋**本物の `LiftLink`**
+- 昇降部は [`FakeEsp32`](cam_support.py)（本物の WS サーバ＋設定 API）＋**本物の `LiftLink`**
 - 制御ループは `control_step()` を自分で回す（時計は `ManualClock`）
 
-これで「画面が押した操作が ESP32 の `cmd` になる」までを途切れさせずに確かめられる
-（[DetailedDesign.md](../../docs/plan/detailed/DetailedDesign.md) §4.2）。
+これで「画面が押した操作が昇降部の `hold`・`release` になる」までを途切れさせずに確かめる。
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import json
 import socket
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -35,7 +35,7 @@ from tests.cam_support import (
 )
 
 #: 設定を保存する場所。作業ツリーを汚さないよう `.briefs/tmp` の下へ置く
-SETTINGS_DIR = str(Path(__file__).resolve().parents[2] / ".briefs" / "tmp" / "cam02")
+SETTINGS_DIR = str(Path(__file__).resolve().parents[2] / ".briefs" / "tmp" / "cam04")
 
 
 class Rig:
@@ -51,17 +51,17 @@ class Rig:
         self.clock = ManualClock()
         self.esp32: FakeEsp32 | None = None
         self.hw = FakeHardware(self.clock)
+        self.hw.set_steady_ceiling(CeilingStatus.MEASURED, 2000)
         self.zoom = RecordingVideoZoom(deliver=deliver_zoom)
         self.settings = copy.deepcopy(SETTINGS)
         self.fake = fake
         self.autostart = autostart
         self.use_fake_lift = use_fake_lift
-        #: 画面を配る置き場（`WP-UI-01` で `camera/web` を入れる）
+        #: 画面を配る置き場（`WP-UI-02` で `camera/web` を入れ直す）
         self.web_dir = web_dir
         self.client: TestClient | None = None
         self.app: Any = None
-        #: 制御ループを何回回したか。指令は 1 回につき 1 本なので、指令の到達を待ち合わせに使う
-        self.steps = 0
+        self.params: dict[str, Any] = dict(PARAMS)
 
     @property
     def camera(self) -> Any:
@@ -73,32 +73,38 @@ class Rig:
         return self.camera._lift  # noqa: SLF001 - 試験から接続状態を見る
 
     @property
-    def cmds(self) -> list[dict[str, Any]]:
-        """受け取った指令の履歴。どちらの昇降部でも同じ形。"""
+    def holds(self) -> list[dict[str, Any]]:
+        """昇降部が受け取った `hold` の履歴。どちらの昇降部でも同じ。"""
         if self.use_fake_lift:
-            return self.lift.cmd_history
+            return self.lift.hold_history
         assert self.esp32 is not None
-        return self.esp32.cmd_history
+        return self.esp32.hold_history
 
     @property
-    def last_cmd(self) -> dict[str, Any] | None:
-        return self.cmds[-1] if self.cmds else None
+    def releases(self) -> list[dict[str, Any]]:
+        if self.use_fake_lift:
+            return self.lift.release_history
+        assert self.esp32 is not None
+        return self.esp32.release_history
 
     async def start(self) -> TestClient:
         """偽 ESP32 を立ててから、**本物の `LiftLink`** をその URL に繋いでアプリを作る。"""
         if self.use_fake_lift:
             lift: Any = FakeLift(self.clock)
         else:
-            assert FakeEsp32 is not None
             self.esp32 = FakeEsp32(self.clock)
-            lift = LiftLink(await self.esp32.start(), self.clock)
+            url = await self.esp32.start()
+            parts = urlsplit(self.esp32.http_base)
+            self.params["lift_host"] = parts.hostname or "127.0.0.1"
+            self.params["lift_port"] = parts.port or 80
+            lift = LiftLink(url, self.clock)
 
         self.app = create_app(
             self.hw,
             lift,
             settings=self.settings,
             using_defaults=True,
-            params=PARAMS,
+            params=self.params,
             clock=self.clock,
             video_zoom=self.zoom,
             fake=self.fake,
@@ -118,36 +124,20 @@ class Rig:
             await self.esp32.stop()
             self.esp32 = None
 
-    async def pump(
-        self, ms: float = 100, distance_mm: int | None = 2000, expect: bool = True
-    ) -> Any:
-        """1 周期ぶん進める。
-
-        `distance_mm` を渡すと次の測定値を差し替える（天井を一定に保つ）。
-        **`None` なら差し替えない。**`POST /api/fake` で入れた値をそのまま使いたいとき用。
-        """
+    async def pump(self, ms: float = 100) -> Any:
+        """1 周期ぶん進める。天井は「十分遠い」を保つ（`freeze` したら止まる）。"""
         self.clock.advance(ms)
-        if distance_mm is not None:
-            self.hw.set_ceiling(CeilingStatus.MEASURED, distance_mm)
-        self.steps += 1
         await self.camera.control_step()
-        state = await self.camera.broadcast_state()
-        if expect:
-            await self.expect_cmds()
-        return state
+        if self.use_fake_lift:
+            self.lift._step(self.clock())  # noqa: SLF001 - プロセス内の偽物は手で進める
+        return await self.camera.broadcast_state()
 
-    async def expect_cmds(self) -> None:
-        """回した回数分の指令が昇降部に届くまで待つ。"""
-        await wait_until(lambda: len(self.cmds) >= self.steps)
+    async def wait_holds(self, count: int) -> None:
+        """昇降部に `hold` が `count` 本届くまで待つ。"""
+        await wait_until(lambda: len(self.holds) >= count)
 
-    async def warm(self) -> Any:
-        """1 回回して**天井の読み値と昇降部の `state` を手に入れる。**
-
-        指令は測定より先に送るので、最初の 1 回は `ceil_ok` が `false` のままになる。
-        試験したい経路に入る前に 1 回回しておく。
-        """
-        await self.pump()
-        await self.wait_state()
+    async def wait_releases(self, count: int) -> None:
+        await wait_until(lambda: len(self.releases) >= count)
 
     async def wait_state(self) -> None:
         """昇降部から `state` が届くまで待つ。"""
@@ -168,109 +158,96 @@ class Rig:
         await ws.receive_json(timeout=2)
         return ws
 
-    def last(self) -> dict[str, Any]:
-        assert self.last_cmd is not None, "まだ指令を受けていない"
-        return self.last_cmd
+    def last_hold(self) -> dict[str, Any]:
+        assert self.holds, "まだ `hold` を受けていない"
+        return self.holds[-1]
 
 
 @pytest.fixture
-async def rig() -> Any:
+async def rig(loop) -> Any:
     r = Rig()
     await r.start()
     await wait_until(lambda: r.lift.connected)  # WS が開いている = 繋がっている
+    assert r.esp32 is not None
+    await wait_until(lambda: bool(r.esp32.hello_history))  # hello は接続の少し後に届く
     try:
         yield r
     finally:
         await r.stop()
 
 
-# --- 画面 → ESP32 の本物の経路 ----------------------------------------------------------------------
+# --- 画面 → 昇降部の本物の経路 ----------------------------------------------------------------------
 
 
 async def test_hold_from_the_browser_reaches_the_esp32(rig: Rig) -> None:
-    await rig.warm()  # 最初の一本は天井を測る前の `false`
+    await rig.pump()  # 天井の読み値と `state` を手に入れる
+    await rig.wait_state()
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
     await rig.pump()
+    await rig.wait_holds(1)
 
-    cmd = rig.last()
-    assert cmd["t"] == "cmd"
-    assert cmd["dir"] == "up"
-    assert cmd["duty"] == 30
-    assert cmd["ceil_ok"] is True, "天井が遠いので上昇を許す"
+    hold = rig.last_hold()
+    assert hold["t"] == "hold"
+    assert hold["dir"] == "up"
+    assert hold["duty"] == 30
+    assert hold["press"] == 1
+    assert hold["ceiling"]["status"] == "MEASURED"
+    assert rig.esp32 is not None and rig.esp32.hello_history[0]["ceiling_sensor"] is True
     await ws.close()
 
 
-async def test_speed_from_the_browser_is_clamped(rig: Rig) -> None:
-    ws = await rig.browser()
-    await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 999})
-    await rig.wait_axis("lift_up")
-    await rig.pump()
-    assert rig.last()["duty"] == 60, "設定 `lift_up` の max 60 で止める"
-    await ws.close()
+async def test_nothing_is_sent_while_idle(rig: Rig) -> None:
+    for _ in range(3):
+        await rig.pump()
+    assert rig.holds == []
+    assert rig.releases == []
 
 
-async def test_ceil_ok_false_over_the_wire_when_the_ceiling_is_close(rig: Rig) -> None:
-    ws = await rig.browser()
-    await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
-    await rig.pump(distance_mm=100)  # この回で近い読み値を取り込む
-    await rig.pump()  # 送るのはこのとき
-    assert rig.last()["dir"] == "up"
-    assert rig.last()["ceil_ok"] is False
-    await ws.close()
-
-
-async def test_ceil_ok_goes_false_after_stale_over_the_real_path(rig: Rig) -> None:
-    """**変異 1 を本物の経路で縛る**（brief §3 の要求）。
-
-    天井の読み値が途中で更新されなくなると、`ceiling_stale_ms` 後に
-    **偽の ESP32 が受ける `ceil_ok`** が `false` になる。前の `true` を使い回したら赤になる。
-    """
-    await rig.warm()  # 遠い読み値を手に入れておく
+async def test_press_increases_over_the_wire(rig: Rig) -> None:
+    """向きを入れ替えると `press` が増える（本物の WS 経路）。"""
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
     await rig.pump()
-    assert rig.last()["ceil_ok"] is True, "天井が遠いので上昇を許す"
-
-    # ここから新しい読み値を返さない（センサが止まる / I2C が読めない）
-    rig.hw.freeze_ceiling()
-    await rig.pump(distance_mm=None)  # まだ古くない
-    assert rig.last()["ceil_ok"] is True
-
-    state = await rig.pump(1000, distance_mm=None)  # ceiling_stale_ms=600 を超える
-    assert rig.last()["ceil_ok"] is False, "前の許可を使い回さない"
-    assert state["ceiling"]["reason"] == "CEILING_STALE"
+    await ws.send_json({"t": "hold", "axis": "lift_down", "speed": 30})
+    await rig.wait_axis("lift_down")
+    await rig.pump()
+    await rig.wait_holds(2)
+    assert [h["press"] for h in rig.holds] == [1, 2]
     await ws.close()
 
 
-async def test_release_from_the_browser_sends_stop(rig: Rig) -> None:
+async def test_release_from_the_browser_sends_release(rig: Rig) -> None:
+    """**変異 4 を本物の経路で縛る。**離したら `release` を送る。"""
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
     await rig.pump()
-    assert rig.last()["dir"] == "up"
+    await rig.wait_holds(1)
 
     await ws.send_json({"t": "release"})
     await rig.wait_axis(None)  # release が届くのを待つ
     await rig.pump()
-    assert rig.last()["dir"] == "stop"
-    assert rig.last()["duty"] == 0
+    await rig.wait_releases(1)
+    assert rig.releases[-1]["press"] == 1
+    await rig.pump()
+    assert len(rig.releases) == 1, "`release` は 1 度だけ"
     await ws.close()
 
 
 async def test_closing_the_browser_releases_its_hold(rig: Rig) -> None:
-    """**この試験が変異 4 を殺す。**切断は `release` 扱い。止まらないと上昇し続ける。"""
+    """切断は `release` 扱い。"""
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
     await rig.pump()
-    assert rig.last()["dir"] == "up"
+    await rig.wait_holds(1)
 
     await ws.close()
     await rig.pump()
-    assert rig.last()["dir"] == "stop", "画面が閉じたら押していた操作は止める"
+    await rig.wait_releases(1)
 
 
 async def test_closing_one_screen_does_not_stop_another_screen_hold(rig: Rig) -> None:
@@ -281,15 +258,16 @@ async def test_closing_one_screen_does_not_stop_another_screen_hold(rig: Rig) ->
     await second.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
     await rig.pump()
-    assert rig.last()["dir"] == "up"
+    await rig.wait_holds(1)
 
     await first.close()
     await rig.pump()
-    assert rig.last()["dir"] == "up", "別画面の操作は止めない"
+    await rig.pump()
+    await rig.wait_holds(2)
+    assert len(rig.holds) >= 2, "別画面の操作は止めない"
+    assert rig.releases == []
 
     await second.close()
-    await rig.pump()
-    assert rig.last()["dir"] == "stop"
 
 
 async def test_unknown_and_broken_messages_are_ignored(rig: Rig) -> None:
@@ -299,7 +277,7 @@ async def test_unknown_and_broken_messages_are_ignored(rig: Rig) -> None:
     await ws.send_json({"t": "explode"})
     await ws.send_json({"t": "hold", "axis": "diagonal", "speed": 10})
     await rig.pump()
-    assert rig.last()["dir"] == "stop", "読めないものは無視して押していないまま"
+    assert rig.holds == [], "読めないものは無視して押していないまま"
     await ws.close()
 
 
@@ -307,6 +285,7 @@ async def test_unknown_and_broken_messages_are_ignored(rig: Rig) -> None:
 
 
 async def test_state_is_pushed_to_the_browser_with_the_client_count(rig: Rig) -> None:
+    await rig.pump()
     first = await rig.browser()
     second = await rig.browser()  # 繋がった直後の配信は 2 人分
     state = await first.receive_json(timeout=2)
@@ -314,6 +293,8 @@ async def test_state_is_pushed_to_the_browser_with_the_client_count(rig: Rig) ->
     assert state["clients"] == 2
     assert state["fake"] is True
     assert "provisional" in state
+    assert state["lift"]["lift_ip"] == "127.0.0.1"
+    assert state["ceiling"]["status"] == "MEASURED"
     await first.close()
     await second.close()
 
@@ -322,10 +303,11 @@ async def test_link_lost_when_the_esp32_stops_sending(rig: Rig) -> None:
     """**LINK_LOST の経路。**`state` が `lift_state_timeout_ms` 越えで届かなくなったら出る。"""
     ws = await rig.browser()
     await rig.pump()
-    await wait_until(lambda: rig.esp32.state_history)  # state は届いている
+    await rig.wait_state()  # 昇降部の `state` を受け取るまで待つ
     state = await rig.camera.broadcast_state()
     assert state["lift"]["link"] == "ok"
 
+    assert rig.esp32 is not None
     rig.esp32.silent = True  # state を出し止める
     state = await rig.pump(1000)
     assert state["lift"]["link"] == "lost"
@@ -333,16 +315,16 @@ async def test_link_lost_when_the_esp32_stops_sending(rig: Rig) -> None:
     await ws.close()
 
 
-async def test_cmd_is_discarded_while_the_link_is_lost(rig: Rig) -> None:
+async def test_hold_is_dropped_while_the_link_is_lost(rig: Rig) -> None:
     """繋がっていない間は指令を送らない（送っても捨てられる）。"""
     ws = await rig.browser()
     await rig.pump()
-    before = len(rig.esp32.cmd_history)
+    before = len(rig.holds)
     await rig.lift.close()  # 昇降部を落とす
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
-    await rig.pump(expect=False)
-    assert len(rig.esp32.cmd_history) == before
+    await rig.pump()
+    assert len(rig.holds) == before
     await ws.close()
 
 
@@ -441,7 +423,7 @@ async def test_zoom_logs_only_when_it_starts_and_stops_failing(caplog) -> None:
         await zoom.close()
 
 
-async def test_app_retries_the_zoom_it_could_not_send() -> None:
+async def test_app_retries_the_zoom_it_could_not_send(loop) -> None:
     """**送れなかった倍率を次の周期に送り直す。**（握り潰す経路を縛る）"""
     r = Rig(autostart=True, deliver_zoom=False)
     await r.start()
@@ -456,16 +438,31 @@ async def test_app_retries_the_zoom_it_could_not_send() -> None:
         await r.stop()
 
 
-# --- 設定 API ---------------------------------------------------------------------------------------
+# --- 設定 API（昇降は昇降部へ中継。protocol §4） -------------------------------------------------------
 
 
-async def test_get_settings_returns_settings_and_the_defaults_flag(rig: Rig) -> None:
+async def test_get_settings_merges_lift_settings(rig: Rig) -> None:
     assert rig.client is not None
     response = await rig.client.get("/api/settings")
     assert response.status == 200
     body = await response.json()
     assert body["using_defaults"] is True
-    assert body["settings"] == SETTINGS
+    assert body["settings"]["pitch"] == SETTINGS["pitch"]
+    assert body["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+
+
+async def test_get_settings_is_503_when_the_lift_is_gone(loop) -> None:
+    """昇降部に繋がらないときは `503`（protocol §4）。"""
+    r = Rig()
+    await r.start()
+    r.params["lift_host"] = "127.0.0.1"
+    r.params["lift_port"] = 1  # 誰も居ない
+    try:
+        assert r.client is not None
+        response = await r.client.get("/api/settings")
+        assert response.status == 503
+    finally:
+        await r.stop()
 
 
 async def test_put_settings_rejects_invalid_and_keeps_the_old_ones(rig: Rig) -> None:
@@ -475,35 +472,76 @@ async def test_put_settings_rejects_invalid_and_keeps_the_old_ones(rig: Rig) -> 
     assert response.status == 400
     body = await response.json()
     assert body["errors"], "理由の一覧を返す"
-    assert rig.settings == SETTINGS, "保存せず、元のまま"
+    assert rig.settings["pitch"] == SETTINGS["pitch"], "保存せず、元のまま"
 
 
-async def test_put_settings_applies_valid_values_to_the_control_loop(rig: Rig) -> None:
+async def test_put_settings_relays_and_saves(rig: Rig) -> None:
     assert rig.client is not None
+    assert rig.esp32 is not None
     good = {
         "lift_up": {"min": 10, "max": 20, "init": 15},
         "lift_down": {"min": 10, "max": 60, "init": 30},
         "pitch": {"min": 1, "max": 30, "init": 10},
-        "yaw": {"min": 1, "max": 30, "init": 10},
+        "yaw": {"min": 2, "max": 30, "init": 10},
     }
     response = await rig.client.put("/api/settings", json=good)
     assert response.status == 200
     body = await response.json()
     assert body["using_defaults"] is False
+    # 昇降の 2 軸は昇降部へ中継する
+    assert rig.esp32.lift_settings["lift_up"] == {"min": 10, "max": 20, "init": 15}
+    # 自分の 2 軸だけを保存する
+    assert rig.settings["yaw"] == {"min": 2, "max": 30, "init": 10}
+    assert rig.settings["lift_up"] == {"min": 10, "max": 20, "init": 15}
 
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 999})
     await rig.wait_axis("lift_up")
     await rig.pump()
-    assert rig.last()["duty"] == 20, "保存した設定の上限を使う"
+    await rig.wait_holds(1)
+    assert rig.last_hold()["duty"] == 20, "保存した設定の上限を使う"
     await ws.close()
+
+
+async def test_put_settings_does_not_save_when_the_lift_refuses(rig: Rig) -> None:
+    """**変異 5 の芯。**昇降部が `400` を返したのに自分の 2 軸を保存したら赤になる。"""
+    assert rig.client is not None
+    assert rig.esp32 is not None
+    rig.esp32.fail_put = True
+    good = {
+        "lift_up": {"min": 10, "max": 20, "init": 15},
+        "lift_down": {"min": 10, "max": 60, "init": 30},
+        "pitch": {"min": 1, "max": 30, "init": 10},
+        "yaw": {"min": 2, "max": 30, "init": 10},
+    }
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 400
+    body = await response.json()
+    assert body["errors"], "昇降部の理由を返す"
+    assert rig.settings["yaw"] == SETTINGS["yaw"], "自分も保存しない"
+
+
+async def test_put_settings_is_503_when_the_lift_is_gone(loop) -> None:
+    """昇降部に繋がらなければ `503` で何も保存しない。"""
+    r = Rig()
+    await r.start()
+    r.params["lift_host"] = "127.0.0.1"
+    r.params["lift_port"] = 1
+    try:
+        assert r.client is not None
+        good = copy.deepcopy(SETTINGS)
+        response = await r.client.put("/api/settings", json=good)
+        assert response.status == 503
+        assert r.settings == SETTINGS
+    finally:
+        await r.stop()
 
 
 # --- 偽物の API -------------------------------------------------------------------------------------
 
 
 @pytest.fixture
-async def fake_rig() -> Any:
+async def fake_rig(loop) -> Any:
     """`POST /api/fake` の試験用。昇降部はプロセス内の `FakeLift`。"""
     r = Rig(use_fake_lift=True)
     await r.start()
@@ -523,8 +561,7 @@ async def test_fake_api_changes_the_ceiling_and_the_lift(fake_rig: Rig) -> None:
     assert response.status == 200
     assert await response.json() == {"ok": True}
 
-    await rig.pump(distance_mm=None)  # 入れた読み値をそのまま使う
-    await rig.wait_state()
+    await rig.pump()
     state = await rig.camera.broadcast_state()
     assert state["ceiling"]["mm"] == 120
     assert state["lift"]["height_mm"] == 800
@@ -535,19 +572,51 @@ async def test_fake_api_can_freeze_the_ceiling(fake_rig: Rig) -> None:
     """偽物 API で「読み値が止まった」状態を作れる。"""
     rig = fake_rig
     assert rig.client is not None
-    await rig.pump(distance_mm=2000)  # まず新しい読み値を持たせる
+    await rig.pump()
     await rig.client.post("/api/fake", json={"ceiling": {"stale": True}})
 
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})
     await rig.wait_axis("lift_up")
-    state = await rig.pump(distance_mm=None)  # まだ古くない
-    assert rig.last()["ceil_ok"] is True
+    state = await rig.pump()
+    assert rig.holds[-1]["ceiling"]["status"] == "MEASURED", "まだ古くない"
 
-    state = await rig.pump(1000, distance_mm=None)  # 新しい読み値を返さないので古くなる
-    assert rig.last()["ceil_ok"] is False
+    rig.clock.advance(1000)  # ceiling_read_stale_ms=600 を超える
+    await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 30})  # 押し直す
+    await rig.wait_axis("lift_up")
+    await rig.camera.control_step()
+    rig.lift._step(rig.clock())  # noqa: SLF001 - 偽昇降部の `state` を進める
+    state = await rig.camera.broadcast_state()
+    assert rig.holds[-1]["ceiling"]["age_ms"] > 600, "前の値を載せ続ける（使い回しでないことの裏返し）"
     assert state["ceiling"]["reason"] == "CEILING_STALE"
     await ws.close()
+
+
+async def test_fake_api_reports_io_lost(fake_rig: Rig) -> None:
+    """`io_lost` で Arduino から行が来ない状態を作れる（protocol §4・names §4）。"""
+    rig = fake_rig
+    assert rig.client is not None
+    await rig.pump()
+    response = await rig.client.post("/api/fake", json={"io_lost": True})
+    assert response.status == 200
+    state = await rig.pump(700)
+    assert state["reason"] == "IO_LOST"
+    response = await rig.client.post("/api/fake", json={"io_lost": False})
+    assert response.status == 200
+
+
+async def test_fake_mode_settings_relay(fake_rig: Rig) -> None:
+    """プロセス内の偽物でも設定の中継は動く（`GET`・`PUT` とも 200）。"""
+    rig = fake_rig
+    assert rig.client is not None
+    response = await rig.client.get("/api/settings")
+    assert response.status == 200
+    assert (await response.json())["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+    good = copy.deepcopy(SETTINGS)
+    good["lift_up"] = {"min": 10, "max": 20, "init": 15}
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    assert (await response.json())["settings"]["lift_up"] == {"min": 10, "max": 20, "init": 15}
 
 
 @pytest.mark.parametrize(
@@ -559,6 +628,7 @@ async def test_fake_api_can_freeze_the_ceiling(fake_rig: Rig) -> None:
         ({"ceiling": "far"}, "オブジェクトでない"),
         ({"height_mm": "高い"}, "数値でない"),
         ({"bottom": 1}, "真偽値でない"),
+        ({"io_lost": "yes"}, "真偽値でない"),
     ],
 )
 async def test_fake_api_rejects_bad_values(fake_rig: Rig, payload: dict, needle: str) -> None:
@@ -570,7 +640,7 @@ async def test_fake_api_rejects_bad_values(fake_rig: Rig, payload: dict, needle:
     assert any(needle in error for error in body["errors"]), body["errors"]
 
 
-async def test_fake_api_does_not_exist_outside_fake_mode() -> None:
+async def test_fake_api_does_not_exist_outside_fake_mode(loop) -> None:
     """偽物のモードのときだけ存在する（names §4）。"""
     r = Rig(fake=False)
     await r.start()
@@ -585,7 +655,7 @@ async def test_fake_api_does_not_exist_outside_fake_mode() -> None:
 # --- 画面そのもの -----------------------------------------------------------------------------------
 
 
-async def test_index_is_served_after_wp_ui_01() -> None:
+async def test_index_is_served_after_wp_ui_01(loop) -> None:
     """`camera/web` を配る設定なら操作画面を返す（names §1）。"""
     r = Rig(web_dir=str(WEB_DIR))
     await r.start()
