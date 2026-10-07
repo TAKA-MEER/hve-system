@@ -131,6 +131,12 @@ class CameraApp:
         #: 設定。`PUT /api/settings` で**中身を入れ替える**（制御ループと同じ物を見るため）
         self._settings = settings
         self._using_defaults = using_defaults
+        #: プロセス内の偽物の昇降設定（`FakeLift` は設定 API を持たないのでここで持つ）
+        self._fake_lift_settings = (
+            {axis: dict(settings[axis]) for axis in LIFT_AXES}
+            if self._fake_lift() is not None
+            else None
+        )
 
         #: 繋がっている画面
         self._clients: dict[web.WebSocketResponse, None] = {}
@@ -323,6 +329,8 @@ class CameraApp:
 
     async def _fetch_lift_settings(self) -> dict | None:
         """昇降部から昇降の 2 軸を取る。取れなければ `None`。"""
+        if self._fake_lift_settings is not None:
+            return dict(self._fake_lift_settings)
         base = await self._lift_http_base()
         if base is None:
             return None
@@ -347,6 +355,9 @@ class CameraApp:
 
     async def _put_lift_settings(self, body: dict) -> tuple:
         """昇降部へ昇降の 2 軸を `PUT`。`(状態, 理由の一覧)`。繋がらなければ `(None, None)`。"""
+        if self._fake_lift_settings is not None:
+            self._fake_lift_settings = {axis: dict(body[axis]) for axis in LIFT_AXES}
+            return 200, []
         base = await self._lift_http_base()
         if base is None:
             return None, None

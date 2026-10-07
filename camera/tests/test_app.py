@@ -603,6 +603,20 @@ async def test_fake_api_reports_io_lost(fake_rig: Rig) -> None:
     assert response.status == 200
 
 
+async def test_fake_mode_settings_relay(fake_rig: Rig) -> None:
+    """プロセス内の偽物でも設定の中継は動く（`GET`・`PUT` とも 200）。"""
+    rig = fake_rig
+    assert rig.client is not None
+    response = await rig.client.get("/api/settings")
+    assert response.status == 200
+    assert (await response.json())["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+    good = copy.deepcopy(SETTINGS)
+    good["lift_up"] = {"min": 10, "max": 20, "init": 15}
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    assert (await response.json())["settings"]["lift_up"] == {"min": 10, "max": 20, "init": 15}
+
+
 @pytest.mark.parametrize(
     ("payload", "needle"),
     [
