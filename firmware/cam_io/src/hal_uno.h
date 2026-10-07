@@ -5,7 +5,6 @@
 // クラス名はファイル名（DetailedDesign-names.md §1）から機械的に対応付けたもの。
 #pragma once
 
-#include <Servo.h>
 #include <stdint.h>
 
 #include "io_hal.h"
@@ -15,7 +14,7 @@ class HalUno : public IoHal {
  public:
   HalUno();
 
-  // D4〜D7・D9・Wire・Timer2 を始める。Serial は main.cpp の役なので触らない
+  // D4〜D7・D9（Timer1 の PWM）・Wire・Timer2 を始める。Serial は main.cpp の役なので触らない
   void begin();
 
   // IoHal（IoController が丸め済みの値を出す。判定はしない）。
@@ -37,7 +36,6 @@ class HalUno : public IoHal {
 
  private:
   StepRate rate_;
-  Servo servo_;
   int32_t last_hsps_;  // loop 側だけが触る（今出している速さ。替わったときだけ位相を戻す）
   uint8_t phase_;      // 割り込み側だけが触る（今の半ステップの相 0〜7）
   bool srf02_ranging_;

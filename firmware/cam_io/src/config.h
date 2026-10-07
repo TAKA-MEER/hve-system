@@ -26,7 +26,7 @@ constexpr uint8_t YAW_HALF_STEP_SEQUENCE[8] = {
     0x09,  // IN4, IN1
 };
 
-// MG996R の信号（仮。DetailedDesign-hardware.md §2.2。Servo ライブラリは Timer1 を使う）
+// MG996R の信号（仮。DetailedDesign-hardware.md §2.2。Timer1 のハードウェア PWM＝OC1A で出す。servo_pwm.h）
 constexpr uint8_t SERVO_PIN = 9;
 // パルス幅と角度の対応（仮。MG996R のデータシートで確かめる）
 constexpr int SERVO_PULSE_CENTER_US = 1500;
@@ -35,8 +35,8 @@ constexpr int SERVO_US_PER_DEG = 10;
 constexpr int SERVO_PULSE_MIN_US = 900;
 constexpr int SERVO_PULSE_MAX_US = 2100;
 
-// SRF02（工場出荷のアドレス。5V の I2C なので直結。DetailedDesign-hardware.md §2.2）
-constexpr uint8_t SRF02_ADDR = 0x70;
+// SRF02（この個体のアドレス＝0x72。工場出荷は 0x70。5V の I2C なので直結。DetailedDesign-hardware.md §2.2）
+constexpr uint8_t SRF02_ADDR = 0x72;
 // 測定の周期 [ms]（SRF02 は 1 回 約 66ms。65ms より早く始めない）
 constexpr uint32_t SRF02_PERIOD_MS = 70;
 // I2C の時間切れ [µs]（仮。Wire.setWireTimeout に渡す。時間切れは st=1）
