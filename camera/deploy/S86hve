@@ -11,6 +11,8 @@
 
 # ssh を閉じても子（アプリ）が SIGHUP で死なないようにする（無視の設定は子へ引き継がれる）
 trap "" HUP
+# ログを m5stack（ssh の利用者）でも読めるようにする
+umask 022
 
 HVE_HOME=/home/m5stack/hve
 APP=$HVE_HOME/camera
@@ -42,6 +44,7 @@ start_one() {
         return 0
     fi
     mkdir -p "$LOG_DIR"
+    chmod 755 "$LOG_DIR"
     # run_logged.py <ログファイル> <モジュール> [引数...]
     $PY "$APP/deploy/run_logged.py" "$LOG_DIR/$name.log" $(cmdline_of "$name") \
         < /dev/null > /dev/null 2>&1 &
