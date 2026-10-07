@@ -220,6 +220,51 @@ async def test_close_ceiling_stops_the_fake_lift_up() -> None:
     assert state["ceiling"]["status"] == "TOO_NEAR"
 
 
+async def test_idle_ceiling_shows_own_measurement_without_verdict() -> None:
+    """止まっている間は、自分で測った値だけを載せ、判定（ok・reason）は null（protocol §4）。
+
+    偽昇降部は止まっていても `ceiling`（`CEILING_STALE`）を返してくるので、
+    持ち主でないときに判定を拾わないことを縛る。
+    """
+    rig = Loop()
+    await rig.prime()
+    state = await rig.step()
+    assert state["lift"]["owner"] is None
+    assert rig.lift.latest_state()["ceiling"]["reason"] == "CEILING_STALE", "前提: 昇降部は返す"
+    assert state["ceiling"]["status"] == "MEASURED"
+    assert state["ceiling"]["mm"] == 2000
+    assert state["ceiling"]["ok"] is None
+    assert state["ceiling"]["reason"] is None
+    assert state["reason"] == "NONE", "止まっている間に CEILING_STALE を停止理由に出さない"
+
+
+async def test_verdict_only_while_module_is_owner() -> None:
+    """持ち主のあいだは昇降部の判定を載せ、離すと null に戻る。"""
+    rig = Loop()
+    await rig.prime()
+    rig.loop.hold("lift_up", 30)
+    state = await rig.step()
+    assert state["ceiling"]["ok"] is True
+    assert state["ceiling"]["reason"] == "NONE"
+    rig.loop.release()
+    await rig.step()
+    state = await rig.step(700)
+    assert state["lift"]["owner"] is None
+    assert state["ceiling"]["ok"] is None
+    assert state["ceiling"]["reason"] is None
+
+
+async def test_ceiling_link_lost_is_false_link_lost() -> None:
+    """昇降部と切れているときは `ok: false`・`LINK_LOST`。"""
+    rig = Loop()
+    await rig.prime()
+    rig.lift.link_ok = lambda now, timeout: False  # type: ignore[method-assign]
+    state = rig.loop.build_state(1)
+    assert state["ceiling"]["ok"] is False
+    assert state["ceiling"]["reason"] == "LINK_LOST"
+    assert state["ceiling"]["status"] == "MEASURED", "自分の値は載せ続ける"
+
+
 async def test_io_lost_when_no_lines_arrive() -> None:
     """Arduino から行が来ないと `IO_LOST`（protocol §4）。"""
     rig = Loop()

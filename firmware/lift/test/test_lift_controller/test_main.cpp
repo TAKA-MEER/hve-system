@@ -405,6 +405,56 @@ void test_state_reports_top_detect_false_and_module() {
   TEST_ASSERT_TRUE(state.height_ok);
 }
 
+void test_state_keeps_last_module_ceiling_after_release() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(812, true, 900);
+  TEST_ASSERT_TRUE(ctrl.on_hello(module(2), hello_with_sensor(true)));
+  ctrl.on_hold(module(2), up_hold(17, 40, 1000), 1000);
+  ctrl.step(1035);
+  ctrl.on_release(module(2), 17);
+  const LiftState state = ctrl.step(1200);
+  TEST_ASSERT_FALSE(state.has_owner);
+  TEST_ASSERT_TRUE(state.ceiling_present);
+  TEST_ASSERT_FALSE(state.ceiling_used);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MEASURED),
+                        static_cast<int>(state.ceiling_status));
+  TEST_ASSERT_EQUAL_INT(1450, state.ceiling_mm);
+  TEST_ASSERT_EQUAL_INT(80 + 200, state.ceiling_age_ms);
+  // 古さは増え続ける
+  const LiftState later = ctrl.step(5000);
+  TEST_ASSERT_TRUE(later.ceiling_present);
+  TEST_ASSERT_EQUAL_INT(80 + 4000, later.ceiling_age_ms);
+  // 止める判断は変えない
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(later.dir));
+}
+
+void test_state_keeps_last_module_ceiling_after_hold_timeout() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(812, true, 900);
+  TEST_ASSERT_TRUE(ctrl.on_hello(module(2), hello_with_sensor(true)));
+  ctrl.on_hold(module(2), up_hold(17, 40, 1000), 1000);
+  ctrl.step(1035);
+  const LiftState state = ctrl.step(9000);
+  TEST_ASSERT_FALSE(state.has_owner);
+  TEST_ASSERT_TRUE(state.ceiling_present);
+  TEST_ASSERT_EQUAL_INT(1450, state.ceiling_mm);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(state.dir));
+}
+
+void test_state_ceiling_null_when_no_module_hold_ever() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(812, true, 900);
+  // 画面（UI）の hold と release だけ。上部モジュールの値は無い
+  ctrl.on_hold(ui(1), down_hold(1), 1000);
+  ctrl.step(1035);
+  ctrl.on_release(ui(1), 1);
+  const LiftState state = ctrl.step(1200);
+  TEST_ASSERT_FALSE(state.ceiling_present);
+}
+
 void test_state_before_step_is_stopped() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -466,6 +516,9 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_motor_is_written_on_every_step);
 
   RUN_TEST(test_state_reports_top_detect_false_and_module);
+  RUN_TEST(test_state_keeps_last_module_ceiling_after_release);
+  RUN_TEST(test_state_keeps_last_module_ceiling_after_hold_timeout);
+  RUN_TEST(test_state_ceiling_null_when_no_module_hold_ever);
   RUN_TEST(test_state_before_step_is_stopped);
 
   RUN_TEST(test_cmd_timeout_survives_millis_wrap);

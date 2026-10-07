@@ -273,12 +273,23 @@ class ControlLoop:
         link_ok = self._lift.link_ok(now, float(self._params["lift_state_timeout_ms"]))
         raw = self._lift.latest_state() or {}
 
-        lift_ceiling = raw.get("ceiling") if isinstance(raw.get("ceiling"), dict) else {}
-        if link_ok:
-            ceiling_ok = bool(lift_ceiling.get("ok", False))
-            ceiling_reason = lift_ceiling.get("reason", "CEILING_STALE")
-        else:
+        raw_ceiling = raw.get("ceiling") if isinstance(raw.get("ceiling"), dict) else {}
+        # 昇降部の判定は、自分が持ち主で昇降部が判定を返しているときだけ使う。
+        # それ以外（止まっている・別の画面が持ち主・`ceiling` が無い）は判定なし（protocol §4）
+        has_verdict = (
+            link_ok
+            and raw.get("owner") == "module"
+            and "reason" in raw_ceiling
+            and "ok" in raw_ceiling
+        )
+        lift_ceiling = raw_ceiling if has_verdict else {}
+        if not link_ok:
             ceiling_ok, ceiling_reason = False, "LINK_LOST"
+        elif has_verdict:
+            ceiling_ok = bool(raw_ceiling["ok"])
+            ceiling_reason = raw_ceiling["reason"]
+        else:
+            ceiling_ok, ceiling_reason = None, None
 
         status, mm, age_ms = self._ceiling_triple(now)
         return {
