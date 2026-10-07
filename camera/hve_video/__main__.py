@@ -44,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
 
     params = load_params()
     source = open_source(
-        args.fake, params["video_capture_width"], params["video_capture_height"]
+        args.fake,
+        params["video_capture_width"],
+        params["video_capture_height"],
+        params["video_capture_fps"],
+        params["video_device"],
     )
     pipeline = VideoPipeline(
         source,

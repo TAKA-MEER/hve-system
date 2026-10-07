@@ -174,6 +174,102 @@ async def test_stream_sends_frames_at_video_fps(aiohttp_client):
     assert elapsed >= 0.2 * 0.75
 
 
+# --- 静止画（spec H-U9） -------------------------------------------------
+
+
+class CameraJpegSource:
+    """取り込み元の代わり。「カメラの JPEG」を固定で持ち、作り直し用の絵は小さい別物にする。"""
+
+    def __init__(self, camera_jpeg):
+        self.camera_jpeg = camera_jpeg
+        self._fake = FakeSource(*CAPTURE)
+
+    def read(self):
+        return self._fake.read()
+
+    def latest_jpeg(self):
+        return self.camera_jpeg
+
+    def release(self):
+        pass
+
+
+def camera_jpeg_720p() -> bytes:
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    image[:, ::7, 1] = 200  # 縞（作り直すと変わる）
+    image[300:420, 560:720] = 255
+    ok, buffer = cv2.imencode(".jpg", image)
+    assert ok
+    return buffer.tobytes()
+
+
+def make_snapshot_app(camera_jpeg, zoom: float = 1.0):
+    pipeline = VideoPipeline(
+        CameraJpegSource(camera_jpeg),
+        zoom=zoom,
+        zoom_max=ZOOM_MAX,
+        zoom_step=ZOOM_STEP,
+        out_height=OUT_HEIGHT,
+        jpeg_quality=JPEG_QUALITY,
+    )
+    return video_server.create_app(pipeline, VIDEO_FPS)
+
+
+async def test_snapshot_returns_the_camera_jpeg_unmodified(aiohttp_client):
+    """**カメラの JPEG をバイト単位でそのまま返す**（作り直した 480p ではない）。"""
+    camera = camera_jpeg_720p()
+    client = await aiohttp_client(make_snapshot_app(camera))
+    response = await client.get("/snapshot")
+    assert response.status == 200
+    assert response.headers["Content-Type"] == "image/jpeg"
+    assert response.headers["Cache-Control"] == "no-store"
+    body = await response.read()
+    assert body == camera
+    frame = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert (frame.shape[1], frame.shape[0]) == (1280, 720)
+
+
+async def test_snapshot_is_not_cropped_by_the_zoom(aiohttp_client):
+    """**倍率を上げても切り出さない。** 配信（/stream）は切り出すが、静止画は 1280×720 のまま。"""
+    camera = camera_jpeg_720p()
+    app = make_snapshot_app(camera)
+    client = await aiohttp_client(app)
+    assert (await client.post("/zoom", json={"level": 4.0})).status == 200
+    async with client.get("/stream") as response:
+        _, streamed = await first_jpeg(response)
+    assert streamed != camera
+    response = await client.get("/snapshot")
+    assert await response.read() == camera
+
+
+async def test_snapshot_is_503_before_the_first_frame(aiohttp_client):
+    client = await aiohttp_client(make_snapshot_app(None))
+    response = await client.get("/snapshot")
+    assert response.status == 503
+
+
+async def test_snapshot_is_served_to_other_addresses():
+    """`/zoom` と違い、外の端末から受ける（接続元を見ない）。"""
+    camera = camera_jpeg_720p()
+    app = make_snapshot_app(camera)
+    handler = handler_of(app, "GET", "/snapshot")
+    request = make_mocked_request("GET", "/snapshot", app=app)
+    response = await handler(request)
+    assert response.status == 200
+    assert response.body == camera
+
+
+async def test_snapshot_of_the_fake_source_is_the_capture_size_not_the_stream_size(
+    aiohttp_client,
+):
+    """偽物のモードも静止画を返す。取り込みの大きさで、配信の大きさではない。"""
+    client = await aiohttp_client(make_app(zoom=4.0))
+    response = await client.get("/snapshot")
+    assert response.status == 200
+    frame = cv2.imdecode(np.frombuffer(await response.read(), dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert (frame.shape[1], frame.shape[0]) == CAPTURE
+
+
 # --- 倍率の受け付け ------------------------------------------------------
 
 

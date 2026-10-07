@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from hve_video.crop import crop_rect
-from hve_video.sources import FakeSource, V4L2Source
+from hve_video.sources import FakeSource, MjpegPipeSource
 
 
 class VideoPipeline:
@@ -18,7 +18,7 @@ class VideoPipeline:
 
     def __init__(
         self,
-        source: FakeSource | V4L2Source,
+        source: FakeSource | MjpegPipeSource,
         *,
         zoom: float,
         zoom_max: float,
@@ -60,13 +60,9 @@ class VideoPipeline:
         out_width, out_height = self.output_size()
         if (width, height) == (out_width, out_height):
             return cropped
-        # 縮めるときは領域平均で、拡大するときは線形補間で、抜けのない画にする
-        shrinking = width * height > out_width * out_height
-        return cv2.resize(
-            cropped,
-            (out_width, out_height),
-            interpolation=cv2.INTER_AREA if shrinking else cv2.INTER_LINEAR,
-        )
+        # 線形補間。縮めるのは 720p → 480p（1.5 倍）までなので十分で、領域平均より速い
+        # （UnitV2 で 20 ms 対 52 ms。DetailedDesign-hardware.md §2.1.1）
+        return cv2.resize(cropped, (out_width, out_height), interpolation=cv2.INTER_LINEAR)
 
     def jpeg_bytes(self) -> bytes | None:
         """次の 1 フレームを JPEG にして返す。取り込めなかったときは `None`。"""
@@ -79,6 +75,10 @@ class VideoPipeline:
         if not ok:
             return None
         return buffer.tobytes()
+
+    def latest_jpeg(self) -> bytes | None:
+        """最後に受けたカメラの JPEG をそのまま返す（作り直さない・切り出さない）。"""
+        return self._source.latest_jpeg()
 
     def release(self) -> None:
         """取り込み元を解放する。"""
