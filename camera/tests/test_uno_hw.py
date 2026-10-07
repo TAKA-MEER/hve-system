@@ -236,3 +236,16 @@ async def test_stop_yaw_sends_zero_speed() -> None:
         assert serial.written[-1].endswith(b" 0\n")
     finally:
         await shutdown(hw)
+
+
+async def test_b_line_with_leading_nul_bytes_resets_the_clock() -> None:
+    """実機のリセット後の 1 行目（先頭に NUL が 2 つ）も `B` として読み、記録を捨てる。"""
+    clock = ManualClock(start_ms=10000.0)
+    serial = FakeSerial([b"C 9000 0 200\n", b"\x00\x00B 0 hve_cam_io-0.1.0\n", b"C 20 0 200\n"])
+    hw = make_hw(clock, serial)
+    try:
+        reading = await hw.read_ceiling()
+        assert reading is not None
+        assert (reading.status, reading.distance_mm) == (CeilingStatus.MEASURED, 2000)
+    finally:
+        await shutdown(hw)

@@ -95,3 +95,9 @@ def test_uno_clock_reset():
 def test_uno_clock_rejects_a_bad_window():
     with pytest.raises(ValueError):
         UnoClock(window=0)
+
+
+def test_parse_io_line_skips_leading_nul_bytes():
+    """実機の UNO はリセット後の 1 行目に NUL が 2 つ付く（観測したままの形）。"""
+    raw = b"\x00\x00B 0 hve_cam_io-0.1.0\n"
+    assert parse_io_line(raw.decode("ascii")) == ("B", 0, "hve_cam_io-0.1.0")

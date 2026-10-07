@@ -41,6 +41,9 @@ def encode_io_cmd(seq: int, pitch_ddeg: int, yaw_hsps: int) -> str:
     return line
 
 
+_LEADING_JUNK = "".join(chr(c) for c in range(0x20)) + "\x7f"
+
+
 def parse_io_line(line: object) -> Union[CLine, BLine, None]:
     """`C`・`B` 行を読む。読めたらタプル、読めなければ `None`。
 
@@ -50,7 +53,8 @@ def parse_io_line(line: object) -> Union[CLine, BLine, None]:
     """
     if not isinstance(line, str):
         return None
-    text = line.rstrip("\r\n")
+    # リセット直後の 1 行目は先頭に NUL（0x00 が 2 つ）が付く。行頭の制御文字・NUL は読み飛ばす
+    text = line.lstrip(_LEADING_JUNK).rstrip("\r\n")
     if len(text) > _IO_LINE_MAX or len(text) == 0:
         return None
     parts = text.split(" ")

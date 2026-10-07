@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import tempfile
 import time
 from pathlib import Path
 
@@ -76,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
 
     params = load_params()
     clock = monotonic_ms
+    settings_path = params["settings_path"]
 
     if args.fake:
         from hve_camera.hw.fake_hw import FakeHardware
@@ -86,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
         # 画面が「天井 値なし」で上昇ボタンも薄いままになる（画面を見る人が動かせない）
         hw.set_steady_ceiling(CeilingStatus.MEASURED, FAKE_CEILING_MM)
         lift = FakeLift(clock)
+        # 既定の保存先（`/home/m5stack/...`）はホストに無く PUT が 500 になる。
+        # 偽物のモードは起動ごとの一時ディレクトリに保存する（実機の既定は変えない）
+        settings_path = str(Path(tempfile.mkdtemp(prefix="hve_camera_fake_")) / "settings.json")
+        log.info("偽物の設定の保存先は %s", settings_path)
         log.warning("偽物のモードで起動する（実機の結果と取り違えないこと）")
         log.info("偽物の天井は %d mm（MEASURED）から始める。POST /api/fake の差し込みは 1 回分、止めるのは freeze", FAKE_CEILING_MM)
     else:
@@ -110,8 +116,8 @@ def main(argv: list[str] | None = None) -> int:
     # 自分の 2 軸（ピッチ・ヨー）だけを保存する。昇降の 2 軸は昇降部が持つ。
     # 制御ループの丸めには 4 軸が要るので、起動時はファイルか既定値の 4 軸で種にする
     # （昇降の設定は `GET /api/settings` で取り直す）。
-    own, using_defaults = load_settings(params["settings_path"], params, axes=OWN_AXES)
-    seed, _ = load_settings(params["settings_path"], params)
+    own, using_defaults = load_settings(settings_path, params, axes=OWN_AXES)
+    seed, _ = load_settings(settings_path, params)
     seed.update(own)
     app = create_app(
         hw,
@@ -122,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         clock=clock,
         video_zoom=VideoZoom(params["video_port"]),
         fake=args.fake,
-        settings_path=params["settings_path"],
+        settings_path=settings_path,
         web_dir=WEB_DIR,
     )
 
