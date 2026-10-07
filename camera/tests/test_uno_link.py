@@ -81,7 +81,8 @@ def test_uno_clock_measures_before_restarting_on_rewind():
     assert restarted is True
     assert age == pytest.approx(1090.0), "古い窓では uno=1000 の 990 ms 前の行＋経過 100 ms"
     age, restarted = clock.observe(received_ms=1250.0, uno_ms=20)
-    assert (restarted, age) == (False, pytest.approx(60.0))
+    assert restarted is False
+    assert age == pytest.approx(40.0)
 
 
 def test_uno_clock_reset():
