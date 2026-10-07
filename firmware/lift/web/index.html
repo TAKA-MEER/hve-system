@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>hve 昇降部</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <span class="title">hve 昇降部</span>
+  <span class="badge" id="bCeil"><span class="dot"></span><span>天井 —</span></span>
+  <span class="badge" id="bClients"><span>端末 —</span></span>
+  <span class="badge warn" id="bProv" style="display:none" title="仮値のまま動いているパラメータがあります"><span class="dot"></span><span>仮値</span></span>
+  <span class="badge warn" id="bTop" title="上端の検知は一時無効です（W-1）。上昇は人が見ながら短く行ってください"><span class="dot"></span><span>上端の検知: 一時無効</span></span>
+  <span class="badge ng" id="bWs" style="display:none" title="昇降部から状態が届きません。再接続を試みています"><span class="dot"></span><span>接続切れ</span></span>
+  <span class="spacer"></span>
+  <button class="hbtn" id="openSettings">設定</button>
+</header>
+
+<main>
+  <section class="card">
+    <h2><span>昇降</span><span class="st" id="liftState">停止中</span></h2>
+    <div class="lift">
+      <div class="liftbtns">
+        <button class="hold" data-dir="up">▲ 上昇</button>
+        <button class="hold" data-dir="down">▼ 下降</button>
+      </div>
+      <div class="gauge" title="高さ">
+        <div class="fill" id="gFill"></div>
+      </div>
+    </div>
+    <div class="sub">速度</div>
+    <div class="slider"><label for="sUp">上昇</label><input type="range" id="sUp"><output id="oUp"></output></div>
+    <div class="slider"><label for="sDown">下降</label><input type="range" id="sDown"><output id="oDown"></output></div>
+  </section>
+
+  <section class="card">
+    <h2><span>状態</span></h2>
+    <dl class="stat">
+      <div><dt>高さ</dt><dd id="stHeight">—</dd></div>
+      <div><dt>下端</dt><dd id="stBottom">—</dd></div>
+      <div><dt>持ち主</dt><dd id="stOwner">—</dd></div>
+      <div><dt>上部モジュール</dt><dd id="stModule">—</dd></div>
+      <div><dt>止めた理由</dt><dd id="stReason">—</dd></div>
+    </dl>
+    <div class="stopbar" id="stopbar"></div>
+  </section>
+</main>
+
+<!-- 設定画面（同じページの中に出る別画面。上昇・下降の速度だけ） -->
+<div class="overlay" id="settings">
+  <div class="sheet" role="dialog" aria-labelledby="stTitle">
+    <h1 id="stTitle">設定</h1>
+    <p class="note">昇降部に保存され、どの端末から開いても同じ設定になります。誰でも変更できます。
+      スライダーの位置は保存されず、画面を開くたびに<b>初期値</b>から始まります。</p>
+    <table>
+      <thead><tr><th>速度</th><th>下限</th><th>上限</th><th>初期値</th><th>単位</th></tr></thead>
+      <tbody id="stBody"></tbody>
+    </table>
+    <div class="err" id="stErr"></div>
+    <div class="row-actions">
+      <button class="hbtn" id="stCancel">閉じる（保存しない）</button>
+      <button class="hbtn primary" id="stSave">保存</button>
+    </div>
+    <div class="prov" id="stProv"></div>
+  </div>
+</div>
+<div class="toast" id="toast">保存しました</div>
+
+<script src="app.js"></script>
+</body>
+</html>
