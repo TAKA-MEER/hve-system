@@ -1,0 +1,11 @@
+--- a/S90wifi-conf
++++ b/S90wifi-conf
+@@ -4,7 +4,7 @@
+         start)
+                 printf "Starting wpa_supplicant: "
+                 /usr/sbin/wpa_supplicant -B -Dnl80211 -iwlan0 -c /etc/wpa_supplicant.conf  &> /tmp/wpa.info &
+-                /usr/sbin/hostapd -d /etc/hostapd.conf -B &> /tmp/hostapd.info &
++                # HVE-P11: /usr/sbin/hostapd -d /etc/hostapd.conf -B &> /tmp/hostapd.info &
+                 [ $? = 0 ] && echo "OK" || echo "FAIL"
+                 ;;
+         stop)
