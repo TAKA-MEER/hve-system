@@ -1,6 +1,6 @@
 """カメラ部のアプリ。画面（静的ファイル）・設定 API・ブラウザとの WS・制御ループ。
 
-[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §1・§2・§3。
+[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §1・§2・§4。
 起動（`__main__.py`）と試験が同じ物を使うように、aiohttp のアプリを組み立てるのは
 **`create_app()` だけ**。試験は `create_app()` で作ったアプリを使う。
 
