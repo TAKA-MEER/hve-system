@@ -2,8 +2,6 @@
 // 680 半ステップ毎秒・100 µs 周期なら約 1.47 ms ごとに刻む。
 #include "step_rate.h"
 
-#include <cstddef>
-
 namespace {
 
 // 1 半ステップに当たる位相 [半ステップ・µs / 秒]

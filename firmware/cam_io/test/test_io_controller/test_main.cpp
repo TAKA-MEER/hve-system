@@ -110,6 +110,19 @@ void test_pitch_is_clamped() {
   TEST_ASSERT_EQUAL_INT(PITCH_MIN_DEG * 10, hal.pitch_ddeg());
 }
 
+void test_pitch_beyond_16bit_int_is_clamped_on_correct_side() {
+  // 丸める前に 16 bit の int に切り詰めると -100000 が正に反転して +60° になる
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(100000, 0), 0);
+  ctrl.tick(0);
+  TEST_ASSERT_EQUAL_INT(PITCH_MAX_DEG * 10, hal.pitch_ddeg());
+
+  ctrl.on_command(cmd(-100000, 0), 10);
+  ctrl.tick(10);
+  TEST_ASSERT_EQUAL_INT(PITCH_MIN_DEG * 10, hal.pitch_ddeg());
+}
+
 void test_pitch_inside_range_passes_through() {
   FakeIoHal hal;
   IoController ctrl(&hal);
@@ -185,6 +198,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_fresh_command_after_watchdog_moves_again);
 
   RUN_TEST(test_pitch_is_clamped);
+  RUN_TEST(test_pitch_beyond_16bit_int_is_clamped_on_correct_side);
   RUN_TEST(test_pitch_inside_range_passes_through);
   RUN_TEST(test_yaw_is_clamped);
   RUN_TEST(test_yaw_inside_range_passes_through);

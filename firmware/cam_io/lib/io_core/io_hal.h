@@ -4,7 +4,8 @@
 // 止めている間・指令が途絶えたときはコイルの電流を切る。サーボのパルスは止めない。
 #pragma once
 
-#include <cstdint>
+// avr-gcc には C++ 標準ライブラリのヘッダが無いので C のヘッダだけを使う。
+#include <stdint.h>
 
 class IoHal {
  public:

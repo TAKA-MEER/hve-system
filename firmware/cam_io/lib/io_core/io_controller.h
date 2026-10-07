@@ -4,7 +4,8 @@
 // （DetailedDesign.md §3.4・DetailedDesign-hardware.md §2.4）。
 #pragma once
 
-#include <cstdint>
+// avr-gcc には C++ 標準ライブラリのヘッダが無いので C のヘッダだけを使う。
+#include <stdint.h>
 
 #include "io_codec.h"
 #include "io_hal.h"

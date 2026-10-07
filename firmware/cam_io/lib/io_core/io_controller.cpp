@@ -10,9 +10,9 @@ int32_t elapsed_ms(uint32_t now_ms, uint32_t then_ms) {
   return static_cast<int32_t>(now_ms - then_ms);
 }
 
-int clamp_pitch_ddeg(int pitch_ddeg) {
-  const int lo = PITCH_MIN_DEG * 10;
-  const int hi = PITCH_MAX_DEG * 10;
+int32_t clamp_pitch_ddeg(int32_t pitch_ddeg) {
+  const int32_t lo = (int32_t)PITCH_MIN_DEG * 10;
+  const int32_t hi = (int32_t)PITCH_MAX_DEG * 10;
   if (pitch_ddeg < lo) {
     return lo;
   }

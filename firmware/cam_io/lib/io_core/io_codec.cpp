@@ -3,9 +3,9 @@
 // 区切りは空白 1 つ。読めない行は捨てる（false・0。生存確認を延ばさない）。
 #include "io_codec.h"
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 namespace {
 
@@ -22,7 +22,7 @@ bool take_int(const char* p, long* value, const char** end) {
     return false;
   }
   char* stop = nullptr;
-  const long parsed = std::strtol(p, &stop, 10);
+  const long parsed = strtol(p, &stop, 10);
   if (stop == p) {
     return false;
   }
@@ -45,7 +45,7 @@ bool parse_m_line(const char* line, IoCmd* out) {
   if (line == nullptr) {
     return false;
   }
-  if (std::strlen(line) > IO_LINE_MAX) {
+  if (strlen(line) > IO_LINE_MAX) {
     return false;
   }
   // 頭文字・区切りはきっちり見る（空白 1 つ。改行が混ざった行も捨てる）
@@ -68,8 +68,8 @@ bool parse_m_line(const char* line, IoCmd* out) {
   if (!take_int(p, &yaw, &end) || !fits_int32(yaw) || *end != '\0') {
     return false;
   }
-  out->seq = static_cast<unsigned int>(seq);
-  out->pitch_ddeg = static_cast<int>(pitch);
+  out->seq = static_cast<uint16_t>(seq);
+  out->pitch_ddeg = static_cast<int32_t>(pitch);
   out->yaw_hsps = static_cast<int32_t>(yaw);
   return true;
 }
@@ -80,7 +80,7 @@ unsigned int format_c_line(uint32_t uno_ms, int st, int cm, char* out, unsigned 
   }
   // uint32_t は AVR では unsigned long、ホストでは unsigned int なので long に広げて %lu
   const int written =
-      std::snprintf(out, out_size, "C %lu %d %d", static_cast<unsigned long>(uno_ms), st, cm);
+      snprintf(out, out_size, "C %lu %d %d", static_cast<unsigned long>(uno_ms), st, cm);
   if (written <= 0 || static_cast<unsigned int>(written) >= out_size ||
       static_cast<unsigned int>(written) > IO_LINE_MAX) {
     if (out_size > 0) {
@@ -101,7 +101,7 @@ unsigned int format_b_line(uint32_t uno_ms, const char* fw, char* out, unsigned 
     }
   }
   const int written =
-      std::snprintf(out, out_size, "B %lu %s", static_cast<unsigned long>(uno_ms), fw);
+      snprintf(out, out_size, "B %lu %s", static_cast<unsigned long>(uno_ms), fw);
   if (written <= 0 || static_cast<unsigned int>(written) >= out_size ||
       static_cast<unsigned int>(written) > IO_LINE_MAX) {
     if (out_size > 0) {

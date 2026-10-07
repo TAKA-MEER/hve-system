@@ -4,7 +4,8 @@
 // （DetailedDesign-names.md §1）。
 #pragma once
 
-#include <cstdint>
+// avr-gcc には C++ 標準ライブラリのヘッダが無いので C のヘッダだけを使う。
+#include <stdint.h>
 
 class StepRate {
  public:

@@ -50,6 +50,21 @@ void test_parse_accepts_out_of_range_values_for_controller_to_clamp() {
   TEST_ASSERT_EQUAL_INT32(-680, cmd.yaw_hsps);
 }
 
+void test_parse_keeps_values_beyond_16bit_int() {
+  // AVR の int は 16 bit。100000 を int に詰めると切り詰められて符号が反転しうる
+  // ので、IoCmd は幅の決まった型で持ち、ここでは切り詰めずに受け付ける
+  IoCmd cmd;
+  TEST_ASSERT_TRUE(parse_m_line("M 0 100000 0", &cmd));
+  TEST_ASSERT_EQUAL_INT32(100000, cmd.pitch_ddeg);
+  TEST_ASSERT_TRUE(parse_m_line("M 0 -100000 0", &cmd));
+  TEST_ASSERT_EQUAL_INT32(-100000, cmd.pitch_ddeg);
+}
+
+void test_io_baud_holds_115200() {
+  // 115200 は 16 bit の int に収まらない。AVR での切り詰めを縛る
+  TEST_ASSERT_EQUAL_INT32(115200, IO_BAUD);
+}
+
 // --- 読めない行は捨てる ---
 
 void test_drops_wrong_head_or_field_count() {
@@ -136,6 +151,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_parse_valid_zero_command);
   RUN_TEST(test_parse_valid_command);
   RUN_TEST(test_parse_accepts_out_of_range_values_for_controller_to_clamp);
+  RUN_TEST(test_parse_keeps_values_beyond_16bit_int);
+  RUN_TEST(test_io_baud_holds_115200);
 
   RUN_TEST(test_drops_wrong_head_or_field_count);
   RUN_TEST(test_drops_non_integer_fields);
