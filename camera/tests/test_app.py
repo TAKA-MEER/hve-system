@@ -168,6 +168,8 @@ async def rig(loop) -> Any:
     r = Rig()
     await r.start()
     await wait_until(lambda: r.lift.connected)  # WS が開いている = 繋がっている
+    assert r.esp32 is not None
+    await wait_until(lambda: bool(r.esp32.hello_history))  # hello は接続の少し後に届く
     try:
         yield r
     finally:

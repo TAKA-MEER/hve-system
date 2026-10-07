@@ -113,6 +113,8 @@ async def test_resolver_is_used_for_reconnect() -> None:
         await wait_until(lambda: len(calls) >= 1)
         missing = False
         await wait_until(lambda: esp32.connected)
+        # hello は接続の少し後に届く。届くのを待ってから確かめる（待たないと競合する）
+        await wait_until(lambda: bool(esp32.hello_history))
         assert esp32.hello_history, "引けるようになったら繋いで hello を送る"
     finally:
         await lift.close()
