@@ -5,6 +5,7 @@
 #include <unity.h>
 
 #include "../../src/config.h"
+#include "../../src/servo_pwm.h"
 #include "io_controller.h"
 
 void test_half_step_sequence_has_eight_phases() {
@@ -68,6 +69,47 @@ void test_servo_pulse_at_both_pitch_limits_stays_inside() {
   TEST_ASSERT_TRUE_MESSAGE(SERVO_PULSE_CENTER_US < SERVO_PULSE_MAX_US, "中央 < MAX");
 }
 
+void test_servo_pwm_period_is_20ms() {
+  // 分周 8（0.5µs/カウント）で TOP+1 カウント＝20 ms（50 Hz）
+  TEST_ASSERT_EQUAL_INT32(20000, (static_cast<int32_t>(SERVO_PWM_TOP) + 1) / SERVO_PWM_TICKS_PER_US);
+}
+
+void test_servo_ocr1a_known_values() {
+  TEST_ASSERT_EQUAL_UINT16(3000, servo_ocr1a_from_ddeg(0));      // 1500µs
+  TEST_ASSERT_EQUAL_UINT16(3600, servo_ocr1a_from_ddeg(300));    // +30° → 1800µs
+  TEST_ASSERT_EQUAL_UINT16(2400, servo_ocr1a_from_ddeg(-300));   // -30° → 1200µs
+  TEST_ASSERT_EQUAL_UINT16(4200, servo_ocr1a_from_ddeg(600));    // +60° → 2100µs（上限）
+  TEST_ASSERT_EQUAL_UINT16(1800, servo_ocr1a_from_ddeg(-600));   // -60° → 900µs（下限）
+}
+
+void test_servo_ocr1a_clamps_outside_range() {
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(30000));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(-30000));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(32767));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(-32768));
+}
+
+void test_servo_ocr1a_always_within_top_and_monotonic() {
+  uint16_t prev = 0;
+  for (int d = -2000; d <= 2000; d += 5) {
+    const uint16_t v = servo_ocr1a_from_ddeg(d);
+    TEST_ASSERT_TRUE(v < SERVO_PWM_TOP);
+    TEST_ASSERT_TRUE(v >= SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US);
+    TEST_ASSERT_TRUE(v <= SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US);
+    TEST_ASSERT_TRUE(v >= prev);
+    prev = v;
+  }
+}
+
+void test_servo_ocr1a_from_us_never_exceeds_top() {
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PWM_TOP, servo_ocr1a_from_us(30000));
+  TEST_ASSERT_EQUAL_UINT16(0, servo_ocr1a_from_us(-5));
+}
+
+void test_srf02_addr_is_this_unit() {
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x72, SRF02_ADDR, "この個体は 0x72（工場出荷 0x70 ではない）");
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_half_step_sequence_has_eight_phases);
@@ -76,5 +118,11 @@ int main() {
   RUN_TEST(test_half_step_sequence_changes_one_coil_at_a_time);
   RUN_TEST(test_yaw_pins_match_portd_upper_bits);
   RUN_TEST(test_servo_pulse_at_both_pitch_limits_stays_inside);
+  RUN_TEST(test_servo_pwm_period_is_20ms);
+  RUN_TEST(test_servo_ocr1a_known_values);
+  RUN_TEST(test_servo_ocr1a_clamps_outside_range);
+  RUN_TEST(test_servo_ocr1a_always_within_top_and_monotonic);
+  RUN_TEST(test_servo_ocr1a_from_us_never_exceeds_top);
+  RUN_TEST(test_srf02_addr_is_this_unit);
   return UNITY_END();
 }

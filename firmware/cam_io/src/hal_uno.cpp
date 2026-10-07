@@ -1,5 +1,5 @@
 // HalUno（DetailedDesign.md §4.5・DetailedDesign-hardware.md §2.2〜§2.4）。
-// 刻みは Timer2 の割り込み（Servo が Timer1、millis が Timer0 を使うため）。
+// 刻みは Timer2 の割り込み（サーボの PWM が Timer1、millis が Timer0 を使うため）。
 // UNO は 16MHz なので、100µs 周期はプリスケーラ 8・OCR2A=199（16M÷8÷200）。
 #include "hal_uno.h"
 
@@ -8,6 +8,8 @@
 #include <avr/interrupt.h>
 
 #include "config.h"
+#include "io_controller.h"
+#include "servo_pwm.h"
 
 namespace {
 
@@ -53,7 +55,17 @@ void HalUno::begin() {
   noInterrupts();
   coils_off();
   interrupts();
-  servo_.attach(SERVO_PIN);
+  static_assert(SERVO_PIN == 9, "MG996R は D9（OC1A）に付ける");
+  // Timer1 のハードウェア PWM（Fast PWM mode 14・TOP＝ICR1・分周 8・非反転）。
+  // 割り込み方式のライブラリはパルスを作り Timer2 の刻みに遅らされて揺れたため使わない。
+  // 先に初期角のパルス幅を入れてから、クロックを入れて出し始める
+  pinMode(SERVO_PIN, OUTPUT);
+  TCCR1A = (1 << COM1A1) | (1 << WGM11);
+  TCCR1B = (1 << WGM13) | (1 << WGM12);  // クロックはまだ止めたまま
+  ICR1 = SERVO_PWM_TOP;
+  OCR1A = servo_ocr1a_from_ddeg(PITCH_INITIAL_DEG * 10);
+  TCNT1 = 0;
+  TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11);
   Wire.begin();
   // 時間切れでもバスを戻す（true）。固まって loop が止まるのを防ぐ
   Wire.setWireTimeout(SRF02_WIRE_TIMEOUT_US, true);
@@ -90,17 +102,13 @@ void HalUno::yaw_coils_off() {
 }
 
 void HalUno::servo_set_ddeg(int pitch_ddeg) {
-  const int32_t pulse =
-      static_cast<int32_t>(SERVO_PULSE_CENTER_US) +
-      (static_cast<int32_t>(pitch_ddeg) * static_cast<int32_t>(SERVO_US_PER_DEG)) / 10;
-  int32_t limited = pulse;
-  if (limited < SERVO_PULSE_MIN_US) {
-    limited = SERVO_PULSE_MIN_US;
-  }
-  if (limited > SERVO_PULSE_MAX_US) {
-    limited = SERVO_PULSE_MAX_US;
-  }
-  servo_.writeMicroseconds(static_cast<int>(limited));
+  const uint16_t ocr = servo_ocr1a_from_ddeg(pitch_ddeg);
+  // OCR1A は 16bit（AVR は一時レジスタ経由で 2 回に分かれる）。Timer2 の割り込みは
+  // Timer1 のレジスタに触らないが、割り込み禁止区間で書いて一時レジスタの競合を避ける。
+  // OCR1A は TOP で反映されるので、パルスの途中で幅が変わることはない
+  noInterrupts();
+  OCR1A = ocr;
+  interrupts();
 }
 
 bool HalUno::srf02_poll(uint32_t now_ms, int* st, int* cm) {
