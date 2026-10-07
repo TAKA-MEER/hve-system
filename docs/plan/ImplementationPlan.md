@@ -12,7 +12,7 @@
 
 ## 1. 今どこにいるか
 
-**最終同期: 2026-10-07**（`redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06`・`WP-BASE-02`・`WP-LIFT-03`・`WP-IO-01` まで）。更新のしかたは §2.3「計画書を都度更新する」。
+**最終同期: 2026-10-07**（`redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06`・`WP-BASE-02`・`WP-LIFT-03`・`WP-IO-01`・`WP-LIFTUI-01` まで）。更新のしかたは §2.3「計画書を都度更新する」。
 
 | | 状態 |
 | --- | --- |
@@ -206,9 +206,10 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | `WP-MEAS-06` | 0 | **実機確認済み**（2026-10-06・07。UART の電圧・ピンの並び・UNO との双方向 115200 も。再起動後に `th-rpi-ap` へ繋がらないことがある → 対策 `P-13` を `WP-CAM-05` で確かめる。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
 | `WP-BASE-02` | 0 | **配線済み**（`9ff6a1d`。`.venv38`・`firmware/cam_io` の骨格。旧版の `camera/tests` は 3.8 で 8 failed・25 errors → `WP-CAM-04` で直す） |
 | `WP-LIFT-03` | 1 | **配線済み**（`b09403f`。判定のホスト試験 140 件。ESP32 の実物には未配線＝`WP-LIFT-04`） |
-| `WP-LIFTUI-01` ／ `WP-LIFT-04` | 1 | 未着手 |
+| `WP-LIFTUI-01` | 1 | **配線済み**（`f6ecd95`。偽の昇降部に向けてスクロール検査 51/51・ブラウザ経路 4/4。ESP32 への埋め込みは `WP-LIFT-04`） |
+| `WP-LIFT-04` | 1 | 2026-10-07 に opencode へ投げた |
 | `WP-IO-01` | 2 | **配線済み**（`56784e1`。ホスト試験 35 件・UNO 向けにもコンパイル） |
-| `WP-IO-02` | 2 | 未着手 |
+| `WP-IO-02` | 2 | 2026-10-07 に opencode へ投げた |
 | `WP-CAM-04` ／ `WP-VIDEO-02` ／ `WP-UI-02` ／ `WP-CAM-05` | 3 | 未着手 |
 | `WP-MEAS-01`〜`05` | 4 | 未着手 |
 
@@ -233,8 +234,8 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | ~~0~~ | ~~v2 の spec・詳細設計の初版・提案 `P-5`〜`P-10`~~ | 2026-10-06 |
 | 1 | ~~`WP-MEAS-06`~~（2026-10-07。再起動後に繋がらないことがある原因は `grace.ko` と分かり、対策 `P-13` は `WP-CAM-05` で入れて確かめる）／ ~~`WP-BASE-02`~~（`9ff6a1d`）／ モバイルバッテリの選定（`D-9`）／ ~~ユーザー判断 `P-11`・`P-12`・`P-13`~~（2026-10-07 すべて採用） | `D-9` が残り |
 | ~~2~~ | ~~`WP-LIFT-03` ／ `WP-IO-01`~~ | `b09403f` ／ `56784e1` |
-| 3 | `WP-LIFTUI-01` ／ `WP-CAM-04`（`WP-MEAS-06` の 1・2・5 は通った） | 2026-10-07 に opencode へ投げた |
-| 4 | `WP-LIFT-04` ／ `WP-IO-02` ／ `WP-VIDEO-02` ／ `WP-UI-02` | 未着手 |
+| 3 | ~~`WP-LIFTUI-01`~~（`f6ecd95`）／ `WP-CAM-04` | CAM-04 は opencode が作業中 |
+| 4 | `WP-LIFT-04` ／ `WP-IO-02` ／ `WP-VIDEO-02` ／ `WP-UI-02` | LIFT-04・IO-02 は opencode が作業中（実機の確認は管理担当） |
 | 5 | `WP-CAM-05` | 未着手 |
 | 6 | `WP-MEAS-01`〜`05` | 未着手 |
 | いつでも | 上端の手段（`H-X9`。ユーザーが検討中）／先方・機構側に聞く値（`H-V1`・`H-V2`）／目標 `H-G1` | 未着手 |
