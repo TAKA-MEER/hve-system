@@ -104,8 +104,12 @@ class LiftLink(LiftPort):
         *,
         name: str = "hve-cam",
         ceiling_sensor: bool = True,
+        state_timeout_ms: float = 600.0,
     ) -> None:
         self._url = url
+        #: `state` がこれだけ（実時間）届かなければ、その WS を自分で閉じて繋ぎ直す
+        #: （protocol §1。相手の再起動で死んだ TCP は切断の知らせが来ない）。
+        self._state_timeout_s = max(float(state_timeout_ms), 1.0) / 1000.0
         self._clock = clock
         #: `hello` の `name`。表示とログのためだけ。
         self._name = name
@@ -250,19 +254,51 @@ class LiftLink(LiftPort):
             log.info("昇降部 %s に繋がった", url)
             with contextlib.suppress(Exception):
                 await ws.send_str(self._hello())
-            async for message in ws:
-                if message.type is not aiohttp.WSMsgType.TEXT:
-                    continue
-                self._accept(message.data)
+            loop = asyncio.get_event_loop()
+            last_state = loop.time()
+            try:
+                while True:
+                    remaining = last_state + self._state_timeout_s - loop.time()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError()
+                    message = await ws.receive(timeout=remaining)
+                    if message.type is not aiohttp.WSMsgType.TEXT:
+                        if message.type in (
+                            aiohttp.WSMsgType.CLOSE,
+                            aiohttp.WSMsgType.CLOSING,
+                            aiohttp.WSMsgType.CLOSED,
+                            aiohttp.WSMsgType.ERROR,
+                        ):
+                            return
+                        continue
+                    if self._accept(message.data):
+                        last_state = loop.time()
+            except asyncio.TimeoutError:
+                log.info("昇降部から state が %.0f ms 届かない。繋ぎ直す", self._state_timeout_s * 1000)
+                # hold を死んだ口へ送らない。先に外す。
+                self._ws = None
+                await self._abandon(ws)
 
-    def _accept(self, raw: str) -> None:
-        """`state` を受けて、受信時刻を**この時計**で記録する。読めないものは捨てる。"""
+    @staticmethod
+    async def _abandon(ws: aiohttp.ClientWebSocketResponse) -> None:
+        """死んだ口を閉じる。**閉じの握手を待たない**（死んだ相手は答えないので）。"""
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(ws.close(), 1.0)
+        # 握手待ちを打ち切ると接続が残ることがあるので、下の層も閉じる
+        with contextlib.suppress(Exception):
+            ws._response.close()  # type: ignore[attr-defined]
+
+    def _accept(self, raw: str) -> bool:
+        """`state` を受けて、受信時刻を**この時計**で記録する。読めないものは捨てる。
+
+        `state` として受けたら `True`。"""
         try:
             data = json.loads(raw)
         except ValueError:
-            return
+            return False
         if not isinstance(data, dict) or data.get("t") != "state":
-            return
+            return False
         self._state = data
         self._state_at_ms = self._clock()
         self.state_history.append(dict(data))
+        return True

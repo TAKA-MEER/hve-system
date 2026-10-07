@@ -121,6 +121,35 @@ async def test_resolver_is_used_for_reconnect() -> None:
         await esp32.stop()
 
 
+async def test_silent_peer_is_dropped_and_reconnected_with_hello() -> None:
+    """相手が TCP を閉じずに `state` だけ止めたら、自分で閉じて繋ぎ直し、`hello` を送り直す。
+
+    実機 2026-10-07: 昇降部の再起動で古い TCP が知らせ無しに死に、永久に `LINK_LOST` だった。
+    **受信タイムアウトを外す（永久に待つ）と赤になる。**
+    """
+    clock = ManualClock()
+    esp32 = FakeEsp32(clock)
+    url = await esp32.start()
+    lift = LiftLink(url, clock, state_timeout_ms=300)
+    try:
+        await lift.start()
+        await wait_until(lambda: len(esp32.hello_history) >= 1)
+        await wait_until(lambda: lift.latest_state() is not None)
+        esp32.silent = True  # 閉じずに黙る
+        await wait_until(lambda: len(esp32.hello_history) >= 2, timeout=5.0)
+        # 黙っている間の hold は死んだ口へ出さない（繋ぎ直しの前後どちらでも例外は出ない）
+        esp32.silent = False
+        before = len(esp32.state_history)
+        await wait_until(lambda: len(esp32.state_history) > before + 2)
+        n = len(esp32.hold_history)
+        await lift.send_hold("up", 30, 1, "MEASURED", 2000, 0)
+        await wait_until(lambda: len(esp32.hold_history) > n)
+        assert len(esp32.hello_history) == 2
+    finally:
+        await lift.close()
+        await esp32.stop()
+
+
 # --- lift_resolve --------------------------------------------------------------
 
 

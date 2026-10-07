@@ -110,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             clock,
             name=str(params.get("module_name", "hve-cam")),
             ceiling_sensor=bool(params.get("module_ceiling_sensor", True)),
+            state_timeout_ms=float(params["lift_state_timeout_ms"]),
         )
         log.info("実物のモードで起動する（UART %s・昇降部 %s）", params.get("io_device"), module_ws_url(params))
 
