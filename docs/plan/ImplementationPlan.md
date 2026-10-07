@@ -12,7 +12,7 @@
 
 ## 1. 今どこにいるか
 
-**最終同期: 2026-10-07**（`redesign/v2` = v2 の spec・詳細設計の初版と `WP-MEAS-06` の大半まで。実装は v2 では未着手）。更新のしかたは §2.3「計画書を都度更新する」。
+**最終同期: 2026-10-07**（`redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06` の大半・`WP-BASE-02` まで）。更新のしかたは §2.3「計画書を都度更新する」。
 
 | | 状態 |
 | --- | --- |
@@ -83,16 +83,16 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 | コミット | **細かく切らせる** | **無料枠・クォータで途中で止まる前提。**opencode は上限に達すると idle のまま進まなくなる |
 | `git push` | **投げない。実装管理担当が検証してから押す** | — |
 
-#### orca の場合（th-system が 2026-10-01 に試用。**hve-system ではまだ使っていない**ので、初回に確かめて直す）
+#### orca の場合（th-system が 2026-10-01 に試用。hve-system では 2026-10-07 の `WP-BASE-02` から使っている）
 
 ```bash
-orca worktree create --name <n> --no-parent --setup skip --agent opencode --json   # worktree 作成と opencode 起動を 1 回で
+orca worktree create --name <n> --no-parent --setup skip --base-branch <元のブランチ> --agent opencode --json   # worktree 作成と opencode 起動を 1 回で（v2 の間は --base-branch redesign/v2）
 git -C <worktreeのpath> branch -m <n> <種別>/<主題>     # orca はブランチ名を <n> にするので付け替える
 mkdir -p <worktreeのpath>/.briefs/tmp                    # .briefs は gitignore なので新しい worktree には無い。ブリーフもここに置く
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json   # satisfied:true を確かめてから送る
 orca terminal send --terminal <handle> --text "指示書は .briefs/brief-<ID>.md。…" --enter --json
 orca terminal read --terminal <handle> --limit 60        # 監視。画面に `esc interrupt` があれば作業中
-orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。フォルダ・ターミナル・ローカルブランチまで消える
+orca worktree rm --worktree path:<path> --force --json   # 片付け。フォルダ・ターミナル・ローカルブランチまで消える（hve-system では `id:<repoId>::<path>` は黙って何もしなかった。2026-10-07）
 ```
 
 | 項目 | 決まりごと | 理由 |
@@ -185,7 +185,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 
 | 段階 | 残るもの | 状態 |
 | --- | --- | --- |
-| 0 土台・調査 | UnitV2 で何ができるかが分かる。Python 3.8 の試験環境・Arduino の骨格 | 未着手 |
+| 0 土台・調査 | UnitV2 で何ができるかが分かる。Python 3.8 の試験環境・Arduino の骨格 | `WP-BASE-02` 済み・`WP-MEAS-06` は再起動後の STA が残り |
 | 1 昇降部 | 昇降部が単体で自分の画面から動く。上部モジュールの口がある | 未着手 |
 | 2 Arduino | UNO がヨー・ピッチ・天井を扱い、途絶で止まる | 未着手 |
 | 3 カメラモジュール | 偽物のモードで v2 の取り決めが通る → UnitV2 の実物・映像 | 未着手 |
@@ -204,7 +204,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 | ID | 段階 | 状態 |
 | --- | --- | --- |
 | `WP-MEAS-06` | 0 | **大半を実施**（2026-10-06・07。UART の電圧・ピンの並び・UNO との双方向 115200 も実機確認済み。残りは再起動後に `th-rpi-ap` へ繋がり直すか。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
-| `WP-BASE-02` | 0 | 未着手 |
+| `WP-BASE-02` | 0 | **配線済み**（`9ff6a1d`。`.venv38`・`firmware/cam_io` の骨格。旧版の `camera/tests` は 3.8 で 8 failed・25 errors → `WP-CAM-04` で直す） |
 | `WP-LIFT-03` ／ `WP-LIFTUI-01` ／ `WP-LIFT-04` | 1 | 未着手 |
 | `WP-IO-01` ／ `WP-IO-02` | 2 | 未着手 |
 | `WP-CAM-04` ／ `WP-VIDEO-02` ／ `WP-UI-02` ／ `WP-CAM-05` | 3 | 未着手 |
@@ -229,8 +229,8 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 | # | 作業 | 状態 |
 | --- | --- | --- |
 | ~~0~~ | ~~v2 の spec・詳細設計の初版・提案 `P-5`〜`P-10`~~ | 2026-10-06 |
-| 1 | `WP-MEAS-06` の残り（再起動後の STA。UART は 2026-10-07 済み）／ `WP-BASE-02` ／ モバイルバッテリの選定（`D-9`）／ **ユーザー判断: `P-11`・`P-12`**（`H-V10` は 2026-10-07 に決定） | `WP-MEAS-06` は大半を実施 |
-| 2 | `WP-LIFT-03` ／ `WP-IO-01` | 未着手 |
+| 1 | `WP-MEAS-06` の残り（**再起動後に `th-rpi-ap` へ繋がり直さない**。2026-10-07 調査中）／ ~~`WP-BASE-02`~~（`9ff6a1d`）／ モバイルバッテリの選定（`D-9`）／ **ユーザー判断: `P-11`・`P-12`**（`H-V10` は 2026-10-07 に決定） | `WP-MEAS-06` は大半を実施 |
+| 2 | `WP-LIFT-03` ／ `WP-IO-01` | 2026-10-07 に opencode へ投げた |
 | 3 | `WP-LIFTUI-01` ／ `WP-CAM-04`（`WP-MEAS-06` の 1・2・5 が通ってから） | 未着手 |
 | 4 | `WP-LIFT-04` ／ `WP-IO-02` ／ `WP-VIDEO-02` ／ `WP-UI-02` | 未着手 |
 | 5 | `WP-CAM-05` | 未着手 |
