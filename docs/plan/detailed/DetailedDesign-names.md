@@ -32,6 +32,7 @@
 | `camera/hve_camera/hw/fake_lift.py` | 偽の昇降部（v2 の取り決めを話す。プロセス内） |
 | `camera/hve_camera/lift_resolve.py` | 昇降部の名前を引く（`lift_host` が空なら `avahi-resolve-host-name -4` で `hve-lift.local`） |
 | `camera/requirements.txt` ／ `requirements-dev.txt` | UnitV2 の OS に入っている版（`aiohttp==3.6.2`・`pyserial==3.4`・numpy 1.16.4・OpenCV 3.4 系）に揃えて固定 ／ ホストの試験用（`pytest-aiohttp` も aiohttp 3.6 で動く版）。**UnitV2 へは入れない**（OS のものを使う） |
+| `tools/requirements-dev.txt` | ホストの `.venv`（Python 3.10）で `tools/tests` を回すための依存。`camera/requirements-dev.txt` が 3.8 の版になるので、旧版の中身をここへ移す（`WP-BASE-02`） |
 | `camera/vendor/` | UnitV2 へ持ち込む純 Python の依存（wheel を展開したもの。いまは `tomli` だけ）。アプリは `PYTHONPATH` に足して読む |
 | `camera/deploy/` | UnitV2 の配備: `S86hve`（init スクリプト。root で `hve_camera` と `hve_video` を起動）・avahi の設定の差分（`P-12`）・組み込みのサービスを外す手順 |
 | `tools/fake_lift_server.py` | 偽の昇降部（単体のプロセス）。昇降部の画面・`/ws/ui`・`/ws/module`・設定 API を出す（[DetailedDesign.md](DetailedDesign.md) §4.2） |
