@@ -13,6 +13,7 @@
 | --- | --- | --- | --- | --- |
 | **`P-11`** | UnitV2 が自分で出している AP（`M5UV2_4afd`。`th-rpi-ap` と同じ 1 ch）を、配備で止めるか | **止める**（`/etc/init.d/S90wifi-conf` の `hostapd` の行を外す）。USB の有線（`10.254.239.1`）での保守は残る | 同じチャネルにもう 1 つ AP があると、ビーコンと接続の分だけ `th-rpi-ap` の帯域を食う（spec `H-A8`・`HD-1` の「干渉しない」）。止めると、無線で UnitV2 に入る手段は `th-rpi-ap` 経由だけになる | `WP-CAM-05`・[-hardware.md](DetailedDesign-hardware.md) §2.1.1 |
 | **`P-12`** | UnitV2 の OS の設定を変えて、avahi に `th-rpi-ap` 側（`wlan0`）を見させるか | **変える**（`/etc/avahi/avahi-daemon.conf` の `allow-interfaces` に `wlan0` を足す）。変えた差分は `camera/deploy/` に置く | 昇降部を `hve-lift.local` で見つけるため（[DetailedDesign.md](DetailedDesign.md) §4.6）。Python からは `.local` を引けない。足すと UnitV2 も `unitv2.local` として `th-rpi-ap` に名乗る | `WP-CAM-05`・§4.6 |
+| **`P-13`** | UnitV2 の起動で `grace.ko`（NFS・CIFS 用のカーネルモジュール）がクラッシュし、`wpa_supplicant` を道連れに固めて `th-rpi-ap` に繋がらないことがある。OS の起動の手順に手を入れるか | **入れる**（`/etc/init.d/S23oadfsko` の `insmod` から `grace.ko` を外す。`cifs.ko` が `grace` に依存していれば一緒に外す）。変えた差分は `camera/deploy/` に置く | 繋がらないと昇降部・操作端末と話せない。D 状態は kill できず、毎回の起動で当たり外れがある。NFS・CIFS は使わない | `WP-CAM-05`・[-hardware.md](DetailedDesign-hardware.md) §2.1.1 |
 | — | `P-5`・`P-6`・`P-8`・`P-9`・`P-10` は 2026-10-06 にすべて採用。`P-6` 以外は spec [Spec-open.md](../spec/Spec-open.md) §3 に記録。`P-6`（画面をファームに埋め込む）は実装の選択なので詳細設計に残す） | | | |
 
 （`P-7` は欠番。昇降部の見つけ方は spec `H-M2` で任されたので、提案にせず [DetailedDesign.md](DetailedDesign.md) §4.6 で決めた）
@@ -25,7 +26,7 @@
 | `D-2`（旧版から） | 映像の解像度・フレームレートの上限 | 配信 480p・取り込み 720p の MJPEG は決定（spec `H-V9`・`H-V10`）。**品質と fps の上限は `WP-MEAS-03`（無線の圧迫）で決める**（いまは品質 80・10 fps の仮。作り直しは 1 コアで約 10 fps） |
 | `D-3`（旧版から） | 昇降部の ESP32 の電源をどこから取るか | 旧版のまま |
 | `D-7`（旧版から） | 画面が映像の途絶えを見つけるため `/stream` へ接続を張っては切る負荷 | UnitV2 では CPU に余裕が無いかもしれない。`WP-MEAS-06` で見る |
-| **`D-8`** | UnitV2 で確かめること | **2026-10-06・07 に確かめた**（UART の電圧・ピンの並び・UNO との双方向も。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。残りは再起動後に `th-rpi-ap` へ繋がり直すか |
+| **`D-8`** | UnitV2 で確かめること | **2026-10-06・07 に確かめた**（UART の電圧・ピンの並び・UNO との双方向も。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。再起動後に `th-rpi-ap` へ繋がらないことがある（`P-13`） |
 | **`D-9`** | モバイルバッテリの型（出力の数・各出力の電流・容量） | [-hardware.md](DetailedDesign-hardware.md) §3。MG996R の拘束電流をモータ側の出力でまかなえること |
 
 ## 3. 完全設計書からの申し送り
