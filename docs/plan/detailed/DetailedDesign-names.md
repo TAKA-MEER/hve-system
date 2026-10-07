@@ -77,6 +77,7 @@
 | 名前 | 置き場 | 中身 |
 | --- | --- | --- |
 | `HalUno`（`begin`・`srf02_poll`・`isr_step`） | `src/hal_uno.h` | `io_hal.h` の実物。`begin` は Timer2・サーボの PWM（Timer1）・`Wire` の準備、`srf02_poll` は待たずに 1 回の測定を進める、`isr_step` は Timer2 の割り込みから呼ぶ刻み |
+| `SERVO_PWM_TOP`・`SERVO_PWM_TICKS_PER_US`・`servo_pulse_us_from_ddeg`・`servo_ocr1a_from_us`・`servo_ocr1a_from_ddeg` | `src/servo_pwm.h` | MG996R の Timer1 のハードウェア PWM（TOP 39999＝20 ms・1 カウント 0.5 µs）と、0.1° → パルス幅 → `OCR1A` の換算（範囲の外へ出さない） |
 | `kFwName` | `src/main.cpp` | `B` 行の `fw` の頭（`hve_cam_io-` ＋ `io_core_version()`） |
 
 ## 2. 機器・ホスト名
