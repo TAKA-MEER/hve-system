@@ -71,6 +71,13 @@
 | `LiftAxisSettings`・`LiftSettings` ／ `validate_lift_settings`・`lift_settings_from_json`・`lift_settings_to_json` | `lift_settings.h` | 昇降の設定 |
 | `LiftController::on_hello`・`on_hold`・`on_release`・`on_close`・`set_ui_clients`・`step` | `lift_controller.h` | 接続ごとの受け口と、判定をモータに効かせる 1 周期 |
 
+### 1.2 `cam_io` の実物の名前（`WP-IO-02` で足した。2026-10-07 に管理担当が登録）
+
+| 名前 | 置き場 | 中身 |
+| --- | --- | --- |
+| `HalUno`（`begin`・`srf02_poll`・`isr_step`） | `src/hal_uno.h` | `io_hal.h` の実物。`begin` は Timer2・`Servo`・`Wire` の準備、`srf02_poll` は待たずに 1 回の測定を進める、`isr_step` は Timer2 の割り込みから呼ぶ刻み |
+| `kFwName` | `src/main.cpp` | `B` 行の `fw` の頭（`hve_cam_io-` ＋ `io_core_version()`） |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
