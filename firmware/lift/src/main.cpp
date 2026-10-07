@@ -13,6 +13,7 @@
 #include "cmd_codec.h"
 #include "config.h"
 #include "hal_esp32.h"
+#include "lift_arbiter.h"
 #include "lift_controller.h"
 #include "lift_decide.h"
 
@@ -29,7 +30,9 @@
 namespace {
 
 AsyncWebServer server(LIFT_HTTP_PORT);
-AsyncWebSocket ws(LIFT_WS_PATH);
+// WP-LIFT-03 の時点では画面の口だけ出す。上部モジュールの口（/ws/module）は
+// WP-LIFT-04 で足す（DetailedDesign-protocol.md §1）
+AsyncWebSocket ws(LIFT_WS_UI_PATH);
 
 LiftEsp32Hal hal;
 
@@ -44,42 +47,81 @@ bool g_have_logged_reason = false;
 // --- WS のタスクと loop() のタスクの受け渡し ---
 // AsyncWebSocket の受信コールバックは AsyncTCP のタスクで走る（loop() とは別のタスク）。
 // LiftController の中身を loop() だけが触るようにして、WS 側は受け渡し用のスロット
-// 1 か所へ書き込むだけにする。ロックは portMUX の臨界区間。コピーするのは LiftCmd
-// （3 つの値）だけなので、臨界区間は数 us で終わる。
-portMUX_TYPE g_cmd_mux = portMUX_INITIALIZER_UNLOCKED;
-LiftCmd g_pending_cmd;        // 次の loop() が on_command に渡す指令
-uint32_t g_pending_at_ms = 0; // **受け取った時刻**（ウォッチドッグはここから数える）
-bool g_pending_valid = false;
+// 1 か所へ書き込むだけにする。ロックは portMUX の臨界区間。
+// （WP-LIFT-03 時点の最小の書き換え。2 つの口への分割は WP-LIFT-04）
+enum class PendingType : uint8_t {
+  NONE = 0,
+  HOLD,
+  RELEASE,
+  CLOSE,
+};
 
-// 指令を「次回の loop() が受け取る」ために積む。WS のタスクからしか呼ばない
-void post_command(const LiftCmd& cmd, uint32_t at_ms) {
+struct PendingEvent {
+  PendingType type = PendingType::NONE;
+  int conn_id = 0;
+  HoldMsg hold;
+  int press = 0;
+  uint32_t at_ms = 0;
+};
+
+portMUX_TYPE g_cmd_mux = portMUX_INITIALIZER_UNLOCKED;
+PendingEvent g_pending;  // 次の loop() が取り出すイベント（1 件ぶん）
+
+// イベントを「次回の loop() が受け取る」ために積む。WS のタスクからしか呼ばない
+void post_event(const PendingEvent& event) {
   portENTER_CRITICAL(&g_cmd_mux);
-  g_pending_cmd = cmd;
-  g_pending_at_ms = at_ms;
-  g_pending_valid = true;
+  g_pending = event;
   portEXIT_CRITICAL(&g_cmd_mux);
 }
 
-// 積んである指令を 1 つ取り出す。取れなければ false
-bool take_pending_command(LiftCmd* out, uint32_t* at_ms) {
+// 積んであるイベントを 1 つ取り出す。取れなければ false
+bool take_pending_event(PendingEvent* out) {
   portENTER_CRITICAL(&g_cmd_mux);
-  const bool have = g_pending_valid;
+  const bool have = g_pending.type != PendingType::NONE;
   if (have) {
-    *out = g_pending_cmd;
-    *at_ms = g_pending_at_ms;
-    g_pending_valid = false;
+    *out = g_pending;
+    g_pending.type = PendingType::NONE;
   }
   portEXIT_CRITICAL(&g_cmd_mux);
   return have;
 }
 
-// カメラ部（または tools/lift_probe.py）からの cmd。壊れていても cmd_decode が
-// 「止まる」側にして返すので、ここではその結果をそのまま積む
-void handle_cmd_frame(const char* text, size_t len) {
-  LiftCmd cmd;
-  cmd_decode(text, &cmd);
-  // 受け取った時刻で受け渡す。loop() に戻るまでの遅れでウォッチドッグを伸ばさない
-  post_command(cmd, millis());
+ConnId ui_conn(int id) {
+  ConnId conn;
+  conn.id = id;
+  conn.kind = ConnKind::UI;
+  return conn;
+}
+
+// 画面からの 1 フレーム。hello ならその接続を閉じる（DetailedDesign.md §3.1）。
+// hold / release は loop() へ渡す。読めないものは捨てる
+void handle_ui_frame(AsyncWebSocketClient* client, const char* text) {
+  const int id = static_cast<int>(client->id());
+  HoldMsg hold;
+  if (decode_hold(text, &hold, millis())) {
+    PendingEvent event;
+    event.type = PendingType::HOLD;
+    event.conn_id = id;
+    event.hold = hold;
+    event.at_ms = hold.ceiling.received_at_ms;  // 受け取った時刻（ウォッチドッグはここから数える）
+    post_event(event);
+    return;
+  }
+  ReleaseMsg release;
+  if (decode_release(text, &release)) {
+    PendingEvent event;
+    event.type = PendingType::RELEASE;
+    event.conn_id = id;
+    event.press = release.press;
+    post_event(event);
+    return;
+  }
+  HelloMsg hello;
+  if (decode_hello(text, &hello)) {
+    // /ws/ui で hello を受けたら、その接続を閉じる
+    Serial.printf("[ws] #%u sent hello on /ws/ui. closing\n", client->id());
+    client->close();
+  }
 }
 
 void on_ws_event(AsyncWebSocket* /*server*/, AsyncWebSocketClient* client, AwsEventType type,
@@ -92,11 +134,10 @@ void on_ws_event(AsyncWebSocket* /*server*/, AsyncWebSocketClient* client, AwsEv
     case WS_EVT_DISCONNECT: {
       Serial.printf("[ws] #%u が切れました。その場で停止する\n", client->id());
       // 正常な切断は待たずに止める（DetailedDesign-protocol.md §1）
-      LiftCmd stop;
-      stop.dir = LiftDir::STOP;
-      stop.duty = 0;
-      stop.ceil_ok = false;
-      post_command(stop, millis());
+      PendingEvent event;
+      event.type = PendingType::CLOSE;
+      event.conn_id = static_cast<int>(client->id());
+      post_event(event);
       break;
     }
     case WS_EVT_DATA: {
@@ -106,7 +147,7 @@ void on_ws_event(AsyncWebSocket* /*server*/, AsyncWebSocketClient* client, AwsEv
           info->opcode != WS_TEXT) {
         return;
       }
-      handle_cmd_frame(reinterpret_cast<const char*>(data), len);
+      handle_ui_frame(client, reinterpret_cast<const char*>(data));
       break;
     }
     default:
@@ -149,7 +190,7 @@ void start_mdns() {
     return;
   }
   MDNS.addService("http", "tcp", LIFT_HTTP_PORT);
-  Serial.printf("[mdns] http://%s.local:%u%s\n", LIFT_MDNS_NAME, LIFT_HTTP_PORT, LIFT_WS_PATH);
+  Serial.printf("[mdns] http://%s.local:%u%s\n", LIFT_MDNS_NAME, LIFT_HTTP_PORT, LIFT_WS_UI_PATH);
 }
 
 // 無線が落ちていたら張り直す。mDNS は繋がったときに 1 回だけ始める
@@ -200,12 +241,24 @@ void setup() {
 void loop() {
   const uint32_t now = millis();
 
-  // 1) WS のタスクが積んだ指令を受ける。取ってから 1 周期ぶん step する
-  LiftCmd cmd;
-  uint32_t at_ms = 0;
-  if (take_pending_command(&cmd, &at_ms)) {
-    controller.on_command(cmd, at_ms);
+  // 1) WS のタスクが積んだイベントを受ける
+  PendingEvent event;
+  if (take_pending_event(&event)) {
+    switch (event.type) {
+      case PendingType::HOLD:
+        controller.on_hold(ui_conn(event.conn_id), event.hold, event.at_ms);
+        break;
+      case PendingType::RELEASE:
+        controller.on_release(ui_conn(event.conn_id), event.press);
+        break;
+      case PendingType::CLOSE:
+        controller.on_close(event.conn_id);
+        break;
+      case PendingType::NONE:
+        break;
+    }
   }
+  controller.set_ui_clients(static_cast<int>(ws.count()));
 
   // 2) 超音波の測定を出す。loop() は止めない
   hal.poll(now);

@@ -1,5 +1,5 @@
-// Unity の試験（env:native）。cmd_codec の正常系と、壊れた入力が上昇にならないこと。
-// DetailedDesign-protocol.md §2.2・§2.3。
+// Unity の試験（env:native）。cmd_codec の hello / hold / release / state。
+// 規則は docs/plan/detailed/DetailedDesign-protocol.md §2。
 #include <unity.h>
 
 #include <cstring>
@@ -10,123 +10,17 @@
 
 namespace {
 
-// 指令全体が stop に落ちる場合（読めない JSON・知らない t・dir が読めない・duty の型が違う）
-void assert_stopped(const char* text) {
-  LiftCmd cmd;
-  const bool ok = cmd_decode(text, &cmd);
+// 捨てた hold をそのまま判定へ通しても上昇しないことを確かめる
+void assert_hold_never_moves_up(const char* text) {
+  HoldMsg hold;
+  const bool ok = decode_hold(text, &hold, 1000);
   TEST_ASSERT_FALSE(ok);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(cmd.dir));
-  TEST_ASSERT_EQUAL_INT(0, cmd.duty);
-  TEST_ASSERT_FALSE(cmd.ceil_ok);
+  // 捨てた hold は持ち主にならないので、判定以前に動かない。
+  // 万が一中身が残っていても、ceiling 無し・STOP 側に倒れていること
+  TEST_ASSERT_FALSE(hold.has_ceiling);
 }
 
-// 壊れた指令をそのまま判定へ通しても上昇しないことを確かめる
-void assert_never_moves_up(const char* text, StopReason expected_reason) {
-  LiftCmd cmd;
-  cmd_decode(text, &cmd);
-
-  LiftDecideInput in;
-  in.has_cmd = true;
-  in.cmd = cmd;
-  in.height_mm = 500;
-  in.height_ok = true;
-  in.height_at_ms = 0;
-  in.top_mm = LIFT_TOP_MM;
-  const LiftDecideResult decided = lift_decide(in);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(decided.dir));
-  TEST_ASSERT_EQUAL_INT(0, decided.duty);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(expected_reason), static_cast<int>(decided.reason));
-}
-
-}  // namespace
-
-// --- cmd の正常系 ---
-
-void test_decode_valid_up_command() {
-  LiftCmd cmd;
-  const bool ok = cmd_decode("{\"t\":\"cmd\",\"seq\":1234,\"dir\":\"up\",\"duty\":40,\"ceil_ok\":true}", &cmd);
-  TEST_ASSERT_TRUE(ok);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(cmd.dir));
-  TEST_ASSERT_EQUAL_INT(40, cmd.duty);
-  TEST_ASSERT_TRUE(cmd.ceil_ok);
-}
-
-void test_decode_valid_down_command() {
-  LiftCmd cmd;
-  const bool ok = cmd_decode("{\"t\":\"cmd\",\"dir\":\"down\",\"duty\":100,\"ceil_ok\":false}", &cmd);
-  TEST_ASSERT_TRUE(ok);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(cmd.dir));
-  TEST_ASSERT_EQUAL_INT(100, cmd.duty);
-  TEST_ASSERT_FALSE(cmd.ceil_ok);
-}
-
-void test_decode_valid_stop_command() {
-  LiftCmd cmd;
-  const bool ok = cmd_decode("{\"t\":\"cmd\",\"dir\":\"stop\",\"duty\":0,\"ceil_ok\":true}", &cmd);
-  TEST_ASSERT_TRUE(ok);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(cmd.dir));
-}
-
-// --- 壊れた入力は上昇させない ---
-
-void test_broken_json_stops() {
-  assert_stopped("{\"t\":\"cmd\",\"dir\":\"up\",");
-  assert_stopped("not json at all");
-  assert_stopped("");
-  assert_stopped("[1,2,3]");
-  assert_stopped("5");
-}
-
-void test_unknown_t_stops() {
-  assert_stopped("{\"t\":\"hold\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":true}");
-  assert_stopped("{\"t\":\"state\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":true}");
-  assert_stopped("{\"dir\":\"up\",\"duty\":40,\"ceil_ok\":true}");  // t 自体が無い
-  assert_stopped("{\"t\":7,\"dir\":\"up\",\"duty\":40,\"ceil_ok\":true}");  // t の型が違う
-}
-
-void test_unreadable_dir_stops() {
-  assert_stopped("{\"t\":\"cmd\",\"duty\":40,\"ceil_ok\":true}");                 // dir が無い
-  assert_stopped("{\"t\":\"cmd\",\"dir\":1,\"duty\":40,\"ceil_ok\":true}");        // dir の型が違う
-  assert_stopped("{\"t\":\"cmd\",\"dir\":\"sideways\",\"duty\":40,\"ceil_ok\":true}");  // 知らない値
-  assert_stopped("{\"t\":\"cmd\",\"dir\":null,\"duty\":40,\"ceil_ok\":true}");
-}
-
-void test_wrong_typed_fields_stop() {
-  assert_stopped("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":\"40\",\"ceil_ok\":true}");
-  assert_stopped("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40.5,\"ceil_ok\":true}");
-  assert_stopped("{\"t\":\"cmd\",\"dir\":\"up\",\"ceil_ok\":true}");  // duty が無い
-}
-
-void test_missing_ceil_ok_is_false() {
-  LiftCmd cmd;
-  const bool ok = cmd_decode("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40}", &cmd);
-  TEST_ASSERT_FALSE(ok);
-  TEST_ASSERT_FALSE(cmd.ceil_ok);
-  // dir は読めた値のまま。天井の許可が無いので上昇はしない
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40}", StopReason::CEILING);
-}
-
-void test_wrong_typed_ceil_ok_is_false() {
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":1}", StopReason::CEILING);
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":\"true\"}", StopReason::CEILING);
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":null}", StopReason::CEILING);
-}
-
-void test_null_text_stops() {
-  assert_stopped(nullptr);
-}
-
-void test_broken_command_never_moves_up_through_decide() {
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":false}", StopReason::CEILING);
-  assert_never_moves_up("{\"t\":\"hold\",\"dir\":\"up\",\"duty\":40,\"ceil_ok\":true}", StopReason::CMD_STOP);
-  assert_never_moves_up("garbage", StopReason::CMD_STOP);
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"sideways\",\"duty\":40,\"ceil_ok\":true}", StopReason::CMD_STOP);
-  assert_never_moves_up("{\"t\":\"cmd\",\"dir\":\"up\",\"duty\":\"40\",\"ceil_ok\":true}", StopReason::CMD_STOP);
-}
-
-// --- state ---
-
-void test_state_encode_contains_all_fields() {
+LiftState moving_state() {
   LiftState state;
   state.seq = 88;
   state.dir = LiftDir::UP;
@@ -135,12 +29,182 @@ void test_state_encode_contains_all_fields() {
   state.bottom = false;
   state.height_mm = 812;
   state.height_ok = true;
-  state.top_mm = 1500;
+  state.top_detect = false;
+  state.ceiling_used = true;
+  state.ceiling_present = true;
+  state.ceiling_status = CeilingStatus::MEASURED;
+  state.ceiling_mm = 1450;
+  state.ceiling_age_ms = 95;
+  state.ceiling_ok = true;
+  state.ceiling_reason = StopReason::NONE;
+  state.has_owner = true;
+  state.owner_kind = 1;
+  state.ui_clients = 1;
+  state.module_connected = true;
+  state.module_has_sensor = true;
+  std::strncpy(state.module_ip, "192.168.5.23", sizeof(state.module_ip) - 1);
+  std::strncpy(state.module_name, "hve-cam", sizeof(state.module_name) - 1);
   state.cmd_age_ms = 35;
+  return state;
+}
 
-  char json[256];
+}  // namespace
+
+// --- hello ---
+
+void test_decode_valid_hello() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(
+      decode_hello("{\"t\":\"hello\",\"ceiling_sensor\":true,\"name\":\"hve-cam\",\"fw\":\"0.2.0\"}",
+                   &hello));
+  TEST_ASSERT_TRUE(hello.has_sensor);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", hello.name);
+  TEST_ASSERT_EQUAL_STRING("0.2.0", hello.fw);
+}
+
+void test_decode_hello_without_sensor() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"ceiling_sensor\":false}", &hello));
+  TEST_ASSERT_FALSE(hello.has_sensor);
+}
+
+void test_decode_hello_missing_sensor_is_true() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\"}", &hello));
+  TEST_ASSERT_TRUE(hello.has_sensor);
+}
+
+void test_decode_hello_wrong_typed_sensor_is_true() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"ceiling_sensor\":1}", &hello));
+  TEST_ASSERT_TRUE(hello.has_sensor);
+}
+
+void test_decode_unreadable_hello_is_true_but_rejected() {
+  HelloMsg hello;
+  // 読めない hello は「ceiling_sensor: true」として扱う
+  TEST_ASSERT_FALSE(decode_hello("not json", &hello));
+  TEST_ASSERT_TRUE(hello.has_sensor);
+  TEST_ASSERT_FALSE(decode_hello("{\"t\":\"hold\",\"press\":1}", &hello));
+  TEST_ASSERT_TRUE(hello.has_sensor);
+  TEST_ASSERT_FALSE(decode_hello(nullptr, &hello));
+  TEST_ASSERT_TRUE(hello.has_sensor);
+}
+
+// --- hold ---
+
+void test_decode_valid_hold() {
+  HoldMsg hold;
+  TEST_ASSERT_TRUE(decode_hold("{\"t\":\"hold\",\"press\":17,\"dir\":\"up\",\"duty\":40,"
+                               "\"ceiling\":{\"status\":\"MEASURED\",\"mm\":1450,\"age_ms\":80}}",
+                               &hold, 1000));
+  TEST_ASSERT_EQUAL_INT(17, hold.press);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hold.dir));
+  TEST_ASSERT_EQUAL_INT(40, hold.duty);
+  TEST_ASSERT_TRUE(hold.has_ceiling);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MEASURED),
+                        static_cast<int>(hold.ceiling.status));
+  TEST_ASSERT_EQUAL_INT(1450, hold.ceiling.mm);
+  TEST_ASSERT_EQUAL_INT(80, hold.ceiling.age_ms);
+  TEST_ASSERT_EQUAL_INT(1000, hold.ceiling.received_at_ms);
+}
+
+void test_decode_broken_hold_is_dropped() {
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"dir\":\"up\",");
+  assert_hold_never_moves_up("not json at all");
+  assert_hold_never_moves_up("");
+  assert_hold_never_moves_up("{\"t\":\"cmd\",\"press\":1,\"dir\":\"up\",\"duty\":40}");
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"dir\":\"up\",\"duty\":40}");  // press が無い
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"press\":1,\"duty\":40}");  // dir が無い
+  assert_hold_never_moves_up(
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"sideways\",\"duty\":40}");  // 知らない方向
+  assert_hold_never_moves_up(
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\"}");  // duty が無い
+  assert_hold_never_moves_up(
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":\"40\"}");  // duty の型が違う
+  assert_hold_never_moves_up(nullptr);
+}
+
+void test_decode_hold_without_ceiling_is_missing() {
+  HoldMsg hold;
+  TEST_ASSERT_TRUE(decode_hold("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40}", &hold,
+                               1000));
+  TEST_ASSERT_FALSE(hold.has_ceiling);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MISSING),
+                        static_cast<int>(hold.ceiling.status));
+  // dir・duty は読めた値のまま（天井が無いので上昇は止まる）
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hold.dir));
+  TEST_ASSERT_EQUAL_INT(40, hold.duty);
+}
+
+void test_decode_hold_with_broken_ceiling_is_missing() {
+  // 知らない status・型の違う中身は hold を捨てず MISSING として受ける
+  const char* cases[] = {
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":{\"status\":\"NEAR\"}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":{\"status\":1}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":{\"status\":\"MEASURED\"}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,"
+      "\"ceiling\":{\"status\":\"MEASURED\",\"mm\":\"1450\",\"age_ms\":80}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":\"MEASURED\"}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":null}",
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    HoldMsg hold;
+    TEST_ASSERT_TRUE(decode_hold(cases[i], &hold, 1000));
+    TEST_ASSERT_FALSE(hold.has_ceiling);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MISSING),
+                          static_cast<int>(hold.ceiling.status));
+  }
+}
+
+void test_decode_hold_ceiling_statuses() {
+  const char* statuses[] = {"MEASURED", "TOO_NEAR", "NO_ECHO", "READ_ERROR"};
+  for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); ++i) {
+    std::string text = std::string("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,"
+                                   "\"ceiling\":{\"status\":\"") +
+                       statuses[i] + "\",\"mm\":1450,\"age_ms\":80}}";
+    HoldMsg hold;
+    TEST_ASSERT_TRUE(decode_hold(text.c_str(), &hold, 1000));
+    TEST_ASSERT_TRUE(hold.has_ceiling);
+  }
+}
+
+// --- release ---
+
+void test_decode_valid_release() {
+  ReleaseMsg release;
+  TEST_ASSERT_TRUE(decode_release("{\"t\":\"release\",\"press\":17}", &release));
+  TEST_ASSERT_EQUAL_INT(17, release.press);
+}
+
+void test_decode_broken_release_is_dropped() {
+  ReleaseMsg release;
+  TEST_ASSERT_FALSE(decode_release("{\"t\":\"release\"}", &release));
+  TEST_ASSERT_FALSE(decode_release("{\"t\":\"hold\",\"press\":1}", &release));
+  TEST_ASSERT_FALSE(decode_release("garbage", &release));
+  TEST_ASSERT_FALSE(decode_release(nullptr, &release));
+}
+
+// --- state ---
+
+void test_state_encode_contains_v2_fields() {
+  const LiftState state = moving_state();
+  char json[1024];
   const size_t written = state_encode(state, json, sizeof(json));
   TEST_ASSERT_GREATER_THAN(0, written);
+
+  // v2 の形（protocol §2.2 の例どおり）を持っていること
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"t\":\"state\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"dir\":\"up\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"top_detect\":false"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling\":{"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"status\":\"MEASURED\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner\":\"module\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"module\":{"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"provisional\":["));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "CEILING_MARGIN_MM"));
+  const std::string expected_fw = std::string("\"fw\":\"") + lift_core_version() + "\"";
+  TEST_ASSERT_NOT_NULL(std::strstr(json, expected_fw.c_str()));
 
   LiftState back;
   TEST_ASSERT_TRUE(state_decode(json, &back));
@@ -150,46 +214,61 @@ void test_state_encode_contains_all_fields() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(StopReason::NONE), static_cast<int>(back.reason));
   TEST_ASSERT_EQUAL_INT(812, back.height_mm);
   TEST_ASSERT_TRUE(back.height_ok);
-  TEST_ASSERT_EQUAL_INT(1500, back.top_mm);
+  TEST_ASSERT_FALSE(back.top_detect);
+  TEST_ASSERT_TRUE(back.ceiling_present);
+  TEST_ASSERT_TRUE(back.ceiling_used);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MEASURED),
+                        static_cast<int>(back.ceiling_status));
+  TEST_ASSERT_EQUAL_INT(1450, back.ceiling_mm);
+  TEST_ASSERT_EQUAL_INT(95, back.ceiling_age_ms);
+  TEST_ASSERT_TRUE(back.ceiling_ok);
+  TEST_ASSERT_TRUE(back.has_owner);
+  TEST_ASSERT_EQUAL_INT(1, back.owner_kind);
+  TEST_ASSERT_EQUAL_INT(1, back.ui_clients);
+  TEST_ASSERT_TRUE(back.module_connected);
+  TEST_ASSERT_TRUE(back.module_has_sensor);
+  TEST_ASSERT_EQUAL_STRING("192.168.5.23", back.module_ip);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", back.module_name);
   TEST_ASSERT_EQUAL_INT(35, back.cmd_age_ms);
-  const std::string expected_fw = std::string("\"fw\":\"") + lift_core_version() + "\"";
-  TEST_ASSERT_NOT_NULL(std::strstr(json, expected_fw.c_str()));
 }
 
-void test_state_encode_writes_null_for_unset_top() {
+void test_state_encode_writes_nulls_when_no_owner_or_module() {
   LiftState state;
-  state.top_mm = LIFT_TOP_MM;
-  state.reason = StopReason::CMD_STOP;
-
-  char json[256];
+  char json[1024];
   TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
-  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"top_mm\":null"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling\":null"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner\":null"));
 
   LiftState back;
   TEST_ASSERT_TRUE(state_decode(json, &back));
-  TEST_ASSERT_EQUAL_INT(LIFT_TOP_MM, back.top_mm);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(StopReason::CMD_STOP), static_cast<int>(back.reason));
+  TEST_ASSERT_FALSE(back.ceiling_present);
+  TEST_ASSERT_FALSE(back.has_owner);
+  TEST_ASSERT_FALSE(back.module_connected);
 }
 
 void test_state_encode_reports_every_stop_reason() {
   const StopReason reasons[] = {
-      StopReason::NONE,     StopReason::CMD_STOP, StopReason::CMD_TIMEOUT,
-      StopReason::CEILING,  StopReason::TOP,     StopReason::BOTTOM,
-      StopReason::MAX_RUN,  StopReason::HEIGHT_UNKNOWN,
+      StopReason::NONE,          StopReason::CMD_STOP,     StopReason::CMD_TIMEOUT,
+      StopReason::OWNER_GONE,    StopReason::CEILING_NEAR, StopReason::CEILING_STALE,
+      StopReason::HEIGHT_UNKNOWN, StopReason::TOP,         StopReason::BOTTOM,
+      StopReason::MAX_RUN,       StopReason::OUT_OF_RANGE,
   };
   for (size_t i = 0; i < sizeof(reasons) / sizeof(reasons[0]); ++i) {
-    LiftState state;
+    LiftState state = moving_state();
     state.reason = reasons[i];
-    char json[256];
+    state.ceiling_reason = reasons[i];
+    char json[1024];
     TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
     LiftState back;
     TEST_ASSERT_TRUE(state_decode(json, &back));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(reasons[i]), static_cast<int>(back.reason));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(reasons[i]),
+                          static_cast<int>(back.ceiling_reason));
   }
 }
 
 void test_state_encode_reports_zero_when_buffer_is_short() {
-  LiftState state;
+  const LiftState state = moving_state();
   char json[8];
   TEST_ASSERT_EQUAL_INT(0, state_encode(state, json, sizeof(json)));
 }
@@ -201,7 +280,10 @@ void test_state_decode_rejects_broken_input() {
   TEST_ASSERT_FALSE(state_decode("{\"t\":\"state\",\"dir\":\"up\"}", &state));
   TEST_ASSERT_FALSE(state_decode("{\"t\":\"state\",\"dir\":\"sideways\",\"duty\":0,\"reason\":\"NONE\","
                                  "\"bottom\":false,\"height_mm\":0,\"height_ok\":false,"
-                                 "\"top_mm\":null,\"cmd_age_ms\":0}",
+                                 "\"top_detect\":false,\"ceiling\":null,\"owner\":null,"
+                                 "\"ui_clients\":0,"
+                                 "\"module\":{\"connected\":false,\"ceiling_sensor\":null,"
+                                 "\"ip\":null,\"name\":null}}",
                                  &state));
   TEST_ASSERT_FALSE(state_decode(nullptr, &state));
 }
@@ -209,21 +291,23 @@ void test_state_decode_rejects_broken_input() {
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
-  RUN_TEST(test_decode_valid_up_command);
-  RUN_TEST(test_decode_valid_down_command);
-  RUN_TEST(test_decode_valid_stop_command);
+  RUN_TEST(test_decode_valid_hello);
+  RUN_TEST(test_decode_hello_without_sensor);
+  RUN_TEST(test_decode_hello_missing_sensor_is_true);
+  RUN_TEST(test_decode_hello_wrong_typed_sensor_is_true);
+  RUN_TEST(test_decode_unreadable_hello_is_true_but_rejected);
 
-  RUN_TEST(test_broken_json_stops);
-  RUN_TEST(test_unknown_t_stops);
-  RUN_TEST(test_unreadable_dir_stops);
-  RUN_TEST(test_wrong_typed_fields_stop);
-  RUN_TEST(test_missing_ceil_ok_is_false);
-  RUN_TEST(test_wrong_typed_ceil_ok_is_false);
-  RUN_TEST(test_null_text_stops);
-  RUN_TEST(test_broken_command_never_moves_up_through_decide);
+  RUN_TEST(test_decode_valid_hold);
+  RUN_TEST(test_decode_broken_hold_is_dropped);
+  RUN_TEST(test_decode_hold_without_ceiling_is_missing);
+  RUN_TEST(test_decode_hold_with_broken_ceiling_is_missing);
+  RUN_TEST(test_decode_hold_ceiling_statuses);
 
-  RUN_TEST(test_state_encode_contains_all_fields);
-  RUN_TEST(test_state_encode_writes_null_for_unset_top);
+  RUN_TEST(test_decode_valid_release);
+  RUN_TEST(test_decode_broken_release_is_dropped);
+
+  RUN_TEST(test_state_encode_contains_v2_fields);
+  RUN_TEST(test_state_encode_writes_nulls_when_no_owner_or_module);
   RUN_TEST(test_state_encode_reports_every_stop_reason);
   RUN_TEST(test_state_encode_reports_zero_when_buffer_is_short);
   RUN_TEST(test_state_decode_rejects_broken_input);
