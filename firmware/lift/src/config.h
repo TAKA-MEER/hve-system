@@ -34,15 +34,19 @@ constexpr uint8_t PWM_RESOLUTION = 8;
 
 constexpr uint32_t SONAR_PERIOD_MS = 100;
 
-// --- 状態の出し方（DetailedDesign-protocol.md §1・§2.3）---
+// --- 状態の出し方（DetailedDesign-protocol.md §1・§2.2）---
 
 constexpr uint32_t LIFT_STATE_PERIOD_MS = 100;  // **仮**
 constexpr uint16_t LIFT_HTTP_PORT = 80;
-constexpr const char* LIFT_WS_PATH = "/ws";
+// 口はコードの定数。設定で変えられるようにしない（DetailedDesign.md §3.1）
+constexpr const char* LIFT_WS_UI_PATH = "/ws/ui";
+constexpr const char* LIFT_WS_MODULE_PATH = "/ws/module";
+constexpr const char* LIFT_NVS_NAMESPACE = "hve_lift";
+constexpr int LIFT_UI_CLIENTS_MAX = 4;  // **仮**。超えた接続は閉じる（WP-LIFT-04）
 constexpr const char* LIFT_MDNS_NAME = "hve-lift";  // names.md §2
 
-// state_encode のバッファ。**仮**（state の JSON は 200 バイト未満）
-constexpr size_t LIFT_STATE_TEXT_MAX = 256;
+// state_encode のバッファ。**仮**（v2 の state の JSON は 500 バイト前後）
+constexpr size_t LIFT_STATE_TEXT_MAX = 640;
 
 // WiFi の状態を見る周期。**仮**（無線が落ちていたら張り直すだけなので短くなくてよい）
 constexpr uint32_t LIFT_WIFI_POLL_MS = 5000;
