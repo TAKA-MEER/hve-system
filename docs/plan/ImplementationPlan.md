@@ -12,7 +12,7 @@
 
 ## 1. 今どこにいるか
 
-**最終同期: 2026-10-06**（`redesign/v2` = v2 の spec・詳細設計の初版まで。実装は v2 では未着手）。更新のしかたは §2.3「計画書を都度更新する」。
+**最終同期: 2026-10-07**（`redesign/v2` = v2 の spec・詳細設計の初版と `WP-MEAS-06` の大半まで。実装は v2 では未着手）。更新のしかたは §2.3「計画書を都度更新する」。
 
 | | 状態 |
 | --- | --- |
@@ -195,7 +195,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 
 - **天井の判定は無線を挟み、v2 では命令の出どころ（接続）で使うかが変わる。**`WP-LIFT-03`・`WP-CAM-04` の変異チェックを**管理担当が必ず自分で**やる
 - **上端の検知が無い**（`W-1`）。昇降部の画面から上昇させると、自動で止まるのは連続駆動の上限だけ。実機で上昇を試すときは人が見ながら短く
-- **UNO の TX は 5 V。**UnitV2 の UART の電圧が分かるまで分圧を挟む（[DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.3）
+- **UNO の TX は 5 V、UnitV2 の UART は 3.3 V。**UNO → UnitV2 には分圧が要る（2026-10-07 に実測。[DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.3）。**D0 に線が付いていると UNO に書き込めない**
 - UnitV2 の CPU・メモリで 1080p の取り込みが回るか分からない（`WP-MEAS-06`）
 - 映像が th-system の無線を圧迫しうる（`WP-MEAS-03` まで分からない）
 
@@ -203,7 +203,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 
 | ID | 段階 | 状態 |
 | --- | --- | --- |
-| `WP-MEAS-06` | 0 | **一部実施**（2026-10-06。UART の電圧・ピンの並び・UNO との往復が残り。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
+| `WP-MEAS-06` | 0 | **大半を実施**（2026-10-06・07。UART の電圧・ピンの並び・UNO との双方向 115200 も実機確認済み。残りは再起動後に `th-rpi-ap` へ繋がり直すか。結果は [DetailedDesign-hardware.md](detailed/DetailedDesign-hardware.md) §2.1.1） |
 | `WP-BASE-02` | 0 | 未着手 |
 | `WP-LIFT-03` ／ `WP-LIFTUI-01` ／ `WP-LIFT-04` | 1 | 未着手 |
 | `WP-IO-01` ／ `WP-IO-02` | 2 | 未着手 |
@@ -229,7 +229,7 @@ orca worktree rm --worktree id:<repoId>::<path> --force --json   # 片付け。�
 | # | 作業 | 状態 |
 | --- | --- | --- |
 | ~~0~~ | ~~v2 の spec・詳細設計の初版・提案 `P-5`〜`P-10`~~ | 2026-10-06 |
-| 1 | `WP-MEAS-06` の残り（UART の電圧・ピンの並び・UNO との往復）／ `WP-BASE-02` ／ モバイルバッテリの選定（`D-9`）／ **ユーザー判断: `P-11`・`P-12`**（`H-V10` は 2026-10-07 に決定） | `WP-MEAS-06` は一部実施 |
+| 1 | `WP-MEAS-06` の残り（再起動後の STA。UART は 2026-10-07 済み）／ `WP-BASE-02` ／ モバイルバッテリの選定（`D-9`）／ **ユーザー判断: `P-11`・`P-12`**（`H-V10` は 2026-10-07 に決定） | `WP-MEAS-06` は大半を実施 |
 | 2 | `WP-LIFT-03` ／ `WP-IO-01` | 未着手 |
 | 3 | `WP-LIFTUI-01` ／ `WP-CAM-04`（`WP-MEAS-06` の 1・2・5 が通ってから） | 未着手 |
 | 4 | `WP-LIFT-04` ／ `WP-IO-02` ／ `WP-VIDEO-02` ／ `WP-UI-02` | 未着手 |

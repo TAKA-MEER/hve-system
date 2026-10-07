@@ -30,7 +30,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 | ID | 段階 | 内容 | 先に要るもの | 実機 |
 | --- | --- | --- | --- | --- |
-| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める）。**2026-10-06 に UART の電圧・UNO との往復を除いて実施** | — | 要（UnitV2・UNO） |
+| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める）。**2026-10-06・07 に実施**（UART の電圧・UNO との双方向も済み。残りは 2 の再起動後の STA） | — | 要（UnitV2・UNO） |
 | `WP-BASE-02` | 0 | `.venv38`・`firmware/cam_io` の骨格・`CLAUDE.md` のビルドと試験の節 | — | 不要 |
 | `WP-LIFT-03` | 1 | `lift_core` v2（`ceiling_check`・`LiftArbiter`・`lift_settings`・判定の変更・`W-1`・`cmd_codec`） | BASE-02 | 不要 |
 | `WP-LIFTUI-01` | 1 | 昇降部の画面・`tools/fake_lift_server.py`・`tools/lift_probe.py` の v2 化 | LIFT-03（取り決めの確定） | 不要 |
@@ -55,7 +55,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - やること: §2.1.1 の各行を実機で確かめ、**結果を -hardware.md §2.1.1 と -names.md §5 に書き戻す**。とくに:
   1. 組み込みのサービスを止め、`/dev/video0` と `/dev/ttyS1` を自分で開けること
   2. `th-rpi-ap` に STA で繋がり、再起動しても繋がること
-  3. **Grove の UART の電圧（テスタ）とピンの並び**。UNO と分圧を挟んでつなぎ、`M`・`C` 相当の行が往復すること（115200 で化けないか）
+  3. **Grove の UART の電圧（テスタ）とピンの並び**。UNO と分圧を挟んでつなぎ、`M`・`C` 相当の行が往復すること（115200 で化けないか）（**2026-10-07 済み**。黄＝TX・白＝RX・3.3 V・D0/D1・分圧・115200 で双方向とも抜け・化け 0）
   4. 取り込みと 480p の作り直しで何 fps 出るか・CPU・メモリ・温度（**2026-10-07 済み**。1920×1080 は取れず、MJPEG 720p を `v4l2-ctl` で受ける方式に決めた）
   5. `aiohttp`・`pyserial`（と名前解決の手段）を Python 3.8 で使えるか
 - 受け入れ: -hardware.md §2.1.1 の全行に結果か「できない」が書かれている。[DetailedDesign.md](DetailedDesign.md) §4.4 の取り込みの方式が実測と合っている
