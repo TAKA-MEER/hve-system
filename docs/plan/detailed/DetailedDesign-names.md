@@ -61,6 +61,16 @@
 | **`latest_jpeg`** | 同（`MjpegPipeSource`・`FakeSource` のメソッド） | 最後の 1 枚をカメラの JPEG のまま返す（無ければ `None`）。`FakeSource` は絵をその場で JPEG にする |
 | **`/snapshot`** | `camera/hve_video/server.py` | `GET`。`latest_jpeg()` をそのまま返す（`image/jpeg`・`Cache-Control: no-store`）。無ければ 503（[-protocol.md](DetailedDesign-protocol.md) §1） |
 
+### 1.1 `lift_core` の型と関数（`WP-LIFT-03` で足した。2026-10-07 に管理担当が登録）
+
+| 名前 | 置き場 | 中身 |
+| --- | --- | --- |
+| `ConnKind`（`UI`・`MODULE`）／ `ConnId` | `lift_arbiter.h` | 命令の出どころの接続の種類（`/ws/ui`・`/ws/module`）と接続の識別 |
+| `StopReason`・`CeilingStatus`・`CeilingReport`（`received_at_ms` を含む）・`CeilingVerdict` | `ceiling_check.h` | 停止理由（§3）・天井の値の状態と判定の結果。`StopReason` は循環 include を避けてここに置く |
+| `HelloMsg`・`HoldMsg`・`ReleaseMsg` ／ `decode_hello`・`decode_hold`・`decode_release`・`state_encode`・`state_decode` | `cmd_codec.h` | [-protocol.md](DetailedDesign-protocol.md) §2・§3 のメッセージ |
+| `LiftAxisSettings`・`LiftSettings` ／ `validate_lift_settings`・`lift_settings_from_json`・`lift_settings_to_json` | `lift_settings.h` | 昇降の設定 |
+| `LiftController::on_hello`・`on_hold`・`on_release`・`on_close`・`set_ui_clients`・`step` | `lift_controller.h` | 接続ごとの受け口と、判定をモータに効かせる 1 周期 |
+
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
