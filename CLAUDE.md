@@ -85,16 +85,20 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 
 ## ビルドとテスト
 
-**リポジトリ直下**から。昇降部は PlatformIO、カメラ部はリポジトリ内の `.venv` で回す（`python3 -m pytest` は使わない。理由は「環境の癖」）。
+**リポジトリ直下**から。ファームは PlatformIO、カメラモジュールは `.venv38`（Python 3.8）、道具は `.venv`（Python 3.10）で回す（`python3 -m pytest` は使わない。理由は「環境の癖」）。
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r camera/requirements-dev.txt   # 初回
-.venv/bin/pip install -e camera        # `python3 -m hve_camera` で動かすため（camera/pyproject.toml）
-pio test -d firmware/lift -e native
-pio run  -d firmware/lift -e esp32dev
-.venv/bin/python -m pytest camera/tests
-.venv/bin/python -m hve_camera --fake --port 18000    # 偽物のモード（立ち上げるだけ）
+~/.local/bin/uv venv -p 3.8 .venv38 && ~/.local/bin/uv pip install -p .venv38/bin/python -r camera/requirements-dev.txt   # 初回（カメラモジュール）
+python3 -m venv .venv && .venv/bin/pip install -r tools/requirements-dev.txt                                              # 初回（道具）
+pio test -d firmware/lift   -e native
+pio run  -d firmware/lift   -e esp32dev
+pio test -d firmware/cam_io -e native
+pio run  -d firmware/cam_io -e uno
+.venv38/bin/python -m pytest camera/tests
+.venv/bin/python -m pytest tools/tests
 ```
+
+旧版の `pip install -e camera` と `--fake` の動かし方は、v2 のアプリが 3.8 へ移る `WP-CAM-04` のあとに直す。
 
 ## このファイル自体の保守ルール
 
@@ -110,12 +114,11 @@ th-system で踏んだもののうち、同じ道具（herdr／orca ＋ opencode
 - **opencode の `/tmp` 許可プロンプトは、拒否し続けてはいけない。**変異チェックのバックアップと**復元**が両方 `/tmp` 経由だと、拒否すると復元だけ失敗して**変異が入ったままのファイルが残る**。一時ファイルは `.briefs/tmp/` を使わせ、それでも出たら「Allow always」で通し、**あとで作業ツリーを自分で確認する**。
 - **opencode の質問画面（選択肢つきの確認）は、ペインが低いと入力欄が画面外に出て、`herdr agent prompt` の文字が入らない**（2026-09-28）。`herdr pane zoom <pane> --on` で広げ、`herdr pane read --source visible` で入力欄を確かめてから `herdr pane send-text` → `herdr pane send-keys <pane> Enter` で答える。終わったら `--off` で戻す。
 - **エージェントが作業中の worktree で、自分の変異チェック（ファイルを壊して `cp` で戻す）を回さない。**戻すときに、そのあいだにエージェントが入れた修正をバックアップで上書きして消す（th-system 2026-10-01）。エージェントを待機させてから回すか、検証用に別の worktree を切る。
-- **orca で作った worktree には gitignore 済みの `.venv/`・`.briefs/` が無い。**カメラ部の試験は worktree 内で `.venv` を作り直す（または検証は本体側の `.venv` で worktree を指して回す）。`.briefs/tmp/` も作る。
+- **orca で作った worktree には gitignore 済みの `.venv/`・`.venv38/`・`.briefs/` が無い。**カメラ部の試験は worktree 内で `.venv38` を作り直す（または検証は本体側の `.venv38` で worktree を指して回す）。道具の試験は `.venv` を作り直す。`.briefs/tmp/` も作る。
 - **既に opencode が動いているペインに `herdr agent start` を打たない。**`start` はシェルプロンプト待ちを期待するため、動作中のセッションに文字列を打ち込んで壊す。`herdr agent rename` だけで登録する。
 - **`pip3 install platformio` をホストの `python3 -m pytest` と同じ環境に入れると、依存の `anyio` が pytest プラグインとして自動登録され、`ModuleNotFoundError: No module named '_pytest.scope'` でテストが全滅する**（この環境の `pytest` は 6.2.5）。`python3 -m pytest -p no:anyio ...` で回避できる（th-system 2026-09-05）。
-- **リポジトリ直下から `.venv/bin/python -m hve_camera` を動かすには `camera/` を編集可能で入れておく**（`pip install -e camera`）。入れないと `No module named hve_camera` になる（`pytest.ini` の `pythonpath = camera` は pytest だけにも効く）。2026-09-29 WP-CAM-02。
-- **`pkill -f <パターン>` は自分のシェルを殺すことがある**（パターンが自分のコマンドラインにマッチする）。PID 指定で止める。
+- **カメラモジュールの試験は `.venv38`**（Python 3.8。`tomllib` が無いので `tomli` を使う。`WP-BASE-02` で UnitV2 の OS の版に揃えた）。**道具の試験は `.venv`**（Python 3.10）で回す。
 - **UnitV2（v2 のカメラモジュール）は `ssh m5stack@10.254.239.1`（USB の有線。パスワード `12345678`）で入る。**ログインシェルが zsh で、**`/dev/null` まで root 専用**のため `scp` は失敗する（ファイルは `cat f | ssh … 'cat > /tmp/f'` で送る）。`m5stack` の `pip3` は権限エラーで動かない。root 操作は `echo 12345678 | sudo -S …`。**`/etc/init.d/S85runpayload stop` は `killall -9 python3` で温度監視まで殺すので使わない**（組み込みのサービスは `server.py`・`server_core.py` の PID を指定して止め、`/etc/init.d/S85runpayload start` で戻す）。**RAM は 116 MB で `/tmp` は RAM 上**。試験の映像を `/tmp` に溜めると OOM で他のプロセスが殺される。**カメラの取り込みに `ffmpeg` を使わない**（カーネルに v4l2 のバッファを大量に取って OOM を起こし、温度監視 `check_thermal.py` や `haveged` まで殺す。`v4l2-ctl --stream-mmap=4` を使う）。OOM のあとは `ps` で両方を確かめ、消えていたら `/etc/init.d/S110thermal start`・`S21haveged start` で戻す。**`nohup`・`setsid` で裏に回したものは ssh を閉じると死ぬ**ので、長い試験は ssh をつないだまま前面で回す。調べた結果は [DetailedDesign-hardware.md](docs/plan/detailed/DetailedDesign-hardware.md) §2.1.1（2026-10-06）。
 - **（旧版 v1）カメラ部のラズパイは Raspberry Pi OS Lite（64-bit）Trixie。pigpio は使えない**（公式リポジトリに無い）。GPIO は カーネル PWM・`lgpio`（OS 同梱。pip に Python 3.13 向けが無い）・`smbus2` で扱う。仮想環境は `--system-site-packages` 付きで作る（[DetailedDesign.md](docs/plan/archive/v1/detailed/DetailedDesign.md) §4.4）。
-- **ホストの Python は 3.10 で `tomllib` が無い。カメラ部の試験はリポジトリ内の `.venv/` で回す**（§4.5）。システムの `python3 -m pytest` を使うと上の anyio の問題を踏む。
+- **`pkill -f <パターン>` は自分のシェルを殺すことがある**（パターンが自分のコマンドラインにマッチする）。PID 指定で止める。
 - **この PC には PlatformIO Core が複数入っている**（`pio run` のたびに「Obsolete PIO Core v6.1.19 is used」と出る）。ビルドは通るので無視してよい。ファームの platform は `espressif32@7.0.1` に固定する（2026-09-25 に先行試作がこの版でビルドできることを確認。`ledcSetup` 等の API が版で変わる）。
