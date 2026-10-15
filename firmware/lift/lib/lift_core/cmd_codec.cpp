@@ -65,6 +65,8 @@ const char* reason_name(StopReason reason) {
       return "BOTTOM";
     case StopReason::MAX_RUN:
       return "MAX_RUN";
+    case StopReason::ENCODER_STALL:
+      return "ENCODER_STALL";
     case StopReason::OUT_OF_RANGE:
       return "OUT_OF_RANGE";
     case StopReason::NONE:
@@ -91,6 +93,7 @@ bool reason_from_name(const char* name, StopReason* out) {
       {"TOP", StopReason::TOP},
       {"BOTTOM", StopReason::BOTTOM},
       {"MAX_RUN", StopReason::MAX_RUN},
+      {"ENCODER_STALL", StopReason::ENCODER_STALL},
       {"OUT_OF_RANGE", StopReason::OUT_OF_RANGE},
   };
   for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
@@ -205,10 +208,11 @@ bool decode_hold(const char* text, HoldMsg* out, uint32_t received_at_ms) {
   if (!obj["dir"].is<const char*>() || !dir_from_name(obj["dir"].as<const char*>(), &parsed.dir)) {
     return false;
   }
-  if (!obj["duty"].is<int>()) {
+  // speed（0 以上の整数）を読む。duty だけの hold は読めない hold として捨てる
+  if (!obj["speed"].is<int>() || obj["speed"].as<int>() < 0) {
     return false;
   }
-  parsed.duty = obj["duty"].as<int>();
+  parsed.speed = obj["speed"].as<int>();
 
   // ceiling は距離計を持つ接続の hold だけ意味を持つ。
   // 欠けている・読めない・知らない status・型の違う中身は hold を捨てずに
@@ -265,6 +269,8 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
   obj["seq"] = state.seq;
   obj["dir"] = dir_name(state.dir);
   obj["duty"] = state.duty;
+  obj["speed"] = state.speed;
+  obj["speed_meas"] = state.speed_meas;
   obj["reason"] = reason_name(state.reason);
   obj["bottom"] = state.bottom;
   obj["height_mm"] = state.height_mm;
@@ -324,6 +330,7 @@ bool state_decode(const char* text, LiftState* out) {
     return false;
   }
   if (!obj["seq"].is<int>() || !obj["dir"].is<const char*>() || !obj["duty"].is<int>() ||
+      !obj["speed"].is<int>() || !obj["speed_meas"].is<int>() ||
       !obj["reason"].is<const char*>() || !obj["bottom"].is<bool>() ||
       !obj["height_mm"].is<int>() || !obj["height_ok"].is<bool>() ||
       !obj["top_detect"].is<bool>() || !obj["ui_clients"].is<int>() ||
@@ -338,6 +345,8 @@ bool state_decode(const char* text, LiftState* out) {
   }
   out->seq = obj["seq"].as<int>();
   out->duty = obj["duty"].as<int>();
+  out->speed = obj["speed"].as<int>();
+  out->speed_meas = obj["speed_meas"].as<int>();
   out->bottom = obj["bottom"].as<bool>();
   out->height_mm = obj["height_mm"].as<int>();
   out->height_ok = obj["height_ok"].as<bool>();
