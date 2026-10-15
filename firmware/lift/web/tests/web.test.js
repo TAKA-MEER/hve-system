@@ -7,11 +7,13 @@ const assert = require('node:assert/strict');
 
 const app = require('../app.js');
 
-test('送る hold は press・向き・デューティだけを持つ（protocol §2.1）', () => {
-  assert.deepEqual(app.holdMessage(3, 'up', 40), {t: 'hold', press: 3, dir: 'up', duty: 40});
-  assert.deepEqual(app.holdMessage('4', 'down', '25'), {t: 'hold', press: 4, dir: 'down', duty: 25});
+test('送る hold は press・向き・速さだけを持つ（protocol §2.1）', () => {
+  assert.deepEqual(app.holdMessage(3, 'up', 40), {t: 'hold', press: 3, dir: 'up', speed: 40});
+  assert.deepEqual(app.holdMessage('4', 'down', '25'), {t: 'hold', press: 4, dir: 'down', speed: 25});
   // 画面（/ws/ui）の hold に天井は載せない（使うのは距離計を持つ上部モジュールだけ。§3.1）
   assert.ok(!('ceiling' in app.holdMessage(1, 'up', 30)));
+  // 旧版の duty は送らない（duty だけの hold は昇降部が捨てる）
+  assert.ok(!('duty' in app.holdMessage(1, 'up', 30)));
 });
 
 test('送る release は press だけを持つ（protocol §2.1）', () => {
@@ -37,10 +39,20 @@ test('スライダーは範囲が下限〜上限、位置が初期値（spec §1
   assert.equal(app.sliderSpec({min: 10, max: 60, init: 30}, 1).value, 30);
 });
 
-test('速度の数値の書式（昇降は PWM デューティ比 [%] の整数）', () => {
-  assert.equal(app.formatSpeed(30), '30 %');
-  assert.equal(app.formatSpeed(29.6), '30 %');
-  assert.equal(app.formatSpeed('25'), '25 %');
+test('速度の数値の書式（昇降は実際の速さ [mm/s] の整数）', () => {
+  assert.equal(app.formatSpeed(30), '30 mm/s');
+  assert.equal(app.formatSpeed(29.6), '30 mm/s');
+  assert.equal(app.formatSpeed('25'), '25 mm/s');
+});
+
+test('速度の設定項目は mm/s・0〜100・刻み 1（spec §1・§2）', () => {
+  assert.deepEqual(app.SETTING_AXES.map((a) => a.key), ['lift_up', 'lift_down']);
+  for (const axis of app.SETTING_AXES) {
+    assert.equal(axis.unit, 'mm/s');
+    assert.equal(axis.abs_low, 0);
+    assert.equal(axis.abs_high, 100);
+    assert.equal(axis.step, 1);
+  }
 });
 
 test('停止理由の文言（names §3 → 画面に出る日本語）', () => {
@@ -52,7 +64,12 @@ test('停止理由の文言（names §3 → 画面に出る日本語）', () => 
     cls: 'ng', text: '天井が近いため上昇できません',
   });
   assert.equal(app.reasonText('CEILING_STALE').cls, 'ng');
-  assert.equal(app.reasonText('HEIGHT_UNKNOWN').cls, 'ng');
+  assert.deepEqual(app.reasonText('HEIGHT_UNKNOWN'), {
+    cls: 'ng', text: '高さが分からないため上昇できません。一度下端まで下げてください',
+  });
+  assert.deepEqual(app.reasonText('ENCODER_STALL'), {
+    cls: 'warn', text: 'エンコーダが回らないため停止しました。反対方向へは動かせます',
+  });
   assert.equal(app.reasonText('BOTTOM').text, '下端です');
   assert.equal(app.reasonText('MAX_RUN').cls, 'warn');
   assert.equal(app.reasonText('TOP').text, '上端に達しました');
@@ -79,6 +96,17 @@ test('高さは読めない値と値なしを区別する', () => {
   assert.equal(app.heightText(102, true), '高さ 102 mm');
   assert.equal(app.heightText(102, false), '高さ 読めない');
   assert.equal(app.heightText(null, true), '高さ —');
+});
+
+test('動いている間の表示は目標と測った速さ（§1）', () => {
+  assert.equal(app.moveText('up', 40, 39, false), '上昇中 40 mm/s（測定 39 mm/s）');
+  assert.equal(app.moveText('down', 40, 39, false), '下降中 40 mm/s（測定 39 mm/s）');
+  // 測った速さが無ければ目標だけ
+  assert.equal(app.moveText('up', 40, null, false), '上昇中 40 mm/s');
+  assert.equal(app.moveText('up', 40, undefined, false), '上昇中 40 mm/s');
+  assert.equal(app.moveText('down', 30, null, false), '下降中 30 mm/s');
+  assert.equal(app.moveText('stop', 0, 0, false), '停止中');
+  assert.equal(app.moveText('stop', 0, 0, true), '停止中・下端');
 });
 
 test('持ち主の文言（最後の操作が勝つことを気づけるように出す。§1.6）', () => {
@@ -127,6 +155,8 @@ test('初期値が上限を超える / 下限より小さいものも保存で�
 test('絶対的な範囲を外すのも保存できない（protocol §3）', () => {
   assert.equal(app.validateSettingsDraft(withChange('lift_up', 'max', 101)).ok, false);
   assert.equal(app.validateSettingsDraft(withChange('lift_up', 'min', -1)).ok, false);
+  const over = app.validateSettingsDraft(withChange('lift_up', 'max', 101));
+  assert.match(over.errors[0].text, /mm\/s/);
 });
 
 test('数値でない・空欄は保存できない', () => {

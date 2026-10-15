@@ -17,7 +17,9 @@
 - 型の違う `ceiling` は `hold` を捨てず `MISSING` として受け取る
 
 `POST /api/fake` は試験用の裏口（names §4）。`height_mm`・`bottom`・
-`height_ok` と、持ち主がいないときに表示する天井（`ceiling`）を変えられる。
+`height_ok`・`stall` と、持ち主がいないときに表示する天井（`ceiling`）を変えられる。
+`stall` が真の間は動かそうとすると `ENCODER_STALL` で止まる。
+`height_ok` が偽の間は動いていれば `HEIGHT_UNKNOWN` を出すが止めない（表示だけ）。
 """
 
 from __future__ import annotations
@@ -36,6 +38,8 @@ CEILING_MARGIN_MM = 500  # 仮
 CEILING_STALE_MS = 600  # 仮
 LIFT_MAX_RUN_MS = 10000  # 仮
 LIFT_DUTY_ABS_MAX_PCT = 100
+LIFT_SPEED_ABS_MAX_MM_S = 100  # 仮（設定の検証の上限・命令の丸め）
+LIFT_STALL_MS = 500  # 仮（spec #4d。動き出しの遅れより長く）
 LIFT_STATE_PERIOD_MS = 100  # 仮
 LIFT_WS_UI_PATH = "/ws/ui"
 LIFT_WS_MODULE_PATH = "/ws/module"
@@ -58,6 +62,11 @@ def clamp_duty(duty: int) -> int:
     return max(0, min(LIFT_DUTY_ABS_MAX_PCT, int(duty)))
 
 
+def clamp_speed(speed: int) -> int:
+    """速さ [mm/s] を 0〜LIFT_SPEED_ABS_MAX_MM_S に丸める（protocol §2.1）。"""
+    return max(0, min(LIFT_SPEED_ABS_MAX_MM_S, int(speed)))
+
+
 def validate_axis(values: dict) -> bool:
     try:
         lo, hi, init = int(values["min"]), int(values["max"]), int(values["init"])
@@ -73,7 +82,7 @@ def validate_settings(body: dict) -> list[str]:
     errors = []
     for key in ("lift_up", "lift_down"):
         if not isinstance(body.get(key), dict) or not validate_axis(body[key]):
-            errors.append(f"{key}: 下限 ≦ 初期値 ≦ 上限・0〜100 の整数にしてください")
+            errors.append(f"{key}: 下限 ≦ 初期値 ≦ 上限・0〜100 mm/s の整数にしてください")
     if set(body.keys()) != {"lift_up", "lift_down"}:
         errors.append("lift_up と lift_down をまるごと送ってください")
     return errors
@@ -128,17 +137,21 @@ def parse_ceiling(raw) -> tuple[bool, CeilingReport]:
 
 
 def decode_hold(body: dict, received_at: int):
-    """→ HoldMsg の辞書。読めない hold は None（捨てる。protocol §2.1）。"""
+    """→ HoldMsg の辞書。読めない hold は None（捨てる。protocol §2.1）。
+
+    速さは `speed` [mm/s] で受ける。`speed` が欠けている・整数でない・
+    真偽値のものと、`duty` だけの hold は読めない hold として捨てる。
+    """
     if not isinstance(body, dict) or body.get("t") != "hold":
         return None
-    press, direction, duty = body.get("press"), body.get("dir"), body.get("duty")
+    press, direction, speed = body.get("press"), body.get("dir"), body.get("speed")
     if (not isinstance(press, int) or isinstance(press, bool)
             or direction not in ("up", "down", "stop")
-            or not isinstance(duty, int) or isinstance(duty, bool)):
+            or not isinstance(speed, int) or isinstance(speed, bool)):
         return None
     has_ceiling, rep = parse_ceiling(body.get("ceiling"))
     rep.received_at_ms = received_at
-    return {"press": press, "dir": direction, "duty": duty,
+    return {"press": press, "dir": direction, "speed": clamp_speed(speed),
             "has_ceiling": has_ceiling, "ceiling": rep}
 
 
@@ -161,6 +174,7 @@ class FakeLift:
         self.height_mm = 800
         self.height_ok = True
         self.bottom = False
+        self.stall = False  # 真の間は動かそうとすると ENCODER_STALL で止まる（POST /api/fake）
         self.pinned_ceiling: CeilingReport | None = None
         self.seq = 0
         self._conns: dict[int, dict] = {}  # id → {kind, hello_seen, has_sensor, name}
@@ -233,7 +247,7 @@ class FakeLift:
         else:
             return
         sensor = self.sensor_of(conn_id, kind)
-        self._owner_cmd = {"dir": hold["dir"], "duty": hold["duty"],
+        self._owner_cmd = {"dir": hold["dir"], "speed": hold["speed"],
                            "sensor": sensor, "ceiling": hold["ceiling"],
                            "has_ceiling": hold["has_ceiling"], "at": now}
         if not hold["has_ceiling"]:
@@ -270,11 +284,14 @@ class FakeLift:
         if not self._owner or not self._owner_cmd:
             out_dir, out_duty, reason = "stop", 0, self._idle_reason
             ok, ceiling_reason = True, "NONE"
+            cmd_speed = 0
         elif cmd_dir == "stop":
             out_dir, out_duty, reason = "stop", 0, "CMD_STOP"
             ok, ceiling_reason = True, "NONE"
+            cmd_speed = 0
         else:
             cmd = self._owner_cmd
+            cmd_speed = clamp_speed(cmd["speed"])
             ok, ceiling_reason = ceiling_check(cmd["ceiling"], now, cmd["sensor"])
             if cmd_dir == "up" and not ok:
                 out_dir, out_duty, reason = "stop", 0, ceiling_reason
@@ -282,12 +299,26 @@ class FakeLift:
                 out_dir, out_duty, reason = "stop", 0, "BOTTOM"
             elif self._run_ms > LIFT_MAX_RUN_MS:
                 out_dir, out_duty, reason = "stop", 0, "MAX_RUN"
+            elif self.stall and self._run_ms > LIFT_STALL_MS:
+                # エンコーダが回らない（#8a の真似。数え方は MAX_RUN と同じ）。
+                # 命令が stop になるか向きが替わるまで続ける
+                out_dir, out_duty, reason = "stop", 0, "ENCODER_STALL"
             else:
-                out_dir, out_duty, reason = cmd_dir, clamp_duty(cmd["duty"]), "NONE"
+                # 偽物のモータへの出力は速さと同じ数（protocol §2.2 の SpeedLoop の出力の真似）
+                out_dir, out_duty, reason = cmd_dir, cmd_speed, "NONE"
 
         self._turning = (reason == "NONE" and out_dir in ("up", "down")
                          and self._owner is not None and out_dir == cmd_dir)
         self._run_at = now
+
+        moving = self._turning
+        if moving:
+            # 偽の高さは速さ [mm/s] × 経過時間で動かす
+            sign = 1 if out_dir == "up" else -1
+            self.height_mm = max(0.0, float(self.height_mm) + sign * cmd_speed * elapsed / 1000)
+        if reason == "NONE" and not self.height_ok:
+            # W-1 の間は昇降部は上昇を止めないので、偽物も止めない。表示だけ
+            reason = "HEIGHT_UNKNOWN"
 
         ui_clients = sum(1 for c in self._conns.values() if c["kind"] == "ui")
         module = next((c for c in self._conns.values()
@@ -313,8 +344,10 @@ class FakeLift:
             shown, present = None, False
         self.state = {
             "t": "state", "seq": self.seq, "dir": out_dir, "duty": out_duty,
+            "speed": cmd_speed if self._owner_cmd else 0,
+            "speed_meas": cmd_speed if moving else 0,
             "reason": reason, "bottom": self.bottom,
-            "height_mm": self.height_mm, "height_ok": self.height_ok,
+            "height_mm": int(round(float(self.height_mm))), "height_ok": self.height_ok,
             "top_detect": False, "ceiling": shown,
             "owner": self._owner[1] if self._owner else None,
             "ui_clients": ui_clients,
@@ -358,7 +391,13 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
         return web.json_response({"settings": lift.settings})
 
     async def post_fake(request: web.Request) -> web.Response:
-        """試験用の裏口。height_mm・bottom・height_ok と表示用の天井を変える。"""
+        """試験用の裏口。height_mm・bottom・height_ok・stall と表示用の天井を変える。
+
+        `stall` が真の間は、動かそうとすると `ENCODER_STALL` で止まる
+        （命令が `stop` になるか向きが替わるまで。`MAX_RUN` と同じ数え方）。
+        `height_ok` を偽にすると `HEIGHT_UNKNOWN` を出すが、止めない（表示だけ。
+        `W-1` の間は昇降部も上昇を止めないため）。
+        """
         lift = request.app["lift"]
         try:
             body = await request.json()
@@ -372,6 +411,8 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
             lift.bottom = bool(body["bottom"])
         if "height_ok" in body:
             lift.height_ok = bool(body["height_ok"])
+        if "stall" in body:
+            lift.stall = bool(body["stall"])
         ceiling = body.get("ceiling")
         if isinstance(ceiling, dict) and ceiling.get("status") in CEILING_KNOWN:
             rep = CeilingReport(ceiling["status"], int(ceiling.get("mm", 0) or 0), 0, now_ms())
