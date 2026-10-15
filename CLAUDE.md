@@ -115,6 +115,8 @@ th-system で踏んだもののうち、同じ道具（herdr／orca ＋ opencode
 - **opencode の質問画面（選択肢つきの確認）は、ペインが低いと入力欄が画面外に出て、`herdr agent prompt` の文字が入らない**（2026-09-28）。`herdr pane zoom <pane> --on` で広げ、`herdr pane read --source visible` で入力欄を確かめてから `herdr pane send-text` → `herdr pane send-keys <pane> Enter` で答える。終わったら `--off` で戻す。
 - **エージェントが作業中の worktree で、自分の変異チェック（ファイルを壊して `cp` で戻す）を回さない。**戻すときに、そのあいだにエージェントが入れた修正をバックアップで上書きして消す（th-system 2026-10-01）。エージェントを待機させてから回すか、検証用に別の worktree を切る。
 - **orca で作った worktree には gitignore 済みの `.venv/`・`.venv38/`・`.briefs/` が無い。**カメラ部の試験は worktree 内で `.venv38` を作り直す（または検証は本体側の `.venv38` で worktree を指して回す）。道具の試験は `.venv` を作り直す。`.briefs/tmp/` も作る。
+- **orca で opencode の許可プロンプト（Allow once / Allow always / Reject）に答えるには、`orca terminal send --text $'\e[C'`（右矢印 1 回で Allow always）→ `--text $'\r'` → 確認画面で もう一度 `$'\r'`**（2026-10-15）。`--enter` 付きの文字は入らない。
+- **orca の新しいターミナル（`worktree create`・`terminal create`・`split`）が `connected: false` のまま opencode が起動しないことがある**（2026-10-15。opencode の自動更新の直後）。Orca を起動し直したら直った。`orca worktree rm` はすぐには消えず、`git worktree list` に少し残る（`git worktree prune` で片付く）。
 - **既に opencode が動いているペインに `herdr agent start` を打たない。**`start` はシェルプロンプト待ちを期待するため、動作中のセッションに文字列を打ち込んで壊す。`herdr agent rename` だけで登録する。
 - **`pip3 install platformio` をホストの `python3 -m pytest` と同じ環境に入れると、依存の `anyio` が pytest プラグインとして自動登録され、`ModuleNotFoundError: No module named '_pytest.scope'` でテストが全滅する**（この環境の `pytest` は 6.2.5）。`python3 -m pytest -p no:anyio ...` で回避できる（th-system 2026-09-05）。
 - **カメラモジュールの試験は `.venv38`**（Python 3.8。`tomllib` が無いので `tomli` を使う。`WP-BASE-02` で UnitV2 の OS の版に揃えた）。**道具の試験は `.venv`**（Python 3.10）で回す。
