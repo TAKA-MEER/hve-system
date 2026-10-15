@@ -27,9 +27,9 @@ constexpr uint8_t ENC_B_PIN = 26;
 constexpr int ENC_PPR = 360;
 // PCNT のノイズ除去の幅 [ns]。**仮**
 constexpr int ENC_GLITCH_FILTER_NS = 1000;
-// PCNT の上限・下限 [counts]。**仮**。ここに達すると割り込みで溢れの累積へ移し、
-// カウンタを 0 に戻す（合計 = 溢れの累積 + 今のカウンタ）
-constexpr int ENC_PCNT_LIMIT = 10000;
+// PCNT の上限・下限 [counts]。**仮**。ここに達するとハードウェアがカウンタを 0 に
+// 戻し、割り込みで溢れの累積へ移す（合計 = 溢れの累積 + 今のカウンタ）
+constexpr int ENC_PCNT_LIMIT = 30000;
 
 // --- PWM（先行試作と同じ。LEDC ch0 / 5 kHz / 8 bit）---
 

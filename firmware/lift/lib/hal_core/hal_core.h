@@ -53,8 +53,25 @@ constexpr PcntQuadConfig kPcntQuadEncoder = {
 int pcnt_quad_step(const PcntQuadConfig& cfg, int prev_a, int prev_b, int now_a, int now_b);
 
 // 溢れの累積と今のカウンタから合計の数を求める
-//（hal_esp32 が上限・下限の割り込みで溢れの累積へ移し、カウンタを 0 に戻す）。
+//（hal_esp32 が上限・下限の割り込みで溢れの累積へ移す。カウンタはハードウェアが 0 に戻す）。
 inline int32_t encoder_total(int32_t overflow, int16_t raw) { return overflow + raw; }
+
+// 前回の合計から limit / 2 を超えて飛んだら、ハードウェアが 0 に戻した直後で
+// まだ割り込みが溢れの累積に足していない途中とみなし、その回は前回の合計の
+// ままにする（次の回に割り込みが足した値で読み直す）。poll の間に本物の動きで
+// limit / 2 進むことは無い。
+inline int32_t encoder_total_guarded(int32_t prev_total, int32_t overflow, int16_t raw,
+                                     int32_t limit) {
+  const int32_t total = encoder_total(overflow, raw);
+  int32_t jump = total - prev_total;
+  if (jump < 0) {
+    jump = -jump;
+  }
+  if (jump > limit / 2) {
+    return prev_total;
+  }
+  return total;
+}
 
 // エンコーダの数と下端スイッチから高さと「読めるか」を決める
 // （DetailedDesign.md §4.1.1。判断はすべてここに置き、hal_esp32 は読んで渡すだけ）。

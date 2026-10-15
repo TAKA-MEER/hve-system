@@ -172,11 +172,42 @@ void test_quad_no_edge_is_zero() {
 
 // --- 溢れの累積 + 今のカウンタ ---
 
+namespace {
+// ENC_PCNT_LIMIT（src/config.h）と同じ値
+constexpr int32_t kLimit = 30000;
+}  // namespace
+
 void test_encoder_total_adds_overflow_and_raw() {
   TEST_ASSERT_EQUAL_INT32(10000, encoder_total(10000, 0));
   TEST_ASSERT_EQUAL_INT32(9999, encoder_total(10000, -1));
   TEST_ASSERT_EQUAL_INT32(-10000, encoder_total(-10000, 0));
   TEST_ASSERT_EQUAL_INT32(42, encoder_total(0, 42));
+}
+
+void test_guarded_holds_on_upward_wrap_race() {
+  // 上限を超えてハードウェアが 0 に戻し、まだ割り込みが足していない瞬間:
+  // overflow=0・raw=5・前回 29998 → 前回のまま
+  TEST_ASSERT_EQUAL_INT32(29998, encoder_total_guarded(29998, 0, 5, kLimit));
+  // 次の回に割り込みが足した値で読み直す
+  TEST_ASSERT_EQUAL_INT32(30010, encoder_total_guarded(29998, 30000, 10, kLimit));
+}
+
+void test_guarded_holds_on_downward_wrap_race() {
+  // 下限側も同じ
+  TEST_ASSERT_EQUAL_INT32(-29998, encoder_total_guarded(-29998, 0, -5, kLimit));
+  TEST_ASSERT_EQUAL_INT32(-30010, encoder_total_guarded(-29998, -30000, -10, kLimit));
+}
+
+void test_guarded_passes_normal_steps() {
+  TEST_ASSERT_EQUAL_INT32(105, encoder_total_guarded(100, 0, 105, kLimit));
+  TEST_ASSERT_EQUAL_INT32(-105, encoder_total_guarded(-100, 0, -105, kLimit));
+  TEST_ASSERT_EQUAL_INT32(30100, encoder_total_guarded(30050, 30000, 100, kLimit));
+}
+
+void test_guarded_allows_exactly_half_limit() {
+  // ちょうど limit / 2 の飛びは通す（超えたら止める）
+  TEST_ASSERT_EQUAL_INT32(15000, encoder_total_guarded(0, 0, 15000, kLimit));
+  TEST_ASSERT_EQUAL_INT32(0, encoder_total_guarded(0, 0, 15001, kLimit));
 }
 
 // --- 向きの符号 ---
@@ -266,6 +297,10 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_quad_two_cycles_are_plusminus8);
   RUN_TEST(test_quad_no_edge_is_zero);
   RUN_TEST(test_encoder_total_adds_overflow_and_raw);
+  RUN_TEST(test_guarded_holds_on_upward_wrap_race);
+  RUN_TEST(test_guarded_holds_on_downward_wrap_race);
+  RUN_TEST(test_guarded_passes_normal_steps);
+  RUN_TEST(test_guarded_allows_exactly_half_limit);
   RUN_TEST(test_up_sign_minus_one_reverses);
   RUN_TEST(test_bottom_high_means_pressed);
   RUN_TEST(test_bottom_low_means_not_pressed);

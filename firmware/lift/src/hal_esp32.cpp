@@ -22,11 +22,11 @@ static_assert(kPcntReverse == PCNT_MODE_REVERSE, "kPcntReverse differs from PCNT
 volatile int32_t g_overflow = 0;
 portMUX_TYPE g_pcnt_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// ENC_PCNT_LIMIT に達した溢れを累積し、カウンタを 0 に戻す。
-// 上限・下限のどちらに当たっても合計が続く。
+// ENC_PCNT_LIMIT に達した溢れを累積する。カウンタはハードウェアが 0 に戻す
+//（TRM）ので clear しない（割り込みに入るまでに数えた分を捨ててしまう）。
 // IRAM に置く。呼ぶのはレジスタ読み書きだけで、Serial も delay も使わない。
+// 32 bit の読み書きは途切れないのでクリティカル区間は要らない。
 void IRAM_ATTR pcnt_limit_isr(void* /*arg*/) {
-  portENTER_CRITICAL_ISR(&g_pcnt_mux);
   uint32_t status = 0;
   pcnt_get_event_status(kPcntUnit, &status);
   if ((status & PCNT_EVT_H_LIM) != 0) {
@@ -35,10 +35,6 @@ void IRAM_ATTR pcnt_limit_isr(void* /*arg*/) {
   if ((status & PCNT_EVT_L_LIM) != 0) {
     g_overflow -= ENC_PCNT_LIMIT;
   }
-  // 上限・下限で止まらず次の分を数えられるように 0 に戻す。
-  // 割り込みに入るまでの数カウントは落ちることがある（10000 に対して微小）。
-  pcnt_counter_clear(kPcntUnit);
-  portEXIT_CRITICAL_ISR(&g_pcnt_mux);
 }
 
 // ENC_GLITCH_FILTER_NS [ns] を APB 80 MHz のクロック数に直す。上限 1023 に丸める。
@@ -122,7 +118,7 @@ void LiftEsp32Hal::poll(uint32_t now_ms) {
   overflow = g_overflow;
   pcnt_get_counter_value(kPcntUnit, &raw);
   portEXIT_CRITICAL(&g_pcnt_mux);
-  total_count_ = encoder_total(overflow, raw);
+  total_count_ = encoder_total_guarded(total_count_, overflow, raw, ENC_PCNT_LIMIT);
   // 下端スイッチの状態と一緒に渡す。判断は EncoderHeight 側
   encoder_.update(total_count_, bottom_pressed(), ENC_UP_SIGN);
   height_mm_ = encoder_.height_mm();
