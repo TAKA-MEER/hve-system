@@ -12,7 +12,8 @@ LiftDecideInput movable() {
   in.has_cmd = true;
   in.owner_empty_reason = StopReason::CMD_TIMEOUT;
   in.dir = LiftDir::UP;
-  in.duty = 40;
+  in.speed_mm_s = 40;
+  in.stalled = false;
   in.ceiling.status = CeilingStatus::MEASURED;
   in.ceiling.mm = 1450;
   in.ceiling.age_ms = 80;
@@ -28,10 +29,11 @@ LiftDecideInput movable() {
   return in;
 }
 
-void assert_decision(const LiftDecideInput& in, LiftDir dir, int duty, StopReason reason) {
+void assert_decision(const LiftDecideInput& in, LiftDir dir, int speed_mm_s,
+                     StopReason reason) {
   const LiftDecideResult r = lift_decide(in);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(dir), static_cast<int>(r.dir));
-  TEST_ASSERT_EQUAL_INT(duty, r.duty);
+  TEST_ASSERT_EQUAL_INT(speed_mm_s, r.speed_mm_s);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(reason), static_cast<int>(r.reason));
 }
 
@@ -65,7 +67,7 @@ void test_no_owner_after_release_stops_with_cmd_stop() {
 void test_cmd_stop_stops_with_cmd_stop() {
   LiftDecideInput in = movable();
   in.dir = LiftDir::STOP;
-  in.duty = 60;
+  in.speed_mm_s = 60;
   assert_decision(in, LiftDir::STOP, 0, StopReason::CMD_STOP);
 }
 
@@ -207,27 +209,64 @@ void test_run_over_max_run_stops_down_too() {
   assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
 }
 
-// --- 表 9 それ以外（デューティの丸め） ---
+// --- 表 8a エンコーダの停滞（#8 の次。spec #4d） ---
 
-void test_duty_is_clamped_into_0_to_100() {
+void test_stalled_stops_with_encoder_stall() {
   LiftDecideInput in = movable();
-  in.duty = -5;
-  assert_decision(in, LiftDir::UP, 0, StopReason::NONE);
-
-  in.duty = 0;
-  assert_decision(in, LiftDir::UP, 0, StopReason::NONE);
-
-  in.duty = 100;
-  assert_decision(in, LiftDir::UP, 100, StopReason::NONE);
-
-  in.duty = 150;
-  assert_decision(in, LiftDir::UP, LIFT_DUTY_ABS_MAX_PCT, StopReason::NONE);
+  in.stalled = true;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::ENCODER_STALL);
 }
 
-void test_stop_command_never_keeps_a_duty() {
+void test_stalled_stops_down_too() {
+  LiftDecideInput in = movable();
+  in.dir = LiftDir::DOWN;
+  in.stalled = true;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::ENCODER_STALL);
+}
+
+void test_stall_wins_over_moving() {
+  LiftDecideInput in = movable();
+  in.stalled = true;
+  in.run_ms = 0;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::ENCODER_STALL);
+}
+
+void test_max_run_wins_over_stall() {
+  // 表の順（#8 が先）に当たることの確認
+  LiftDecideInput in = movable();
+  in.stalled = true;
+  in.run_ms = LIFT_MAX_RUN_MS + 1;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
+}
+
+void test_stop_command_wins_over_stall() {
   LiftDecideInput in = movable();
   in.dir = LiftDir::STOP;
-  in.duty = 100;
+  in.stalled = true;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::CMD_STOP);
+}
+
+// --- 表 9 それ以外（速さの丸め。デューティは決めない） ---
+
+void test_speed_is_clamped_into_0_to_max() {
+  LiftDecideInput in = movable();
+  in.speed_mm_s = -5;
+  assert_decision(in, LiftDir::UP, 0, StopReason::NONE);
+
+  in.speed_mm_s = 0;
+  assert_decision(in, LiftDir::UP, 0, StopReason::NONE);
+
+  in.speed_mm_s = LIFT_SPEED_ABS_MAX_MM_S;
+  assert_decision(in, LiftDir::UP, LIFT_SPEED_ABS_MAX_MM_S, StopReason::NONE);
+
+  in.speed_mm_s = LIFT_SPEED_ABS_MAX_MM_S + 50;
+  assert_decision(in, LiftDir::UP, LIFT_SPEED_ABS_MAX_MM_S, StopReason::NONE);
+}
+
+void test_stop_command_never_keeps_a_speed() {
+  LiftDecideInput in = movable();
+  in.dir = LiftDir::STOP;
+  in.speed_mm_s = 100;
   assert_decision(in, LiftDir::STOP, 0, StopReason::CMD_STOP);
 }
 
@@ -262,7 +301,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_no_owner_after_release_stops_with_cmd_stop);
 
   RUN_TEST(test_cmd_stop_stops_with_cmd_stop);
-  RUN_TEST(test_stop_command_never_keeps_a_duty);
+  RUN_TEST(test_stop_command_never_keeps_a_speed);
 
   RUN_TEST(test_up_with_far_ceiling_moves);
   RUN_TEST(test_up_with_near_ceiling_stops_with_ceiling_near);
@@ -288,7 +327,13 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_run_over_max_run_stops_with_max_run);
   RUN_TEST(test_run_over_max_run_stops_down_too);
 
-  RUN_TEST(test_duty_is_clamped_into_0_to_100);
+  RUN_TEST(test_stalled_stops_with_encoder_stall);
+  RUN_TEST(test_stalled_stops_down_too);
+  RUN_TEST(test_stall_wins_over_moving);
+  RUN_TEST(test_max_run_wins_over_stall);
+  RUN_TEST(test_stop_command_wins_over_stall);
+
+  RUN_TEST(test_speed_is_clamped_into_0_to_max);
 
   RUN_TEST(test_cmd_timestamp_newer_than_now_does_not_stop);
   RUN_TEST(test_ceiling_age_across_millis_wrap_is_stale_at_1280ms);

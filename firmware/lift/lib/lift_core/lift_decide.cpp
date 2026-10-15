@@ -3,20 +3,20 @@
 
 namespace {
 
-int clamp_duty(int duty) {
-  if (duty < 0) {
+int clamp_speed(int speed_mm_s) {
+  if (speed_mm_s < 0) {
     return 0;
   }
-  if (duty > LIFT_DUTY_ABS_MAX_PCT) {
-    return LIFT_DUTY_ABS_MAX_PCT;
+  if (speed_mm_s > LIFT_SPEED_ABS_MAX_MM_S) {
+    return LIFT_SPEED_ABS_MAX_MM_S;
   }
-  return duty;
+  return speed_mm_s;
 }
 
 LiftDecideResult stop_with(StopReason reason) {
   LiftDecideResult result;
   result.dir = LiftDir::STOP;
-  result.duty = 0;
+  result.speed_mm_s = 0;
   result.reason = reason;
   return result;
 }
@@ -83,10 +83,18 @@ LiftDecideResult lift_decide(const LiftDecideInput& in) {
     return stop_with(StopReason::MAX_RUN);
   }
 
-  // 表 9 それ以外。指令どおりに動かして、デューティは 0〜LIFT_DUTY_ABS_MAX_PCT に丸める
+  // 表 8a 同じ方向の命令が続く間に、モータへ出力しているのに LIFT_STALL_MS の間
+  // エンコーダが進行方向へ LIFT_STALL_MIN_COUNTS 未満しか進まない（逆向きも）。
+  // 数え方は #8 と同じく、命令が stop になるか向きが替わるまで続ける
+  if (in.stalled) {
+    return stop_with(StopReason::ENCODER_STALL);
+  }
+
+  // 表 9 それ以外。指令どおりの向き。速さは 0〜LIFT_SPEED_ABS_MAX_MM_S に丸め、
+  // SpeedLoop がデューティに直す
   LiftDecideResult result;
   result.dir = in.dir;
-  result.duty = clamp_duty(in.duty);
+  result.speed_mm_s = clamp_speed(in.speed_mm_s);
   result.reason = StopReason::NONE;
   return result;
 }
