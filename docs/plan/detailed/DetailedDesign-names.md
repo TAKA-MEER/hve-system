@@ -172,7 +172,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`EncoderHeight`** | `hal_core.h` | 原点・故障（`P-14`）・高さの式を持つ小さな状態（`WP-LIFT-05`） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
 | **`PcntQuadConfig`** / **`kPcntQuadEncoder`** / **`pcnt_quad_step`** | `hal_core.h` | A/B 4 逓倍のチャンネル設定・その値・(A,B) 1 段の遷移の増減（`WP-LIFT-05` 差し戻し 1） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
 | **`encoder_total`** | `hal_core.h` | 溢れの累積 ＋ 今のカウンタの純関数（`WP-LIFT-05` 差し戻し 1） | 同 |
-| **`ENC_PCNT_LIMIT`** | `config.h` | 10000 | **仮**（PCNT の上限・下限。`WP-LIFT-05` 差し戻し 1） |
+| **`encoder_total_guarded`** | `hal_core.h` | 割り込みが追いつく前の読み飛びを前回の合計で抑える純関数（`WP-LIFT-05` 差し戻し 2） | 同 |
+| **`ENC_PCNT_LIMIT`** | `config.h` | 30000 | **仮**（PCNT の上限・下限。`WP-LIFT-05` 差し戻し 2） |
 | **`encoder_count`** | `lift_core/hal.h`（`LiftHal`） | エンコーダの生の数（原点に依らない。`WP-LIFT-06` の速さの制御が使う） | 同 |
 
 ### 5.2 昇降部の画面（`firmware/lift/web/app.js`）
