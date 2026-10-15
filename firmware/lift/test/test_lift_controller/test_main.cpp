@@ -487,6 +487,17 @@ void test_height_ok_in_state_survives_millis_wrap_when_fresh() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hal.motor_dir()));
 }
 
+void test_height_unknown_shows_in_state_while_waiver() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  // 原点を取る前（height_ok が偽）でも state.height_ok は偽（W-1 の間も表示用に縛る）
+  hal.set_height(0, false, 0);
+  ctrl.on_hold(ui(1), down_hold(1), 0);
+  const LiftState state = ctrl.step(0);
+  TEST_ASSERT_FALSE(state.height_ok);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(hal.motor_dir()));
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -523,6 +534,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
   RUN_TEST(test_cmd_timeout_survives_millis_wrap);
   RUN_TEST(test_height_ok_in_state_survives_millis_wrap_when_fresh);
+  RUN_TEST(test_height_unknown_shows_in_state_while_waiver);
 
   return UNITY_END();
 }
