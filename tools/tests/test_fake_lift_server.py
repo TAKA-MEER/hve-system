@@ -24,8 +24,8 @@ import fake_lift_server as fake
 from fake_lift_server import FakeLift, ceiling_check, decode_hold, validate_settings
 
 
-def hold_text(press=1, direction="up", duty=40, ceiling=None):
-    body = {"t": "hold", "press": press, "dir": direction, "duty": duty}
+def hold_text(press=1, direction="up", speed=40, ceiling=None):
+    body = {"t": "hold", "press": press, "dir": direction, "speed": speed}
     if ceiling is not None:
         body["ceiling"] = ceiling
     return body
@@ -93,9 +93,28 @@ def test_without_sensor_everything_is_ok():
 def test_decode_hold_reads_a_full_hold():
     hold = decode_hold(hold_text(ceiling=FAR), 1000)
     assert hold is not None
-    assert hold["press"] == 1 and hold["dir"] == "up" and hold["duty"] == 40
+    assert hold["press"] == 1 and hold["dir"] == "up" and hold["speed"] == 40
     assert hold["has_ceiling"] is True
     assert hold["ceiling"].status == "MEASURED"
+
+
+def test_decode_hold_drops_a_duty_only_hold():
+    """`duty` だけの hold（`speed` が無い）は読めない hold として捨てる。"""
+    assert decode_hold({"t": "hold", "press": 1, "dir": "up", "duty": 40,
+                        "ceiling": FAR}, 1000) is None
+    assert decode_hold({"t": "hold", "press": 1, "dir": "up"}, 1000) is None
+
+
+def test_decode_hold_clamps_speed_to_abs_max():
+    """`speed` は 0〜LIFT_SPEED_ABS_MAX_MM_S（100）に丸める。"""
+    hold = decode_hold(hold_text(speed=140, ceiling=FAR), 1000)
+    assert hold is not None
+    assert hold["speed"] == 100
+
+
+def test_decode_hold_drops_a_hold_with_a_broken_speed():
+    assert decode_hold(hold_text(speed="fast", ceiling=FAR), 1000) is None
+    assert decode_hold(hold_text(speed=True, ceiling=FAR), 1000) is None
 
 
 def test_decode_hold_keeps_broken_ceiling_as_missing_without_dropping():
@@ -165,6 +184,72 @@ def test_module_without_ceiling_cannot_go_up():
     state = lift.step(1050)
     assert state["dir"] == "stop"
     assert state["reason"] == "CEILING_STALE"
+
+
+def test_state_carries_speed_and_measured_speed():
+    """`state` に目標の速さ・測った速さ・モータへの出力を載せる。"""
+    lift = FakeLift()
+    conn = module_conn(lift)
+    hold = decode_hold(hold_text(speed=40, ceiling=FAR), 1000)
+    assert hold is not None
+    lift.on_hold(conn, "module", hold, 1000)
+    state = lift.step(1050)
+    assert state["dir"] == "up"
+    assert state["speed"] == 40
+    assert state["speed_meas"] == 40
+    assert state["duty"] == 40
+
+
+def test_height_moves_with_speed_times_elapsed():
+    """偽の高さは `speed` [mm/s] × 経過時間で動く。"""
+    lift = FakeLift()
+    lift.height_mm = 800
+    conn = module_conn(lift)
+    lift.step(1000)
+    lift.on_hold(conn, "module", decode_hold(hold_text(speed=40, ceiling=FAR), 1000), 1000)
+    lift.on_hold(conn, "module", decode_hold(hold_text(speed=40, ceiling=FAR), 1900), 1900)
+    state = lift.step(2000)  # 速さ 40 mm/s × 1 秒
+    assert state["dir"] == "up"
+    assert state["height_mm"] == 840
+
+
+def test_stall_stops_with_encoder_stall_until_stop_or_reverse():
+    """`stall` が真の間は動かそうとすると `ENCODER_STALL` で止まる。"""
+    lift = FakeLift()
+    lift.stall = True
+    conn = module_conn(lift)
+    now = 1000
+    lift.step(now)
+    lift.on_hold(conn, "module", decode_hold(hold_text(speed=40, ceiling=FAR), now), now)
+    # 押し続け（100 ms ごと）で 600 ms 動かす。動き出しの遅れの間は動く
+    for now in (1100, 1200, 1300, 1400, 1500, 1600):
+        assert lift.step(now)["dir"] == "up"
+        lift.on_hold(conn, "module", decode_hold(hold_text(speed=40, ceiling=FAR), now), now)
+    stalled = lift.step(1700)
+    assert stalled["dir"] == "stop"
+    assert stalled["reason"] == "ENCODER_STALL"
+    # 押し続けている間は続ける
+    lift.on_hold(conn, "module", decode_hold(hold_text(speed=40, ceiling=FAR), 1700), 1700)
+    assert lift.step(1800)["reason"] == "ENCODER_STALL"
+    # 向きを替えれば反対方向へは動ける
+    down = decode_hold(hold_text(press=2, direction="down", speed=40, ceiling=FAR), 1850)
+    assert down is not None
+    lift.on_hold(conn, "module", down, 1850)
+    assert lift.step(1900)["dir"] == "down"
+
+
+def test_height_unknown_is_shown_without_stopping():
+    """`height_ok` が偽でも止めない（表示だけ。`W-1` の間は昇降部も止めない）。"""
+    lift = FakeLift()
+    lift.height_ok = False
+    conn = module_conn(lift)
+    lift.step(1000)
+    hold = decode_hold(hold_text(speed=40, ceiling=FAR), 1000)
+    assert hold is not None
+    lift.on_hold(conn, "module", hold, 1000)
+    state = lift.step(1050)
+    assert state["dir"] == "up"
+    assert state["reason"] == "HEIGHT_UNKNOWN"
 
 
 def test_release_stops_at_once():
