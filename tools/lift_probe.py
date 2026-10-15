@@ -32,10 +32,10 @@ import aiohttp
 
 # `hold` を送る周期。**仮**（DetailedDesign-names.md §5.2 の ui_hold_period_ms と同じ）
 lift_probe_period_ms = 100
-# 起動直後のデューティ。**仮**（旧版の例の値）
-lift_probe_duty_pct = 40
-# `+` / `-` で 1 回に変える量
-lift_probe_duty_step_pct = 5
+# 起動直後の速さ [mm/s]。**仮**（旧版の例の値。単位だけ替わった）
+lift_probe_speed_mm_s = 40
+# `+` / `-` で 1 回に変える量 [mm/s]
+lift_probe_speed_step_mm_s = 5
 # `c` で遠い側にしたときの天井の値（CEILING_MARGIN_MM=500 より十分遠い）
 lift_probe_far_mm = 2000
 # 送る `hello` の名前（protocol §2.1。判定には使わない）
@@ -48,9 +48,9 @@ KEY_ACTIONS: dict[str, str] = {
     "d": "down",
     "s": "stop",
     "c": "toggle_ceiling",
-    "+": "duty_up",
-    "=": "duty_up",
-    "-": "duty_down",
+    "+": "speed_up",
+    "=": "speed_up",
+    "-": "speed_down",
     "x": "toggle_sending",
     "q": "quit",
 }
@@ -61,14 +61,14 @@ def key_action(key: str) -> str | None:
     return KEY_ACTIONS.get(key)
 
 
-def clamp_duty(duty_pct: int) -> int:
-    """デューティを 0〜100 に丸める（protocol §2.1 は 0〜LIFT_DUTY_ABS_MAX_PCT）。"""
-    return max(0, min(100, int(duty_pct)))
+def clamp_speed(speed_mm_s: int) -> int:
+    """速さを 0〜100 [mm/s] に丸める（protocol §2.1 は 0〜LIFT_SPEED_ABS_MAX_MM_S）。"""
+    return max(0, min(100, int(speed_mm_s)))
 
 
-def initial_state(duty_pct: int = lift_probe_duty_pct) -> dict:
+def initial_state(speed_mm_s: int = lift_probe_speed_mm_s) -> dict:
     """起動直後の状態。**止まっていて、天井は近すぎ（上昇しない側）**。"""
-    return {"dir": "stop", "duty_pct": clamp_duty(duty_pct), "press": 0,
+    return {"dir": "stop", "speed_mm_s": clamp_speed(speed_mm_s), "press": 0,
             "ceiling_near": True}
 
 
@@ -76,7 +76,7 @@ def apply_action(state: dict, action: str) -> dict:
     """操作を `state` へ適用した新しい `state` を返す（元の辞書は変えない）。
 
     `press` は押し始め（止まっている向きと違う向き・`up` と `down` の入れ替え）
-    ごとに 1 増やす。`stop` でもデューティは保持する。
+    ごとに 1 増やす。`stop` でも速さは保持する。
     """
     out = dict(state)
     if action == "up":
@@ -91,10 +91,10 @@ def apply_action(state: dict, action: str) -> dict:
         out["dir"] = "stop"
     elif action == "toggle_ceiling":
         out["ceiling_near"] = not out["ceiling_near"]
-    elif action == "duty_up":
-        out["duty_pct"] = clamp_duty(out["duty_pct"] + lift_probe_duty_step_pct)
-    elif action == "duty_down":
-        out["duty_pct"] = clamp_duty(out["duty_pct"] - lift_probe_duty_step_pct)
+    elif action == "speed_up":
+        out["speed_mm_s"] = clamp_speed(out["speed_mm_s"] + lift_probe_speed_step_mm_s)
+    elif action == "speed_down":
+        out["speed_mm_s"] = clamp_speed(out["speed_mm_s"] - lift_probe_speed_step_mm_s)
     return out
 
 
@@ -112,9 +112,9 @@ def ceiling_of(state: dict) -> dict:
 
 
 def build_hold(state: dict) -> dict:
-    """昇降部へ送る `hold`（protocol §2.1）。"""
+    """昇降部へ送る `hold`（protocol §2.1）。速さは目標の mm/s。"""
     return {"t": "hold", "press": int(state["press"]), "dir": state["dir"],
-            "duty": clamp_duty(state["duty_pct"]), "ceiling": ceiling_of(state)}
+            "speed": clamp_speed(state["speed_mm_s"]), "ceiling": ceiling_of(state)}
 
 
 def build_release(state: dict) -> dict:
@@ -127,6 +127,7 @@ def format_state(state: dict) -> str:
     ceiling = state.get("ceiling") or {}
     return (
         f"state seq={state.get('seq')} dir={state.get('dir')} duty={state.get('duty')} "
+        f"speed={state.get('speed')} speed_meas={state.get('speed_meas')} "
         f"reason={state.get('reason')} bottom={state.get('bottom')} "
         f"height_mm={state.get('height_mm')} height_ok={state.get('height_ok')} "
         f"top_detect={state.get('top_detect')} "
@@ -248,7 +249,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "キー:\n"
             "  u 上昇 / d 下降 / s 停止（離す・release を送る）\n"
             "  c 天井を 近すぎ/遠い（2000 mm）に切り替える（既定は近すぎ = 上昇しない）\n"
-            "  + （ = も同じ）デューティ +5 / - デューティ -5\n"
+            "  + （ = も同じ）速さ +5 mm/s / - 速さ -5 mm/s\n"
             "  x 送信を止める・再開する / q 終了\n"
             f"\nhold は {lift_probe_period_ms} ms ごと。x で送信を止めると、"
             "昇降部側のウォッチドッグ（LIFT_CMD_TIMEOUT_MS=600 ms）で止まる。"
@@ -257,10 +258,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("url", help="昇降部の WS の URL（例 ws://127.0.0.1:18080/ws/module）")
     parser.add_argument(
-        "--duty",
+        "--speed",
         type=int,
-        default=lift_probe_duty_pct,
-        help=f"起動直後のデューティ %%（既定 {lift_probe_duty_pct}）",
+        default=lift_probe_speed_mm_s,
+        help=f"起動直後の速さ mm/s（既定 {lift_probe_speed_mm_s}）",
     )
     parser.add_argument(
         "--period-ms",
@@ -278,10 +279,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    state = initial_state(args.duty)
+    state = initial_state(args.speed)
     probe = Probe(args.url, state, sending=not args.stop_sending, period_ms=args.period_ms)
     print(
-        f"* dir={state['dir']} duty={state['duty_pct']} "
+        f"* dir={state['dir']} speed={state['speed_mm_s']} mm/s "
         f"天井={'近すぎ' if state['ceiling_near'] else '遠い'} "
         f"送信={'する' if probe.sending else '止めた'}",
         flush=True,

@@ -14,7 +14,7 @@ lift_probe = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(lift_probe)
 
 key_action = lift_probe.key_action
-clamp_duty = lift_probe.clamp_duty
+clamp_speed = lift_probe.clamp_speed
 apply_action = lift_probe.apply_action
 initial_state = lift_probe.initial_state
 build_hello = lift_probe.build_hello
@@ -24,7 +24,7 @@ ceiling_of = lift_probe.ceiling_of
 format_state = lift_probe.format_state
 parse_args = lift_probe.parse_args
 
-STEP = lift_probe.lift_probe_duty_step_pct
+STEP = lift_probe.lift_probe_speed_step_mm_s
 PERIOD = lift_probe.lift_probe_period_ms
 
 
@@ -34,7 +34,7 @@ PERIOD = lift_probe.lift_probe_period_ms
 def test_initial_state_is_stopped_with_near_ceiling():
     """起動直後は止まっていて、天井は近すぎ（上昇しない側）のこと。"""
     state = initial_state()
-    assert state == {"dir": "stop", "duty_pct": 40, "press": 0, "ceiling_near": True}
+    assert state == {"dir": "stop", "speed_mm_s": 40, "press": 0, "ceiling_near": True}
 
 
 # --- キーの解釈 ---------------------------------------------------------
@@ -47,9 +47,9 @@ def test_initial_state_is_stopped_with_near_ceiling():
         ("d", "down"),
         ("s", "stop"),
         ("c", "toggle_ceiling"),
-        ("+", "duty_up"),
-        ("=", "duty_up"),
-        ("-", "duty_down"),
+        ("+", "speed_up"),
+        ("=", "speed_up"),
+        ("-", "speed_down"),
         ("x", "toggle_sending"),
         ("q", "quit"),
     ],
@@ -80,11 +80,11 @@ def test_press_increases_on_new_press_only():
     assert again["press"] == 3
 
 
-def test_stop_keeps_duty_and_press():
+def test_stop_keeps_speed_and_press():
     state = apply_action(initial_state(), "up")
     stopped = apply_action(state, "stop")
     assert stopped["dir"] == "stop"
-    assert stopped["duty_pct"] == state["duty_pct"]
+    assert stopped["speed_mm_s"] == state["speed_mm_s"]
     assert stopped["press"] == state["press"]
 
 
@@ -111,13 +111,14 @@ def test_build_hello_claims_a_sensor_once():
     assert hello["ceiling_sensor"] is True
 
 
-def test_build_hold_carries_press_dir_duty_and_ceiling():
+def test_build_hold_carries_press_dir_speed_and_ceiling():
     state = apply_action(initial_state(), "up")
     hold = build_hold(state)
     assert hold["t"] == "hold"
     assert hold["press"] == 1
     assert hold["dir"] == "up"
-    assert hold["duty"] == 40
+    assert hold["speed"] == 40
+    assert "duty" not in hold  # 旧版の duty は送らない
     assert hold["ceiling"]["status"] == "TOO_NEAR"  # 立ち上がりは近すぎ
 
 
@@ -134,9 +135,9 @@ def test_build_release_carries_the_same_press():
     assert release == {"t": "release", "press": 1}
 
 
-def test_build_hold_clamps_duty():
-    hold = build_hold({"dir": "up", "duty_pct": 140, "press": 1, "ceiling_near": True})
-    assert hold["duty"] == 100
+def test_build_hold_clamps_speed():
+    hold = build_hold({"dir": "up", "speed_mm_s": 140, "press": 1, "ceiling_near": True})
+    assert hold["speed"] == 100
 
 
 # --- state の表示 -------------------------------------------------------
@@ -149,6 +150,8 @@ def test_format_state_is_one_line_and_shows_the_numbers():
             "seq": 3,
             "dir": "up",
             "duty": 40,
+            "speed": 40,
+            "speed_meas": 39,
             "reason": "NONE",
             "bottom": False,
             "height_mm": 1234,
@@ -162,7 +165,7 @@ def test_format_state_is_one_line_and_shows_the_numbers():
         }
     )
     assert "\n" not in line
-    for want in ("seq=3", "dir=up", "duty=40", "height_mm=1234", "owner=module"):
+    for want in ("seq=3", "dir=up", "duty=40", "speed=40", "speed_meas=39", "height_mm=1234", "owner=module"):
         assert want in line
 
 
