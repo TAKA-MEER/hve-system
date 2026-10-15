@@ -5,7 +5,7 @@
 
 - 4 項目（`lift_up`・`lift_down`・`pitch`・`yaw`）すべてが揃う
 - `min ≦ init ≦ max`
-- `lift_*` は 0〜100（PWM デューティ比 [%]）・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
+- `lift_*` は 0〜`LIFT_SPEED_ABS_MAX_MM_S`（100）[mm/s] の整数・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
 
 **ピッチ・ヨーはここで保存、昇降は昇降部へ中継する**（v2）。
 そのため読み書きは軸を絞れる（`axes`）。`PUT /api/settings` の検証は 4 軸のまま。
@@ -30,11 +30,11 @@ _SPEED_AXES = ("lift_up", "lift_down", "pitch", "yaw")
 #: 1 つの軸が持つ値。
 _SPEED_FIELDS = ("min", "max", "init")
 
-#: `lift_*` の絶対範囲の上限。protocol §3「`lift_*` は 0〜100」。
-_LIFT_DUTY_MAX_PCT = 100
+#: 昇降の速さの絶対範囲の上限 [mm/s]。protocol §3。names §5 `LIFT_SPEED_ABS_MAX_MM_S`。
+_LIFT_SPEED_ABS_MAX_MM_S = 100
 
-#: 0 未満はだめ（下限が 0 を含める）軸。
-_DUTY_AXES = ("lift_up", "lift_down")
+#: 0 を含める（0 以上でよい）軸。昇降の 2 軸（目標の速さ [mm/s] の整数）。
+_LIFT_SPEED_AXES = ("lift_up", "lift_down")
 
 #: 0 以下の速度はだめ（protocol §3「`pitch` / `yaw` は 0 超」）軸。
 _POSITIVE_ONLY_AXES = ("pitch", "yaw")
@@ -186,8 +186,8 @@ def _check_range(
     params: Mapping[str, Any],
     errors: list[str],
 ) -> None:
-    if axis in _DUTY_AXES:
-        high = float(_LIFT_DUTY_MAX_PCT)
+    if axis in _LIFT_SPEED_AXES:
+        high = float(_LIFT_SPEED_ABS_MAX_MM_S)
         low_inclusive = True
     elif axis in _POSITIVE_ONLY_AXES:
         high = float(params["axis_speed_abs_max_dps"])
@@ -201,6 +201,8 @@ def _check_range(
             errors.append(f"{axis}.{field}: 下限を満たさない（{value:g}）")
         if value > high:
             errors.append(f"{axis}.{field}: {high:g} より大きい（{value:g}）")
+        if axis in _LIFT_SPEED_AXES and value != int(value):
+            errors.append(f"{axis}.{field}: 整数でない（{value:g}）")
 
 
 def _unlink_quietly(name: str | os.PathLike[str]) -> None:
