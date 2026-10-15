@@ -17,9 +17,11 @@ class FakeHal : public LiftHal {
   int height_mm() const override { return height_mm_; }
   bool height_ok() const override { return height_ok_; }
   uint32_t height_at_ms() const override { return height_at_ms_; }
+  int32_t encoder_count() const override { return encoder_count_; }
 
   // 試験が使う設定
   void set_bottom(bool pressed) { bottom_ = pressed; }
+  void set_encoder_count(int32_t count) { encoder_count_ = count; }
   void set_height(int mm, bool ok, uint32_t at_ms) {
     height_mm_ = mm;
     height_ok_ = ok;
@@ -36,6 +38,7 @@ class FakeHal : public LiftHal {
   int motor_duty_ = 0;
   int motor_calls_ = 0;
   bool bottom_ = false;
+  int32_t encoder_count_ = 0;
   int height_mm_ = 0;
   bool height_ok_ = false;
   uint32_t height_at_ms_ = 0;

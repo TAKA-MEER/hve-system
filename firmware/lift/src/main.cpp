@@ -588,7 +588,7 @@ void loop() {
   }
   controller.set_ui_clients(static_cast<int>(ws_ui.count()));
 
-  // 2) 超音波の測定を出す。loop() は止めない
+  // 2) エンコーダの数を読み、高さを更新する。loop() は止めない
   hal.poll(now);
 
   // 3) 判定してモータへ出し、状態を更新する

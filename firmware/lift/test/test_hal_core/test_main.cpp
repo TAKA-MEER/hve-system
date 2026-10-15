@@ -1,5 +1,5 @@
-// Unity の試験（env:native）。WP-LIFT-02 で足した hal_core の純関数の試験。
-// ここで縛るのは「換算の式・測定範囲の判定・停止が 0 になる」こと。
+// Unity の試験（env:native）。WP-LIFT-05 で足した EncoderHeight の純関数の試験。
+// ここで縛るのは「原点・読めるか・高さの式・PCNT の差の足し込み」こと。
 // hal_esp32 がこれらを実際に使っているかはこの試験では見られないので、
 // 変異チェックでは hal_esp32 側の配線も手で確かめること。
 #include <unity.h>
@@ -17,9 +17,8 @@ constexpr int kLow = 0;
 constexpr int kResolution = 8;
 constexpr uint32_t kFullScale = (1u << kResolution) - 1;
 
-// 距離 mm に対応する ECHO のパルス幅（µs）。hal_core.cpp の 0.017 mm/µs（100 で割る）と
-// 対応する。切り捨てで境界をまたがないよう、必ず 1 µs 切り上げて作る。
-uint32_t echo_us_for_mm(int mm) { return static_cast<uint32_t>((mm * 100 + 16) / 17); }
+// LIFT_UM_PER_COUNT（100 µm）では 10 カウントで 1 mm。
+constexpr int kCountsPerMm = 1000 / LIFT_UM_PER_COUNT;
 
 }  // namespace
 
@@ -27,97 +26,200 @@ void setUp() {}
 
 void tearDown() {}
 
-// --- 超音波: パルス幅 -> mm ---
+// --- 起動直後 ---
 
-void test_echo_width_becomes_mm_at_200mm() {
-  int mm = -1;
-  TEST_ASSERT_TRUE(sonar_echo_to_mm(echo_us_for_mm(200), &mm));
-  TEST_ASSERT_EQUAL_INT(200, mm);
+void test_not_pressed_at_boot_is_unknown() {
+  EncoderHeight h;
+  h.update(1234, false);
+  TEST_ASSERT_FALSE(h.ok());
 }
 
-void test_echo_width_becomes_mm_at_800mm() {
-  int mm = -1;
-  TEST_ASSERT_TRUE(sonar_echo_to_mm(echo_us_for_mm(800), &mm));
-  TEST_ASSERT_EQUAL_INT(800, mm);
+void test_pressed_at_boot_takes_home() {
+  EncoderHeight h;
+  h.update(1234, true);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
 }
 
-void test_echo_width_is_linear_across_the_range() {
-  // 換算の割合が途中で変わっていないことを、2 点ではなく連続で見る
-  int mm = -1;
-  for (int want = 100; want <= 2000; want += 137) {
-    TEST_ASSERT_TRUE(sonar_echo_to_mm(echo_us_for_mm(want), &mm));
-    TEST_ASSERT_EQUAL_INT(want, mm);
+// --- 押された瞬間に原点を取り直す ---
+
+void test_second_landing_retakes_home() {
+  EncoderHeight h;
+  h.update(1000, true);
+  h.update(1100, false);  // 上げる（10 mm）
+  TEST_ASSERT_EQUAL_INT(10, h.height_mm());
+  // 2 回目の着地で原点を取り直す
+  h.update(500, true);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+  // 離れてから上げると高さが増える
+  h.update(600, false);
+  TEST_ASSERT_EQUAL_INT(10, h.height_mm());
+}
+
+void test_height_grows_when_raising_after_release() {
+  EncoderHeight h;
+  h.update(0, true);
+  h.update(10 * kCountsPerMm, false);
+  TEST_ASSERT_EQUAL_INT(10, h.height_mm());
+  TEST_ASSERT_TRUE(h.ok());
+}
+
+// --- 押されている間の下降は原点を下げる ---
+
+void test_pressed_going_down_lowers_home() {
+  EncoderHeight h;
+  h.update(1000, true);
+  // 押されている間に下降側へ 50 カウント進むと原点が下がる（高さは 0 のまま）
+  h.update(950, true);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+  // 離れてから 150 カウント上げると、ずらした原点からの高さになる（15 mm）
+  h.update(1100, false);
+  TEST_ASSERT_EQUAL_INT(15, h.height_mm());
+}
+
+// --- 押されている間の上昇は原点を動かさない ---
+
+void test_pressed_going_up_does_not_move_home() {
+  EncoderHeight h;
+  h.update(1000, true);
+  // 押されている間に上昇側へ進んでも原点は動かない（高さが付く）
+  h.update(1050, true);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(5, h.height_mm());
+  // 離れて戻しても原点は最初のまま
+  h.update(1000, false);
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+}
+
+// --- HOME_SLACK_MM を超えたら故障 ---
+
+void test_pressed_within_slack_stays_ok() {
+  EncoderHeight h;
+  h.update(1000, true);
+  h.update(1000 + HOME_SLACK_MM * kCountsPerMm, true);
+  TEST_ASSERT_TRUE(h.ok());
+}
+
+void test_pressed_beyond_slack_is_fault() {
+  EncoderHeight h;
+  h.update(1000, true);
+  h.update(1000 + (HOME_SLACK_MM + 10) * kCountsPerMm, true);
+  TEST_ASSERT_FALSE(h.ok());
+}
+
+void test_fault_stays_after_release_until_repress() {
+  EncoderHeight h;
+  h.update(1000, true);
+  h.update(1000 + (HOME_SLACK_MM + 10) * kCountsPerMm, true);
+  TEST_ASSERT_FALSE(h.ok());
+  // 離れても偽のまま
+  h.update(1000, false);
+  TEST_ASSERT_FALSE(h.ok());
+  // 押し直したら原点を取り直して真に戻る
+  h.update(900, true);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+}
+
+// --- 原点より下（ずれ）は負のまま ---
+
+void test_below_home_is_negative() {
+  EncoderHeight h;
+  h.update(1000, true);
+  h.update(900, false);  // 離れている間の下降側へのずれ
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(-10, h.height_mm());
+}
+
+// --- PCNT の A/B 4 逓倍 ---
+
+namespace {
+// (A,B) の列を 1 段ずつ進めた合計
+int run_quad_steps(const PcntQuadConfig& cfg, const int* ab, int n) {
+  int total = 0;
+  for (int i = 1; i < n; ++i) {
+    total += pcnt_quad_step(cfg, ab[2 * (i - 1)], ab[2 * (i - 1) + 1], ab[2 * i], ab[2 * i + 1]);
   }
+  return total;
+}
+}  // namespace
+
+void test_quad_forward_cycle_is_minus4() {
+  // (A,B) = 00→10→11→01→00 の 1 周（A が B より進む向き）で −4
+  const int ab[] = {0, 0, 1, 0, 1, 1, 0, 1, 0, 0};
+  TEST_ASSERT_EQUAL_INT(-4, run_quad_steps(kPcntQuadEncoder, ab, 5));
 }
 
-void test_echo_width_counts_the_round_trip() {
-  // 118 µs の ECHO は約 2 cm。片道の距離で割ると 2 倍の 40 mm になってしまうので、
-  // 40 mm も範囲内なので assert が効く。
-  int mm = -1;
-  TEST_ASSERT_TRUE(sonar_echo_to_mm(echo_us_for_mm(SONAR_MIN_RANGE_MM), &mm));
-  TEST_ASSERT_EQUAL_INT(SONAR_MIN_RANGE_MM, mm);
-  TEST_ASSERT_NOT_EQUAL(2 * SONAR_MIN_RANGE_MM, mm);
+void test_quad_backward_cycle_is_plus4() {
+  // 逆向きの 1 周で +4
+  const int ab[] = {0, 0, 0, 1, 1, 1, 1, 0, 0, 0};
+  TEST_ASSERT_EQUAL_INT(4, run_quad_steps(kPcntQuadEncoder, ab, 5));
 }
 
-void test_zero_echo_is_out_of_range() {
-  int mm = -1;
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(0, &mm));
+void test_quad_two_cycles_are_plusminus8() {
+  // 2 周で ±8（1 周の 2 倍）
+  const int fwd[] = {0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0};
+  TEST_ASSERT_EQUAL_INT(-8, run_quad_steps(kPcntQuadEncoder, fwd, 9));
 }
 
-// --- 超音波: 測定範囲の外は無効 ---
-
-void test_below_min_range_is_rejected() {
-  int mm = -1;
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(echo_us_for_mm(SONAR_MIN_RANGE_MM) - 1, &mm));
+void test_quad_no_edge_is_zero() {
+  // 変化が無ければ 0（両方同時に変わることは無い）
+  TEST_ASSERT_EQUAL_INT(0, pcnt_quad_step(kPcntQuadEncoder, 0, 0, 0, 0));
+  TEST_ASSERT_EQUAL_INT(0, pcnt_quad_step(kPcntQuadEncoder, 1, 1, 1, 1));
 }
 
-void test_exactly_min_range_is_accepted() {
-  int mm = -1;
-  TEST_ASSERT_TRUE(sonar_echo_to_mm(echo_us_for_mm(SONAR_MIN_RANGE_MM), &mm));
-  TEST_ASSERT_EQUAL_INT(SONAR_MIN_RANGE_MM, mm);
+// --- 溢れの累積 + 今のカウンタ ---
+
+namespace {
+// ENC_PCNT_LIMIT（src/config.h）と同じ値
+constexpr int32_t kLimit = 30000;
+}  // namespace
+
+void test_encoder_total_adds_overflow_and_raw() {
+  TEST_ASSERT_EQUAL_INT32(10000, encoder_total(10000, 0));
+  TEST_ASSERT_EQUAL_INT32(9999, encoder_total(10000, -1));
+  TEST_ASSERT_EQUAL_INT32(-10000, encoder_total(-10000, 0));
+  TEST_ASSERT_EQUAL_INT32(42, encoder_total(0, 42));
 }
 
-void test_over_max_range_is_rejected() {
-  // 1 µs で 0.017 mm しか変わらないので、確実に範囲外になる幅（+100 µs ≒ +1.7 m）で見る
-  int mm = -1;
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(echo_us_for_mm(SONAR_MAX_RANGE_MM) + 100, &mm));
+void test_guarded_holds_on_upward_wrap_race() {
+  // 上限を超えてハードウェアが 0 に戻し、まだ割り込みが足していない瞬間:
+  // overflow=0・raw=5・前回 29998 → 前回のまま
+  TEST_ASSERT_EQUAL_INT32(29998, encoder_total_guarded(29998, 0, 5, kLimit));
+  // 次の回に割り込みが足した値で読み直す
+  TEST_ASSERT_EQUAL_INT32(30010, encoder_total_guarded(29998, 30000, 10, kLimit));
 }
 
-void test_exactly_max_range_is_accepted() {
-  int mm = -1;
-  TEST_ASSERT_TRUE(sonar_echo_to_mm(echo_us_for_mm(SONAR_MAX_RANGE_MM), &mm));
-  TEST_ASSERT_EQUAL_INT(SONAR_MAX_RANGE_MM, mm);
+void test_guarded_holds_on_downward_wrap_race() {
+  // 下限側も同じ
+  TEST_ASSERT_EQUAL_INT32(-29998, encoder_total_guarded(-29998, 0, -5, kLimit));
+  TEST_ASSERT_EQUAL_INT32(-30010, encoder_total_guarded(-29998, -30000, -10, kLimit));
 }
 
-void test_out_of_range_does_not_write_the_out_value() {
-  // 無効なときは out_mm を書き換えない（呼び出し側が前の有効値を保持できる）
-  int mm = 12345;
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(echo_us_for_mm(SONAR_MAX_RANGE_MM) + 1000, &mm));
-  TEST_ASSERT_EQUAL_INT(12345, mm);
+void test_guarded_passes_normal_steps() {
+  TEST_ASSERT_EQUAL_INT32(105, encoder_total_guarded(100, 0, 105, kLimit));
+  TEST_ASSERT_EQUAL_INT32(-105, encoder_total_guarded(-100, 0, -105, kLimit));
+  TEST_ASSERT_EQUAL_INT32(30100, encoder_total_guarded(30050, 30000, 100, kLimit));
 }
 
-void test_garbage_echo_is_rejected() {
-  int mm = -1;
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(0xFFFFFFFFu, &mm));
+void test_guarded_allows_exactly_half_limit() {
+  // ちょうど limit / 2 の飛びは通す（超えたら止める）
+  TEST_ASSERT_EQUAL_INT32(15000, encoder_total_guarded(0, 0, 15000, kLimit));
+  TEST_ASSERT_EQUAL_INT32(0, encoder_total_guarded(0, 0, 15001, kLimit));
 }
 
-void test_echo_timeout_window_covers_the_max_range() {
-  // 割り込みの時間切れは 4 m の往復より長くなければならない（真的会 4 m まで
-  // 測れなくなる）。かつ HC-SR04 の 1 回の測定周期 60 ms より短いこと。
-  const uint32_t max_range_echo_us = echo_us_for_mm(SONAR_MAX_RANGE_MM);
-  TEST_ASSERT_TRUE(SONAR_ECHO_TIMEOUT_US > max_range_echo_us);
-  TEST_ASSERT_TRUE(SONAR_ECHO_TIMEOUT_US < 60000);
-}
+// --- 向きの符号 ---
 
-void test_no_echo_reports_zero_width() {
-  // 割り込みが立ち上がりを得られなかったとき hal_esp32 は幅 0 µs として扱う。
-  // 0 は測定範囲の外なので「高さが読めない」になる（ height_ok = false）。
-  int mm = -1;
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(0, &mm));
-}
-
-void test_null_out_is_rejected() {
-  TEST_ASSERT_FALSE(sonar_echo_to_mm(echo_us_for_mm(500), nullptr));
+void test_up_sign_minus_one_reverses() {
+  EncoderHeight h;
+  h.update(1000, true, -1);
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+  // +1 のとき下げ方向の進みが、-1 では上げ方向になる
+  h.update(900, false, -1);
+  TEST_ASSERT_EQUAL_INT(10, h.height_mm());
+  TEST_ASSERT_TRUE(h.ok());
 }
 
 // --- 下端スイッチ ---
@@ -178,113 +280,28 @@ void test_pwm_works_at_12_bit_too() {
   TEST_ASSERT_EQUAL_UINT32(full, motor_duty_to_pwm(100, 12));
 }
 
-// --- 高さの中央値フィルタ（直近 5 回）---
-
-namespace {
-// 5 回分を入れる。最後の戻り値と中央値を返す
-bool feed(HeightFilter& f, const int* mms, int n, int* out) {
-  bool ok = false;
-  for (int i = 0; i < n; ++i) {
-    ok = f.on_echo(echo_us_for_mm(mms[i]), out);
-  }
-  return ok;
-}
-}  // namespace
-
-void test_filter_is_not_ready_until_five_samples() {
-  HeightFilter f;
-  int mm = -1;
-  for (int i = 0; i < 4; ++i) {
-    TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), &mm));
-  }
-  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2200), &mm));
-  TEST_ASSERT_EQUAL_INT(2200, mm);
-}
-
-void test_filter_rejects_one_or_two_low_outliers() {
-  const int one[] = {2200, 350, 2203, 2201, 2204};
-  HeightFilter f1;
-  int mm = -1;
-  TEST_ASSERT_TRUE(feed(f1, one, 5, &mm));
-  TEST_ASSERT_INT_WITHIN(3, 2201, mm);
-
-  const int two[] = {350, 2203, 340, 2201, 2204};
-  HeightFilter f2;
-  TEST_ASSERT_TRUE(feed(f2, two, 5, &mm));
-  TEST_ASSERT_INT_WITHIN(3, 2203, mm);
-}
-
-void test_filter_cannot_reject_three_in_a_row() {
-  // 仕様の受け入れリスク（Spec-safety.md §2）。除けないことを明示しておく
-  const int three[] = {2200, 350, 340, 360, 2204};
-  HeightFilter f;
-  int mm = -1;
-  TEST_ASSERT_TRUE(feed(f, three, 5, &mm));
-  TEST_ASSERT_INT_WITHIN(3, 360, mm);
-}
-
-void test_filter_window_slides() {
-  HeightFilter f;
-  int mm = -1;
-  const int first[] = {1000, 1000, 1000, 1000, 1000};
-  TEST_ASSERT_TRUE(feed(f, first, 5, &mm));
-  TEST_ASSERT_INT_WITHIN(2, 1000, mm);
-  // 3 個入れ替わると中央値が新しい値になる（古い値が落ちている）
-  const int next[] = {2000, 2000, 2000};
-  TEST_ASSERT_TRUE(feed(f, next, 3, &mm));
-  TEST_ASSERT_INT_WITHIN(3, 2000, mm);
-  // 4 個目で 1000 が 1 個だけ残る → まだ 2000 が多数派
-  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2000), &mm));
-  TEST_ASSERT_INT_WITHIN(3, 2000, mm);
-}
-
-void test_filter_restarts_after_out_of_range() {
-  HeightFilter f;
-  int mm = -1;
-  const int full[] = {2200, 2200, 2200, 2200, 2200};
-  TEST_ASSERT_TRUE(feed(f, full, 5, &mm));
-  // 範囲外（時間切れの幅 0 を含む）が 1 回来たら窓を空にする
-  TEST_ASSERT_FALSE(f.on_echo(0, &mm));
-  for (int i = 0; i < 4; ++i) {
-    TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), &mm));
-  }
-  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2200), &mm));
-}
-
-void test_filter_restarts_after_timeout() {
-  HeightFilter f;
-  int mm = -1;
-  const int full[] = {2200, 2200, 2200, 2200, 2200};
-  TEST_ASSERT_TRUE(feed(f, full, 5, &mm));
-  f.on_invalid();
-  for (int i = 0; i < 4; ++i) {
-    TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), &mm));
-  }
-  TEST_ASSERT_TRUE(f.on_echo(echo_us_for_mm(2200), &mm));
-}
-
-void test_filter_null_out_is_false() {
-  HeightFilter f;
-  TEST_ASSERT_FALSE(f.on_echo(echo_us_for_mm(2200), nullptr));
-}
-
-
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
-  RUN_TEST(test_echo_width_becomes_mm_at_200mm);
-  RUN_TEST(test_echo_width_becomes_mm_at_800mm);
-  RUN_TEST(test_echo_width_is_linear_across_the_range);
-  RUN_TEST(test_echo_width_counts_the_round_trip);
-  RUN_TEST(test_zero_echo_is_out_of_range);
-  RUN_TEST(test_below_min_range_is_rejected);
-  RUN_TEST(test_exactly_min_range_is_accepted);
-  RUN_TEST(test_over_max_range_is_rejected);
-  RUN_TEST(test_exactly_max_range_is_accepted);
-  RUN_TEST(test_out_of_range_does_not_write_the_out_value);
-  RUN_TEST(test_garbage_echo_is_rejected);
-  RUN_TEST(test_echo_timeout_window_covers_the_max_range);
-  RUN_TEST(test_no_echo_reports_zero_width);
-  RUN_TEST(test_null_out_is_rejected);
+  RUN_TEST(test_not_pressed_at_boot_is_unknown);
+  RUN_TEST(test_pressed_at_boot_takes_home);
+  RUN_TEST(test_second_landing_retakes_home);
+  RUN_TEST(test_height_grows_when_raising_after_release);
+  RUN_TEST(test_pressed_going_down_lowers_home);
+  RUN_TEST(test_pressed_going_up_does_not_move_home);
+  RUN_TEST(test_pressed_within_slack_stays_ok);
+  RUN_TEST(test_pressed_beyond_slack_is_fault);
+  RUN_TEST(test_fault_stays_after_release_until_repress);
+  RUN_TEST(test_below_home_is_negative);
+  RUN_TEST(test_quad_forward_cycle_is_minus4);
+  RUN_TEST(test_quad_backward_cycle_is_plus4);
+  RUN_TEST(test_quad_two_cycles_are_plusminus8);
+  RUN_TEST(test_quad_no_edge_is_zero);
+  RUN_TEST(test_encoder_total_adds_overflow_and_raw);
+  RUN_TEST(test_guarded_holds_on_upward_wrap_race);
+  RUN_TEST(test_guarded_holds_on_downward_wrap_race);
+  RUN_TEST(test_guarded_passes_normal_steps);
+  RUN_TEST(test_guarded_allows_exactly_half_limit);
+  RUN_TEST(test_up_sign_minus_one_reverses);
   RUN_TEST(test_bottom_high_means_pressed);
   RUN_TEST(test_bottom_low_means_not_pressed);
   RUN_TEST(test_bottom_pressed_level_is_high);
@@ -296,12 +313,5 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_duty_is_linear_in_pwm);
   RUN_TEST(test_pwm_stays_inside_the_channel);
   RUN_TEST(test_pwm_works_at_12_bit_too);
-  RUN_TEST(test_filter_is_not_ready_until_five_samples);
-  RUN_TEST(test_filter_rejects_one_or_two_low_outliers);
-  RUN_TEST(test_filter_cannot_reject_three_in_a_row);
-  RUN_TEST(test_filter_window_slides);
-  RUN_TEST(test_filter_restarts_after_out_of_range);
-  RUN_TEST(test_filter_restarts_after_timeout);
-  RUN_TEST(test_filter_null_out_is_false);
   return UNITY_END();
 }

@@ -2,65 +2,80 @@
 
 namespace {
 
-// HC-SR04 は「往復」を測る。音速 約 343 m/s は 0.0343 mm/µs なので、
-// 距離 = 0.0343 / 2 = 0.017 mm/µs。整数で割り切れるように 100 倍して扱う
-// （NewPing の 0.017 cm/µs と同じ値。20 mm なら約 118 µs・4 m なら約 23.5 ms）。
-constexpr int64_t kMmPerEchoUsNum = 17;
-constexpr int64_t kMmPerEchoUsDen = 100;
+int apply_ctrl(int base, int ctrl_mode) {
+  if (ctrl_mode == kPcntReverse) {
+    if (base == kPcntInc) {
+      return kPcntDec;
+    }
+    if (base == kPcntDec) {
+      return kPcntInc;
+    }
+    return base;
+  }
+  if (ctrl_mode == kPcntKeep) {
+    return base;
+  }
+  return 0;  // DISABLE などは数えない
+}
 
-int64_t echo_us_to_mm(uint32_t echo_us) {
-  return static_cast<int64_t>(echo_us) * kMmPerEchoUsNum / kMmPerEchoUsDen;
+int to_delta(int mode) {
+  if (mode == kPcntInc) {
+    return +1;
+  }
+  if (mode == kPcntDec) {
+    return -1;
+  }
+  return 0;
 }
 
 }  // namespace
 
-bool sonar_echo_to_mm(uint32_t echo_us, int* out_mm) {
-  if (out_mm == nullptr) {
-    return false;
+int pcnt_quad_step(const PcntQuadConfig& cfg, int prev_a, int prev_b, int now_a, int now_b) {
+  int total = 0;
+  // ch0: パルス=A・制御=B
+  if (now_a != prev_a) {
+    const int base = (now_a != 0) ? cfg.ch0_pos : cfg.ch0_neg;
+    total += to_delta(apply_ctrl(base, (now_b != 0) ? cfg.ch0_hctrl : cfg.ch0_lctrl));
   }
-  // 32 bit の echo_us を 64 bit で掛けてから割るので、途中でオーバーフローしない
-  const int64_t mm = echo_us_to_mm(echo_us);
-  if (mm < SONAR_MIN_RANGE_MM || mm > SONAR_MAX_RANGE_MM) {
-    return false;
+  // ch1: パルス=B・制御=A
+  if (now_b != prev_b) {
+    const int base = (now_b != 0) ? cfg.ch1_pos : cfg.ch1_neg;
+    total += to_delta(apply_ctrl(base, (now_a != 0) ? cfg.ch1_hctrl : cfg.ch1_lctrl));
   }
-  *out_mm = static_cast<int>(mm);
-  return true;
+  return total;
 }
 
-bool HeightFilter::on_echo(uint32_t echo_us, int* out_mm) {
-  if (out_mm == nullptr) {
-    return false;
-  }
-  int mm = 0;
-  if (!sonar_echo_to_mm(echo_us, &mm)) {
-    on_invalid();
-    return false;
-  }
-  buf_[next_] = mm;
-  next_ = (next_ + 1) % SONAR_MEDIAN_WINDOW;
-  if (count_ < SONAR_MEDIAN_WINDOW) {
-    ++count_;
-  }
-  if (count_ < SONAR_MEDIAN_WINDOW) {
-    return false;
-  }
-  int sorted[SONAR_MEDIAN_WINDOW];
-  for (int i = 0; i < SONAR_MEDIAN_WINDOW; ++i) {
-    int v = buf_[i];
-    int j = i;
-    while (j > 0 && sorted[j - 1] > v) {
-      sorted[j] = sorted[j - 1];
-      --j;
+void EncoderHeight::update(int32_t count, bool bottom_pressed, int up_sign) {
+  last_count_ = count;
+  last_sign_ = (up_sign >= 0) ? +1 : -1;
+  const int32_t signed_count = count * last_sign_;
+  const int32_t signed_home = home_count_ * last_sign_;
+
+  if (bottom_pressed && !prev_pressed_) {
+    // 押された瞬間（起動時に既に押されていれば起動時）。そのときの数を原点にする。
+    home_count_ = count;
+    has_home_ = true;
+    fault_ = false;
+  } else if (bottom_pressed && has_home_ && !fault_) {
+    if (signed_count < signed_home) {
+      // 押されている間の下降側への進みは原点を下げる（高さは 0 のまま）。
+      home_count_ = count;
+    } else {
+      // 上昇側へは原点を動かさない。HOME_SLACK_MM を超えたらスイッチの故障。
+      const int64_t up_um =
+          (static_cast<int64_t>(signed_count) - signed_home) * LIFT_UM_PER_COUNT;
+      if (up_um > static_cast<int64_t>(HOME_SLACK_MM) * 1000) {
+        fault_ = true;
+      }
     }
-    sorted[j] = v;
   }
-  *out_mm = sorted[SONAR_MEDIAN_WINDOW / 2];
-  return true;
+  // 離れている間は何もしない。一度故障したら、離れて押し直されるまで戻らない。
+  prev_pressed_ = bottom_pressed;
 }
 
-void HeightFilter::on_invalid() {
-  count_ = 0;
-  next_ = 0;
+int EncoderHeight::height_mm() const {
+  const int64_t diff = static_cast<int64_t>(last_count_) - home_count_;
+  return static_cast<int>(diff * last_sign_ * LIFT_UM_PER_COUNT / 1000);
 }
 
 bool bottom_pressed_from_level(int level) {
