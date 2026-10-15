@@ -229,10 +229,10 @@ class ControlLoop:
             # 押し始め（動かし始め・向きの入れ替え・別の画面の操作）
             self._press += 1
             self._press_owner = self._owner
-        duty = int(round(speed))
+        speed_mm_s = int(round(speed))
         status, mm, age_ms = self._ceiling_triple(now)
         await self._lift.send_hold(
-            direction, duty, self._press, status, mm, age_ms
+            direction, speed_mm_s, self._press, status, mm, age_ms
         )
         self._lift_sending = True
         self._press_dir = direction
@@ -298,6 +298,8 @@ class ControlLoop:
                 "link": "ok" if link_ok else "lost",
                 "dir": raw.get("dir", "stop"),
                 "duty": raw.get("duty", 0),
+                "speed": raw.get("speed"),
+                "speed_meas": raw.get("speed_meas"),
                 "reason": raw.get("reason", "CMD_STOP"),
                 "bottom": bool(raw.get("bottom", False)),
                 "height_mm": raw.get("height_mm"),

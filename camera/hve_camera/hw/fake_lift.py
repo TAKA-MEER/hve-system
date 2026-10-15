@@ -21,13 +21,10 @@ from hve_camera.lift_link import LiftPort
 #: 昇降部の定数（`lift_core` と同じ値。**偽物でしか使わない。**本物はファームウェア側にある）
 LIFT_CMD_TIMEOUT_MS = 600
 LIFT_MAX_RUN_MS = 10000
-LIFT_DUTY_ABS_MAX_PCT = 100
+LIFT_SPEED_ABS_MAX_MM_S = 100
 LIFT_STATE_PERIOD_MS = 100
 CEILING_MARGIN_MM = 500
 CEILING_STALE_MS = 600
-
-#: 偽の高さの進む速さ [mm/s per 1 % デューティ]。**画面を動かすための当てずっぽう**
-_MM_PER_PCT_S = 2.5
 
 Clock = Callable[[], float]
 
@@ -56,7 +53,7 @@ class FakeLift(LiftPort):
         #: 持ち主の `press` と、前に見た最大の `press`
         self._owner_press: Optional[int] = None
         self._seen_press = 0
-        self._cmd: Dict[str, Any] = {"dir": "stop", "duty": 0}
+        self._cmd: Dict[str, Any] = {"dir": "stop", "speed": 0}
         self._cmd_at_ms = clock()
         self._ceiling: Dict[str, Any] = {"status": "MISSING", "mm": None, "age_ms": 0}
         self._run_dir: Optional[str] = None
@@ -113,19 +110,23 @@ class FakeLift(LiftPort):
     async def send_hold(
         self,
         direction: str,
-        duty: int,
+        speed: int,
         press: int,
         ceiling_status: str,
         ceiling_mm: Optional[int],
         ceiling_age_ms: int,
     ) -> None:
-        """`hold` を受ける。古い `press`（取って代わられた側の押し続け）は無視する（§3.3）。"""
+        """`hold` を受ける。古い `press`（取って代わられた側の押し続け）は無視する（§3.3）。
+
+        目標の速さは `speed` [mm/s] で受ける。**`speed` が無い命令（`duty` だけの旧式の `hold`）は
+        この口では表せず、送ろうとすれば `TypeError` になる**（protocol §2.1。昇降部も捨てる）。
+        """
         now = self._clock()
         press = int(press)
         self.hold_history.append(
             {
                 "dir": direction,
-                "duty": int(duty),
+                "speed": int(speed),
                 "press": press,
                 "ceiling": {
                     "status": ceiling_status,
@@ -147,7 +148,7 @@ class FakeLift(LiftPort):
         else:
             self._run_dir = direction if direction in ("up", "down") else None
             self._run_since_ms = now
-        self._cmd = {"dir": direction, "duty": int(duty)}
+        self._cmd = {"dir": direction, "speed": int(speed)}
         self._cmd_at_ms = now
         self._ceiling = {
             "status": ceiling_status,
@@ -160,7 +161,7 @@ class FakeLift(LiftPort):
         self.release_history.append({"press": int(press)})
         if self._owner_press is not None and int(press) == self._owner_press:
             self._owner_press = None
-            self._cmd = {"dir": "stop", "duty": 0}
+            self._cmd = {"dir": "stop", "speed": 0}
             self._cmd_at_ms = self._clock()
 
     def link_ok(self, now_ms: float, timeout_ms: float) -> bool:
@@ -182,22 +183,22 @@ class FakeLift(LiftPort):
             self._step(self._clock())
 
     def _decide(self, now: float) -> tuple:
-        """持ち主の命令・天井・下端・経過時間から `(dir, duty, 理由)` を返す（§3.2・§4.1）。"""
+        """持ち主の命令・天井・下端・経過時間から `(dir, speed, 理由)` を返す（§3.2・§4.1）。"""
         direction = self._cmd.get("dir")
         try:
-            duty = int(self._cmd.get("duty"))
+            speed = int(self._cmd.get("speed"))
         except (TypeError, ValueError):
             return "stop", 0, "CMD_STOP"
         if direction not in ("up", "down", "stop"):
             return "stop", 0, "CMD_STOP"
-        duty = min(max(duty, 0), LIFT_DUTY_ABS_MAX_PCT)
+        speed = min(max(speed, 0), LIFT_SPEED_ABS_MAX_MM_S)
 
         if self._owner_press is None:
             return "stop", 0, "CMD_STOP"
         if now - self._cmd_at_ms > LIFT_CMD_TIMEOUT_MS:
             self._owner_press = None
             return "stop", 0, "CMD_TIMEOUT"
-        if direction == "stop" or duty == 0:
+        if direction == "stop" or speed == 0:
             return "stop", 0, "CMD_STOP"
         if direction == "up":
             ok, reason = fake_ceiling_verdict(
@@ -214,18 +215,18 @@ class FakeLift(LiftPort):
             run_ms = now - self._run_since_ms
         if run_ms > LIFT_MAX_RUN_MS:
             return "stop", 0, "MAX_RUN"
-        return direction, duty, "NONE"
+        return direction, speed, "NONE"
 
     def _step(self, now: float) -> None:
         """1 周期ぶん進める。判定 → 動かす → `state` を作る。"""
         dt_s = max(0.0, (now - self._last_step_ms) / 1000.0)
         self._last_step_ms = now
 
-        direction, duty, reason = self._decide(now)
+        direction, speed, reason = self._decide(now)
         if direction == "up":
-            self._height_mm += duty * _MM_PER_PCT_S * dt_s
+            self._height_mm += speed * dt_s
         elif direction == "down":
-            self._height_mm -= duty * _MM_PER_PCT_S * dt_s
+            self._height_mm -= speed * dt_s
         self._height_at_ms = now
 
         ok, ceiling_reason = fake_ceiling_verdict(
@@ -238,7 +239,10 @@ class FakeLift(LiftPort):
             "t": "state",
             "seq": self._seq,
             "dir": direction,
-            "duty": duty,
+            # 偽物はフィードバック制御を真似ないので、モータへの出力は目標と同じ数値にする。
+            "duty": speed,
+            "speed": speed,
+            "speed_meas": speed,
             "reason": reason,
             "bottom": self._bottom,
             "height_mm": int(self._height_mm),
