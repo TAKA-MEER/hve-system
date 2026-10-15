@@ -399,7 +399,7 @@ void apply_settings_put(AsyncWebServerRequest* request, const char* body_text) {
   }
   LiftSettings parsed;
   if (!lift_settings_from_json(body_text, &parsed)) {
-    send_settings_error(request, 400, "下限 ≦ 初期値 ≦ 上限・0〜100 の整数にしてください");
+    send_settings_error(request, 400, "下限 ≦ 初期値 ≦ 上限・0〜100（mm/s）の整数にしてください");
     return;
   }
   if (!store_settings(parsed)) {
@@ -598,8 +598,9 @@ void loop() {
   if (!g_have_logged_reason || state.reason != g_logged_reason) {
     g_logged_reason = state.reason;
     g_have_logged_reason = true;
-    Serial.printf("[lift] reason=%d dir=%d duty=%d\n", static_cast<int>(state.reason),
-                  static_cast<int>(state.dir), state.duty);
+    Serial.printf("[lift] reason=%d dir=%d duty=%d speed=%d speed_meas=%d\n",
+                  static_cast<int>(state.reason), static_cast<int>(state.dir), state.duty,
+                  state.speed, state.speed_meas);
   }
 
   // 5) 状態を両方の口へ送る
