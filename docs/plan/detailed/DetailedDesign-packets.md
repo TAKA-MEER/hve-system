@@ -42,6 +42,14 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-UI-02` | 3 | カメラモジュールの画面を v2 にする | CAM-04 | 不要（偽物のモード） |
 | `WP-CAM-05` | 3 | UnitV2 への配備・自動起動・実機の結合 | MEAS-06・CAM-04・VIDEO-02・UI-02・IO-02・LIFT-04 | 要（全部） |
 | `WP-MEAS-01`〜`05` | 4 | 旧版と同じ（ストローク・遅延・無線の圧迫・古さと天井の余裕・電池） | 各実物 | 要 |
+| `WP-LIFT-05` | 5 | **高さをエンコーダにする**（`EncoderHeight`・PCNT・HC-SR04 を外す・`P-14`）。spec 2026-10-15 | — | 要（昇降部・エンコーダ） |
+| `WP-LIFT-06` | 5 | **速さのフィードバック**（`SpeedLoop`・`ENCODER_STALL`・`hold` の `speed`・設定を mm/s・NVS の名前空間） | LIFT-05 | 要（同上） |
+| `WP-LIFTUI-02` | 5 | 昇降部の画面・偽の昇降部・`lift_probe` を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要 |
+| `WP-CAM-06` | 5 | カメラモジュール（アプリ・画面）を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
+
+**段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
+`WP-MEAS-01`（ストローク）で `ENC_PPR` の確認・`LIFT_UM_PER_COUNT`・速さの制御の係数・`LIFT_TOP_MM` を決める。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -145,3 +153,48 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 ### `WP-MEAS-*` 測定
 
 旧版の [`WP-MEAS-*`](../archive/v1/detailed/DetailedDesign-packets.md) と同じ。v2 で変わる点: `WP-MEAS-01` は**上端の検知が無い（`W-1`）ので、上昇は人が見ながら短く行う**。`WP-MEAS-04` の天井の余裕・古さは昇降部の定数（`CEILING_MARGIN_MM`・`CEILING_STALE_MS`）を置き換える。**`WP-MEAS-03` は th-system を動かしながら 480p の映像を流し、`video_jpeg_quality`・`video_fps` の上限を決める**（spec `H-V10`・`H-A8`。高画質の映像 `H-V11` は測らない）。
+
+### `WP-LIFT-05` 高さをエンコーダにする
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.1、[-hardware.md](DetailedDesign-hardware.md) §1.1、[-names.md](DetailedDesign-names.md) §3・§5.1、spec [Spec-safety.md](../spec/Spec-safety.md) §1.2
+- 作るもの: `lib/hal_core` の `EncoderHeight`（PCNT の 16 bit の差の足し込み・原点・`P-14`）とホスト試験。`hal_esp32` の PCNT（A/B の 4 逓倍・ノイズ除去）。**HC-SR04 のコード（`sonar_*`・`HeightFilter`・`SONAR_*`）と試験を消す**。`hal.h` のコメント。`config.h` のピン
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev` が成功。`grep -rn SONAR firmware/lift` が空。**次の変異がそれぞれ赤になる**（`LiftController` を通した試験で縛るものに ※）
+  1. ※ 起動直後（下端に一度も着いていない）に `height_ok` を真にする（上昇できてしまう。`W-1` の間でも `state.height_ok` で縛る）
+  2. 下端スイッチが押されても原点を取り直さない
+  3. スイッチが押されたまま数が `HOME_SLACK_MM` を超えて進んでも `height_ok` を偽にしない（`P-14`）
+  4. PCNT の 16 bit の差を符号なしで足す（−1 が +65535 になる）
+  5. `ENC_UP_SIGN` を掛け忘れる
+- **実機で管理担当が確かめる**: 手で巻き取り軸を回して数が増減する向き・起動直後は `height_ok: false`・下端に着けると 0・上げると増える・A/B の線を 1 本抜くと数が進まない
+
+### `WP-LIFT-06` 速さのフィードバック
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.2、[-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §3・§5.1、spec [Spec-ui.md](../spec/Spec-ui.md) §1・[Spec-safety.md](../spec/Spec-safety.md) #4d
+- 作るもの: `lib/lift_core` の `SpeedLoop`（PI・前向き・積分の扱い）・`lift_decide` の #8a と #9・`LiftController` で `SpeedLoop` の出力をモータへ・`cmd_codec`（`hold` の `speed`・`state` の `speed`・`speed_meas`・`ENCODER_STALL`）・`lift_settings` の範囲（mm/s）・`LIFT_NVS_NAMESPACE`
+- 受け入れ: native の試験・esp32dev のビルドが成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL で、モータに出した値を見て縛る）
+  1. ※ 測った速さが目標より遅くても出力を上げない（前向きだけで動く）
+  2. ※ 数が進まないのに出力を出し続ける（#8a を消す）
+  3. ※ 逆向きに数が進んでも #8a で止めない
+  4. ※ 止まった・向きが替わったときに積分を 0 に戻さない
+  5. ※ 出力の丸め（`LIFT_DUTY_ABS_MAX_PCT`）を外す
+  6. `duty` だけの `hold` を受け付ける
+  7. 設定の検証が `LIFT_SPEED_ABS_MAX_MM_S` を超える値を通す
+- **実機で管理担当が確かめる**: 同じ速さで上昇・下降の所要時間がほぼ同じ／巻き取り軸からエンコーダを外す（カップリングを抜く）と `ENCODER_STALL` で止まる／`state.speed_meas` が目標に収まる
+
+### `WP-LIFTUI-02` 昇降部の画面・道具を速さ（mm/s）に
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §3、spec [Spec-ui.md](../spec/Spec-ui.md) §1・§2
+- 作るもの: `firmware/lift/web/`（`hold` の `speed`・スライダーと設定の単位 mm/s・測った速さの表示・`ENCODER_STALL` と「下端まで下げて高さの原点を取ってください」（`HEIGHT_UNKNOWN`）の文言）・`tools/fake_lift_server.py`・`tools/lift_probe.py`
+- 受け入れ: node の試験・`tools/tests`・スクロールの検査が通る。**変異**: `hold` に `duty` を送る → 赤
+
+### `WP-CAM-06` カメラモジュールを速さ（mm/s）に
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§4、[-names.md](DetailedDesign-names.md) §3
+- 作るもの: `camera/hve_camera`（`lift_link` の `hold` の `speed`・設定の中継の範囲・`state.lift` の `speed`・`speed_meas`）・`camera/web`（単位 mm/s・`ENCODER_STALL`・`HEIGHT_UNKNOWN` の文言）・偽物のモード
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験が通る。**変異**: 昇降部へ `duty` を送る／`state.lift` から `speed_meas` を落とす → 赤
+
+### `WP-LIFT-07` 上端の検知を戻す（`W-1` を閉じる）
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1、[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)
+- 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）
+- 受け入れ: native の試験が成功。`grep -rn 'WAIVER(demo): W-1'` が空。**変異**: ※ 原点を取る前に上昇できる／※ `LIFT_TOP_MM` を設定して高さがそれ以上でも上昇できる → 赤
+- **実機で管理担当が確かめる**: 起動直後は上昇しない（`HEIGHT_UNKNOWN`）→ 下げて下端に着けると上昇できる／`LIFT_TOP_MM` を仮に低く置いて、そこで止まる

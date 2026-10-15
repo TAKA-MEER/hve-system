@@ -115,10 +115,11 @@
 | **`OWNER_GONE`** | 昇降部 | 持ち主の接続が閉じた |
 | **`CEILING_NEAR`** | 昇降部 | 天井が近い（`MEASURED` で閾値以下・`TOO_NEAR`）。**v1 ではカメラ部の理由だった** |
 | **`CEILING_STALE`** | 昇降部 | 天井の値が無い・読めない・古い。**v1 ではカメラ部の理由だった** |
-| `HEIGHT_UNKNOWN` | 昇降部 | 高さが読めない・古い。**`W-1` の間は出ない** |
+| `HEIGHT_UNKNOWN` | 昇降部 | 高さが読めない（**原点を取る前**・下端スイッチの故障・`loop` が回らず古い）。**`W-1` の間は出ない** |
 | `TOP` | 昇降部 | 上端に達した。**`W-1` の間は出ない** |
 | `BOTTOM` | 昇降部 | 下端スイッチが押されている |
 | `MAX_RUN` | 昇降部 | 連続駆動の上限 |
+| **`ENCODER_STALL`** | 昇降部 | モータへ出力しているのにエンコーダが回らない・逆に回る（spec #4d） |
 | `OUT_OF_RANGE` | 昇降部（天井の理由のみ。**停止理由ではない**） | 天井の距離計に反射が返らない。上昇は許す |
 | `HOLD_TIMEOUT` | カメラモジュール | 画面からの操作が途絶えた |
 | `LINK_LOST` | カメラモジュール | 昇降部と繋がっていない |
@@ -149,14 +150,25 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `LIFT_DUTY_ABS_MAX_PCT` | `lift_decide.h` | 100 | MD10C |
 | **`CEILING_MARGIN_MM`** | `ceiling_check.h` | 500 | **仮**（`H-V8`。v1 の `ceiling_margin_mm` を昇降部へ移した。spec `H-M4`） |
 | **`CEILING_STALE_MS`** | `ceiling_check.h` | 600 | **仮**（`H-V8`。v1 の `ceiling_stale_ms` を昇降部へ移した） |
-| 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}` | **仮**（旧版の例の値） |
+| 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}`（**mm/s**。spec 2026-10-15 で % から替えた） | **仮**（数だけ旧版の例の値。`H-V3`） |
+| **`LIFT_SPEED_ABS_MAX_MM_S`** | `lift_decide.h` | 100 | **仮**（設定の検証の上限・命令の丸め。`H-V3`） |
+| **`LIFT_SPEED_CTRL_MS`** / **`LIFT_SPEED_WINDOW_MS`** | `speed_loop.h` | 20 / 100 | **仮** |
+| **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.5 / 2.0（%/(mm/s)・%/mm） | **仮**（`WP-MEAS-01` で合わせる） |
+| **`LIFT_FF_UP_PCT_PER_MM_S`** / **`LIFT_FF_DOWN_PCT_PER_MM_S`** | `speed_loop.h` | 0.5 / 0.3 | **仮**（同上） |
+| **`LIFT_STALL_MS`** / **`LIFT_STALL_MIN_COUNTS`** | `lift_decide.h` | 500 / 8 | **仮**（spec #4d。動き出しの遅れより長く） |
 | `LIFT_STATE_PERIOD_MS` | `config.h` | 100 | **仮** |
 | **`LIFT_WS_UI_PATH`** / **`LIFT_WS_MODULE_PATH`** | `config.h` | `/ws/ui` / `/ws/module` | [-protocol.md](DetailedDesign-protocol.md) §1（v1 の `LIFT_WS_PATH` は廃止） |
-| **`LIFT_NVS_NAMESPACE`** | `config.h` | `hve_lift` | [-protocol.md](DetailedDesign-protocol.md) §3 |
+| **`LIFT_NVS_NAMESPACE`** | `config.h` | `hve_lift_mm`（`WP-LIFT-06` で `hve_lift` から替える。% で保存した値を mm/s と読まないため） | [-protocol.md](DetailedDesign-protocol.md) §3 |
 | **`LIFT_UI_CLIENTS_MAX`** | `config.h` | 4 | **仮**（ESP32 のメモリ。超えた接続は閉じる） |
 | `LIFT_STATE_TEXT_MAX` | `config.h` | 640 | **仮**（v2 の `state` は 500 バイト前後） |
 | `LIFT_MDNS_NAME` / `LIFT_HTTP_PORT` | `config.h` | `hve-lift` / 80 | 旧版 |
-| ピン・PWM・HC-SR04 の定数 | `config.h`・`hal_core.h` | 旧版のまま | 旧版 §5 |
+| ピン・PWM の定数 | `config.h` | 旧版のまま | 旧版 §5 |
+| **`ENC_A_PIN`** / **`ENC_B_PIN`** | `config.h` | 25 / 26 | **仮**（[-hardware.md](DetailedDesign-hardware.md) §1.1） |
+| **`ENC_PPR`** | `config.h` | **要確認**（手元の型番の末尾） | E6A2-CW3C |
+| **`ENC_GLITCH_FILTER_NS`** | `config.h` | 1000 | **仮**（PCNT のノイズ除去） |
+| **`ENC_UP_SIGN`** | `hal_core.h` | +1 | **仮**（上昇で数が増える向き。実機で確かめる） |
+| **`LIFT_UM_PER_COUNT`** | `hal_core.h` | **仮**（巻き取りの周長 ÷ (4 × `ENC_PPR`)。µm にして整数で持つ） | spec `H-V12`。`WP-MEAS-01` で全行程を測って直す |
+| **`HOME_SLACK_MM`** | `hal_core.h` | 20 | **仮**（`P-14`） |
 
 ### 5.2 昇降部の画面（`firmware/lift/web/app.js`）
 

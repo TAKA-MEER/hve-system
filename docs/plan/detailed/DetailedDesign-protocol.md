@@ -30,7 +30,7 @@
 
 ```json
 {"t":"hello","ceiling_sensor":true,"name":"hve-cam","fw":"0.2.0"}
-{"t":"hold","press":17,"dir":"up","duty":40,"ceiling":{"status":"MEASURED","mm":1450,"age_ms":80}}
+{"t":"hold","press":17,"dir":"up","speed":40,"ceiling":{"status":"MEASURED","mm":1450,"age_ms":80}}
 {"t":"release","press":17}
 ```
 
@@ -41,7 +41,7 @@
 | `name` / `fw` | 表示とログのため（判定に使わない）。欠けてよい |
 | `press` | 押し始めごとに送り手が 1 増やす整数（接続ごとに独立）。**その接続で前に見た値より大きければ「新しい押し始め」**（§3.3） |
 | `dir` | `up` / `down` / `stop` |
-| `duty` | 0〜100 の整数 [%]。MD10C の PWM デューティ比。**昇降部は設定の下限〜上限に丸めない**（丸めは送り手の画面の役。昇降部は 0〜`LIFT_DUTY_ABS_MAX_PCT` に丸める） |
+| `speed` | 0 以上の整数 [mm/s]。昇降の目標の速さ（spec [Spec-ui.md](../spec/Spec-ui.md) §1。**2026-10-15 に `duty`（%）から替えた**）。**昇降部は設定の下限〜上限に丸めない**（丸めは送り手の画面の役。昇降部は 0〜`LIFT_SPEED_ABS_MAX_MM_S` に丸める）。`duty` だけの `hold` は読めない `hold` として捨てる |
 | `ceiling` | **距離計を持つ接続の `hold` だけ**意味を持つ。`status` は `MEASURED` / `TOO_NEAR` / `NO_ECHO` / `READ_ERROR`。`mm` は `MEASURED` のときだけ。`age_ms` は送るその瞬間の読み値の古さ。**欠けている・読めない・知らない `status`・型の違う中身は、`hold` を捨てずに `MISSING`（→ `CEILING_STALE`）として受け取る**（捨てると前の `hold` の値で最長 `LIFT_CMD_TIMEOUT_MS` 動き続けるので、その場で止める） |
 
 **読めない JSON・知らない `t`・`ceiling` 以外のフィールドが欠けている・型の違う `hold` は捨てる**（持ち主の `hold` が途絶えれば `LIFT_CMD_TIMEOUT_MS` で止まる）。
@@ -51,7 +51,7 @@
 ### 2.2 昇降部 → 画面・上部モジュール
 
 ```json
-{"t":"state","seq":88,"dir":"up","duty":40,"reason":"NONE",
+{"t":"state","seq":88,"dir":"up","duty":52,"speed":40,"speed_meas":39,"reason":"NONE",
  "bottom":false,"height_mm":812,"height_ok":true,"top_detect":false,
  "ceiling":{"used":true,"status":"MEASURED","mm":1450,"age_ms":95,"ok":true,"reason":"NONE"},
  "owner":"module","ui_clients":1,"module":{"connected":true,"ceiling_sensor":true,"ip":"192.168.5.23","name":"hve-cam"},
@@ -60,9 +60,10 @@
 
 | フィールド | 値 |
 | --- | --- |
-| `dir` / `duty` | **実際にモータへ出している**方向・デューティ |
+| `dir` / `duty` | **実際にモータへ出している**方向・デューティ（`SpeedLoop` の出力） |
+| `speed` / `speed_meas` | 目標の速さ・エンコーダで測った速さ [mm/s]（`speed_meas` は上向きが正） |
 | `reason` | 停止理由（[-names.md](DetailedDesign-names.md) §3）。動いていれば `NONE` |
-| `bottom` / `height_mm` / `height_ok` | 旧版と同じ。**高さは表示用**（`W-1` の間は判定に使わない） |
+| `bottom` / `height_mm` / `height_ok` | 旧版と同じ形。**高さはエンコーダから**（[DetailedDesign.md](DetailedDesign.md) §4.1.1）。`height_ok` は**原点を取る前・下端スイッチの故障のとき `false`**。`W-1` の間は判定に使わない |
 | `top_detect` | 上端の検知が有効か。**`W-1` の間は常に `false`**。`false` のとき両方の画面が「上端の検知: 一時無効」を出す |
 | `ceiling.used` | いまの持ち主の命令に天井の値を使っているか（持ち主が距離計を持つ上部モジュールのとき `true`） |
 | `ceiling.status` / `mm` / `age_ms` | 持ち主の最後の `hold` に載っていた天井の値。古さは受け取ってからの経過を足したもの。持ち主がいなければ、上部モジュールの最後の `hold` の値（無ければ `null`） |
@@ -78,9 +79,9 @@
 | --- | --- | --- |
 | `GET` | `/` と画面のファイル | 昇降部の画面（埋め込み。[DetailedDesign.md](DetailedDesign.md) §4.2） |
 | `GET` | `/api/settings` | `{"settings":{"lift_up":{…},"lift_down":{…}},"using_defaults":false}` |
-| `PUT` | `/api/settings` | `{"lift_up":{"min":10,"max":60,"init":30},"lift_down":{…}}` をまるごと置き換える。検証に通らなければ `400` と `errors` を返し、**保存しない** |
+| `PUT` | `/api/settings` | `{"lift_up":{"min":10,"max":60,"init":30},"lift_down":{…}}`（**mm/s**）をまるごと置き換える。検証に通らなければ `400` と `errors` を返し、**保存しない** |
 
-検証（`lift_settings`）: 2 項目が揃う／`min ≦ init ≦ max`／0〜100 の整数。**昇降部が自分で検証する**（カメラモジュール側の検証は便宜のため）。
+検証（`lift_settings`）: 2 項目が揃う／`min ≦ init ≦ max`／0〜`LIFT_SPEED_ABS_MAX_MM_S` の整数（mm/s）。**昇降部が自分で検証する**（カメラモジュール側の検証は便宜のため）。
 保存は NVS（`Preferences` の名前空間 `LIFT_NVS_NAMESPACE`）。読めない・検証を通らないときは既定値で動き、`using_defaults` を `true` にする。
 
 ## 4. カメラモジュールの HTTP・WS（旧版からの変更だけ）
@@ -89,7 +90,7 @@
 | --- | --- |
 | `GET /api/settings` | 自分のピッチ・ヨーの設定と、**昇降部から取った**昇降の設定をまとめて返す（形は旧版と同じ 4 軸）。昇降部に繋がらないときは `503` |
 | `PUT /api/settings` | 4 軸をまとめて受ける。**先に 4 軸とも自分で検証 → 昇降部へ `PUT`（昇降の 2 軸）→ 成功したら自分の 2 軸を保存**。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
-| `state.lift` | 昇降部の `state` のうち `dir`・`duty`・`reason`・`bottom`・`height_mm`・`height_ok`・`top_detect`・`owner`・`ui_clients` を載せる。**昇降部の IP**（`lift_ip`）も載せる（画面に昇降部へのリンクを出す。[DetailedDesign.md](DetailedDesign.md) §4.6） |
+| `state.lift` | 昇降部の `state` のうち `dir`・`duty`・`speed`・`speed_meas`・`reason`・`bottom`・`height_mm`・`height_ok`・`top_detect`・`owner`・`ui_clients` を載せる。**昇降部の IP**（`lift_ip`）も載せる（画面に昇降部へのリンクを出す。[DetailedDesign.md](DetailedDesign.md) §4.6） |
 | `state.ceiling` | 自分で測った値（`status`・`mm`・`age_ms`）と、**昇降部が返した判定**（`ok`・`reason`）。カメラモジュールは許可を計算しない。**判定は、カメラモジュールが持ち主で昇降部が判定を返しているときだけ載せ、それ以外（止まっている・別の画面が持ち主・昇降部が `ceiling` を返さない）は `ok`・`reason` を `null` にする**（昇降部と切れているときは `ok: false`・`reason: LINK_LOST`）。2026-10-07 実機: 判定が無いのに `CEILING_STALE` を入れていたので、止まっている間ずっと画面が「天井 値なし」になり、上昇ボタンも薄くなっていた |
 | 画面の天井のバッジ | **判定（`reason`）があればそれで出す。無ければ自分で測った `status` で出す**（`MEASURED` → 距離・`TOO_NEAR` → 近すぎ・`NO_ECHO` → 範囲外・`READ_ERROR`／値が無い → 値なし）。**上昇ボタンを薄くするのは、昇降部と切れているときと、判定が `ok: false` のときだけ**（判定が無いだけでは薄くしない。上昇してよいかは昇降部が決める） |
 | `state.reason` | 旧版の選び方のうち、天井の理由は昇降部の `ceiling.reason` を使う。`IO_LOST`（Arduino から行が来ない）を `LINK_LOST` の次に足す |

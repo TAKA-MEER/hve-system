@@ -14,6 +14,8 @@
 | — | **`P-11`・`P-12`・`P-13` は 2026-10-07 にすべて採用**（配備で UnitV2 の自前の AP を止める ／ avahi に `wlan0` を見させる ／ 起動で `grace.ko` を読ませない。差分は `camera/deploy/`・`WP-CAM-05`）。spec [Spec-open.md](../spec/Spec-open.md) §3 に記録 | | | |
 | — | `P-5`・`P-6`・`P-8`・`P-9`・`P-10` は 2026-10-06 にすべて採用。`P-6` 以外は spec [Spec-open.md](../spec/Spec-open.md) §3 に記録。`P-6`（画面をファームに埋め込む）は実装の選択なので詳細設計に残す） | | | |
 
+| **`P-14`** | 下端スイッチが押されたまま昇降機が上がったら（数が `HOME_SLACK_MM` 以上進んだら）どうするか | **スイッチの故障とみなし、高さを「読めない」にする**（上昇しない。一度離れて押し直されるまで） | NC 配線の断線は「押されている」に見え、高さが 0 に張り付いて上端で止まらなくなる。断線したままだと上にも下にも動かせなくなるが、配線を直すまで止めておく方を取る | [DetailedDesign.md](DetailedDesign.md) §4.1.1 ／ `WP-LIFT-05` |
+
 （`P-7` は欠番。昇降部の見つけ方は spec `H-M2` で任されたので、提案にせず [DetailedDesign.md](DetailedDesign.md) §4.6 で決めた）
 
 ## 2. 詳細設計側の未確定事項
@@ -31,7 +33,9 @@
 
 | 完全設計書の ID | 詳細設計で要ること |
 | --- | --- |
-| `H-X9`（`W-1`） | 上端の手段が決まったら: `LIFT_TOP_DETECT_ENABLED` を戻す・判定 #4・#6 を手段に合わせて直す・`WAIVER(demo): W-1` を消して台帳を閉じる |
+| `H-X9`（`W-1`） | **2026-10-15 にエンコーダの高さに決まった。**`WP-LIFT-05`（エンコーダ）のあと `WP-LIFT-07` で `LIFT_TOP_DETECT_ENABLED` を戻し、`WAIVER(demo): W-1` を消して台帳を閉じる |
+| spec #4d・速さの制御 | `WP-LIFT-06`。`LIFT_SPEED_*`・`LIFT_FF_*`・`LIFT_STALL_*` を `WP-MEAS-01` で合わせる |
+| `H-V12` | `ENC_PPR`（手元の個体）・`LIFT_UM_PER_COUNT`（`WP-MEAS-01` で全行程を測る）・巻き太りのずれ |
 | `H-V8` | 実測（`WP-MEAS-01`・`-04`）で -names.md §5 の仮値を置き換える |
 | `H-A8` | `WP-MEAS-03` |
 | `H-V6` | `WP-MEAS-02`（UnitV2 で。spec では「簡単な動作確認で問題なし」） |

@@ -36,7 +36,7 @@
   ▼                                          昇降部 ESP32  hve_lift
 カメラモジュール UnitV2                         ├ MD10C → パワーウィンドウモータ
   hve_camera（Python 3.8）──WS :80/ws/module──→ ├ 下端: リミットスイッチ
-  hve_video （Python 3.8・別プロセス）             └ 高さ: HC-SR04（表示だけ。W-1）
+  hve_video （Python 3.8・別プロセス）             └ 高さ: エンコーダ E6A2-CW3C（PCNT。W-1 の間は表示だけ）
   │ UART /dev/ttyS1（Grove）
   ▼
 Arduino UNO  hve_cam_io
@@ -140,7 +140,9 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 | `LiftController` | 受け付け・持ち主・ウォッチドッグ・`lift_decide()` の結果を**モータに効かせる**。ハードウェアは `hal.h` の抽象を通す | ○（偽 HAL） |
 | `lift_settings` | 昇降の速度の設定の検証（下限 ≦ 初期値 ≦ 上限・0〜100）と JSON | ○ |
 | `cmd_codec` | JSON ⇔ 構造体。読めない `hold` は捨てる（持ち主の `hold` が途絶えれば止まる）。読めない `hello` は「距離計を持つ」 | ○ |
-| `hal_esp32` ／ `main.cpp` | 実物の MD10C・スイッチ・超音波・WiFi・WS・HTTP・NVS。**`main.cpp` は組み立てて呼ぶだけ** | × |
+| `EncoderHeight` | 純関数に近い小さな状態。エンコーダの数と下端スイッチ → 高さ・読めるか（§4.1.1） | ○ |
+| `SpeedLoop` | 速さのフィードバック（PI）。目標 mm/s・測った mm/s・経過時間 → デューティ（§4.1.2） | ○ |
+| `hal_esp32` ／ `main.cpp` | 実物の MD10C・スイッチ・エンコーダ（PCNT）・WiFi・WS・HTTP・NVS。**`main.cpp` は組み立てて呼ぶだけ** | × |
 | `web/` ＋ `scripts/embed_web.py` | 昇降部の画面。ビルド時に `src/web_assets.h`（生成物・除外済み）へ埋め込む | 画面の純関数は node で試験 |
 
 判定の規則（上から順に、最初に当たったもので止める）。**旧版から変わった行に ★**:
@@ -154,13 +156,46 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 | 6 | ★上昇 かつ 上端の閾値が設定済み かつ 高さ ≧ 閾値 | **`W-1` の間は判定しない** | `TOP` |
 | 7 | 下降 かつ 下端スイッチが押されている | 停止 | `BOTTOM` |
 | 8 | 同じ方向へ `LIFT_MAX_RUN_MS` 超 連続 | 停止 | `MAX_RUN`（spec #4b） |
-| 9 | それ以外 | 指令どおり。デューティは `0`〜`LIFT_DUTY_ABS_MAX_PCT` に丸める | `NONE` |
+| 8a | ★同じ方向の命令が続く間に、モータへ出力しているのに `LIFT_STALL_MS` の間エンコーダが進行方向へ `LIFT_STALL_MIN_COUNTS` 未満しか進まない（**逆向きに進んだ場合も**） | 停止。数え方は #8 と同じく、命令が `stop` になるか向きが替わるまで続ける（反対方向へは動かせる） | ★`ENCODER_STALL`（spec #4d） |
+| 9 | それ以外 | 指令どおりの向き。**速さ `speed`（mm/s）を `0`〜`LIFT_SPEED_ABS_MAX_MM_S` に丸め、`SpeedLoop` がデューティ（`0`〜`LIFT_DUTY_ABS_MAX_PCT`）に直す**（§4.1.2） | `NONE` |
 
 **`W-1`（上端の検知の一時無効）**: 判定 #4・#6 は**消さずに** `LIFT_TOP_DETECT_ENABLED`（`false`）で外す。
 その場所に `WAIVER(demo): W-1 上端の検知を一時無効` を置く（[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)）。
 `state` の `top_detect` は `false` を返し、両方の画面が「上端の検知: 一時無効」を常に出す。**高さは測って `state` に載せ続ける。**
+**エンコーダで高さを測る実装（`WP-LIFT-05`）と実機での確認が済んだら、`WP-LIFT-07` で `LIFT_TOP_DETECT_ENABLED` を `true` にして `W-1` を閉じる**（spec [Spec-safety.md](../spec/Spec-safety.md) §1.1）。
+判定 #4・#6 の中身は変えない（高さの出どころが替わるだけ）。
+
+#### 4.1.1 エンコーダの高さ（`EncoderHeight`。spec [Spec-safety.md](../spec/Spec-safety.md) §1.2）
+
+`hal_esp32` が `loop` ごとに PCNT の数（16 bit）の**前回からの差**を足し込み、下端スイッチの状態と一緒に `EncoderHeight` へ渡す。
+`LiftHal` の `height_mm()`・`height_ok()`・`height_at_ms()` の形は変えない（`height_at_ms` は渡した時刻。`HEIGHT_STALE_MS` は「`loop` が回っていない」の守りとして残す）。
+
+| 状況 | 高さ | `height_ok` |
+| --- | --- | --- |
+| 起動・再起動の直後（下端に一度も着いていない） | 数えるが原点が無い | **偽**（判定 #4 `HEIGHT_UNKNOWN`。上昇しない） |
+| 下端スイッチが押されている | **0 に取り直す**（押されている間は押され続けている位置を 0 とする） | 真 |
+| 原点を取ったあと、スイッチが離れている | `(数 − 原点の数) × ENC_UP_SIGN × LIFT_UM_PER_COUNT ÷ 1000` | 真 |
+| ★**スイッチが押されたまま、数が上昇側へ `HOME_SLACK_MM` を超えて進んだ** | — | **偽（スイッチの故障とみなす）。**一度離れて押し直されるまで戻らない（`P-14`） |
+
+★の行は**下端スイッチの線が切れたとき**の守り。NC 配線なので断線は「押されている」に見え、そのままだと上がっても高さが 0 に張り付き、上端で止まらない。
+その状態では上昇（`HEIGHT_UNKNOWN`）も下降（`BOTTOM`）もできず止まったままになるが、それを受け入れる（配線を直す）。
+**起動したときすでに断線していると、途中の高さを 0 と取ってしまう**。上がり始めて `HOME_SLACK_MM` 進んだところで★に当たって止まる。
 
 **連続駆動の上限（#8）は持ち主が替わっても数え直さない。**同じ方向が続く限り数え続ける（持ち主を交互に替えて上限を逃れられないように）。
+
+#### 4.1.2 速さのフィードバック（`SpeedLoop`。spec [Spec-ui.md](../spec/Spec-ui.md) §1・[Spec-safety.md](../spec/Spec-safety.md) #4d）
+
+| 項目 | 決まり |
+| --- | --- |
+| 測った速さ | エンコーダの数の直近 `LIFT_SPEED_WINDOW_MS` の差 × `LIFT_UM_PER_COUNT` から mm/s。**原点の有無に依らない**（原点を取る前の下降でも効く） |
+| 出力 | `duty = 前向き（目標 × LIFT_FF_UP/DOWN_PCT_PER_MM_S） ＋ Kp × 偏差 ＋ Ki × 偏差の積分`。`0`〜`LIFT_DUTY_ABS_MAX_PCT` に丸める。前向きの係数を上昇・下降で別に持つ（重力の分） |
+| 周期 | `LIFT_SPEED_CTRL_MS` ごと（`LiftController::tick` の中。`loop` が詰まったら経過時間で割る） |
+| 積分の扱い | 出力が丸めに当たっている間は積分を進めない。**止まった・向きが替わった・持ち主が替わったら 0 に戻す**（前の向きの積分を持ち越さない） |
+| 測った速さが逆向き | 偏差として扱い（出力を上げる方向に効く）、#8a が止める。`ENC_UP_SIGN` の取り違えをここで捕まえる |
+| 出しすぎの守り | 出力の上限 `LIFT_DUTY_ABS_MAX_PCT` と #8a（回らない・逆に回る）と #8（連続駆動の上限） |
+
+**呼び出し側を縛る**: `SpeedLoop` の単体試験だけでなく、`LiftController` を偽 HAL（数を進める・進めない）で回し、
+「出力が上がって速さが目標に近づく」「数が進まなければ `ENCODER_STALL` で 0 になる」をモータに出した値で確かめる（[-packets.md](DetailedDesign-packets.md) `WP-LIFT-06`）。
 
 ### 4.2 昇降部の画面（`firmware/lift/web/`）
 
