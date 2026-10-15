@@ -28,27 +28,28 @@ const lift_gauge_full_mm = 1800;  // 高さのゲージの満量
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
 const SETTING_AXES = [
-  {key: 'lift_up', name: '上昇', unit: '%', abs_low: 0, abs_high: 100, step: 1},
-  {key: 'lift_down', name: '下降', unit: '%', abs_low: 0, abs_high: 100, step: 1},
+  {key: 'lift_up', name: '上昇', unit: 'mm/s', abs_low: 0, abs_high: 100, step: 1},
+  {key: 'lift_down', name: '下降', unit: 'mm/s', abs_low: 0, abs_high: 100, step: 1},
 ];
 
 /* 停止理由の文言（names §3。**文言は仮**） */
 const REASON_TEXT = {
   CEILING_NEAR: ['ng', '天井が近いため上昇できません'],
   CEILING_STALE: ['ng', '天井の値が届かないため上昇できません'],
-  HEIGHT_UNKNOWN: ['ng', '高さが読めないため上昇できません'],
+  HEIGHT_UNKNOWN: ['ng', '高さが分からないため上昇できません。一度下端まで下げてください'],
   TOP: ['warn', '上端に達しました'],
   BOTTOM: ['warn', '下端です'],
   MAX_RUN: ['warn', '同じ方向へ動き続けた時間が上限を超えたため停止しました。反対方向へは動かせます'],
+  ENCODER_STALL: ['warn', 'エンコーダが回らないため停止しました。反対方向へは動かせます'],
   CMD_TIMEOUT: ['warn', '操作が途絶えたため停止しました'],
   OWNER_GONE: ['warn', '操作していた画面が閉じられたため停止しました'],
 };
 
 /* --- DOM に触れない部分（Node の試験で見る） --- */
 
-/** 送る `hold` の JSON（protocol §2.1）。画面（`/ws/ui`）の `hold` に天井は載せない */
-function holdMessage(press, dir, duty) {
-  return {t: 'hold', press: Number(press), dir: dir, duty: Number(duty)};
+/** 送る `hold` の JSON（protocol §2.1）。速さは目標の mm/s。画面（`/ws/ui`）の `hold` に天井は載せない */
+function holdMessage(press, dir, speed) {
+  return {t: 'hold', press: Number(press), dir: dir, speed: Number(speed)};
 }
 
 /** 送る `release` の JSON */
@@ -79,9 +80,9 @@ function sliderSpec(setting, step) {
   };
 }
 
-/** 速度の数値の書式（昇降は PWM デューティ比 [%] の整数） */
+/** 速度の数値の書式（昇降は実際の速さ [mm/s] の整数） */
 function formatSpeed(value) {
-  return `${Math.round(Number(value))} %`;
+  return `${Math.round(Number(value))} mm/s`;
 }
 
 /** 停止理由 → `{色, 文言}`。帯を出さないものは `null` */
@@ -110,6 +111,15 @@ function heightText(height_mm, height_ok) {
   if (height_ok === false) return '高さ 読めない';
   if (height_mm === null || height_mm === undefined) return '高さ —';
   return `高さ ${Math.round(height_mm)} mm`;
+}
+
+/** 動いている間の表示。目標の速さと、あれば測った速さを出す */
+function moveText(dir, speed, speed_meas, bottom) {
+  const meas = speed_meas === null || speed_meas === undefined || speed_meas === ''
+    ? '' : `（測定 ${Math.round(Number(speed_meas))} mm/s）`;
+  if (dir === 'up') return `上昇中 ${Math.round(Number(speed))} mm/s${meas}`;
+  if (dir === 'down') return `下降中 ${Math.round(Number(speed))} mm/s${meas}`;
+  return bottom ? '停止中・下端' : '停止中';
 }
 
 /** 持ち主の文言（spec §1.6。最後の操作が勝つことを気づけるように出す） */
@@ -364,9 +374,7 @@ function render() {
     bar.textContent = '';
   }
 
-  if (state.dir === 'up') $('liftState').textContent = `上昇中 ${state.duty}%`;
-  else if (state.dir === 'down') $('liftState').textContent = `下降中 ${state.duty}%`;
-  else $('liftState').textContent = state.bottom ? '停止中・下端' : '停止中';
+  $('liftState').textContent = moveText(state.dir, state.speed, state.speed_meas, state.bottom);
 
   // 高さのゲージ
   const height = state.height_ok === false ? 0 : Number(state.height_mm) || 0;
@@ -541,7 +549,7 @@ if (typeof document !== 'undefined') initApp();
 if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
-    formatSpeed, reasonText, ceilingText, heightText, ownerText, stateStale,
+    formatSpeed, reasonText, ceilingText, heightText, ownerText, moveText, stateStale,
     validateSettingsDraft, settingsErrorText, SETTING_AXES,
   };
 }
