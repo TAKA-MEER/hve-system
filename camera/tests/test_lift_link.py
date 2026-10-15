@@ -122,6 +122,44 @@ async def test_resolver_is_used_for_reconnect() -> None:
         await esp32.stop()
 
 
+async def test_slow_resolver_does_not_block_the_loop() -> None:
+    """名前解決が遅い間もイベントループが回る。本番の `_connect_once` の経路で確かめる。
+
+    実機 2026-10-15: `avahi-resolve-host-name` を同期で待って UART の読み出し・WS・
+    制御ループまで止まった。**`run_in_executor` を外して同期で呼ぶと赤になる。**
+    """
+    import asyncio
+    import contextlib
+    import time
+
+    clock = ManualClock()
+
+    def slow_resolve():
+        time.sleep(0.5)
+        # すぐ失敗する先。名前解決の後の待ちを混ぜず、解決中の回りだけを測る。
+        return "ws://127.0.0.1:1/ws/module"
+
+    lift = LiftLink(slow_resolve, clock)
+    ticks = 0
+
+    async def ticker() -> None:
+        nonlocal ticks
+        for _ in range(20):
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    try:
+        connect = asyncio.create_task(lift._connect_once())
+        counting = asyncio.create_task(ticker())
+        with contextlib.suppress(Exception):
+            await connect
+        during = ticks
+        await counting
+        assert during >= 5, f"名前解決の 0.5 s の間にループが {during} 回しか回らなかった"
+    finally:
+        await lift.close()
+
+
 async def test_silent_peer_is_dropped_and_reconnected_with_hello() -> None:
     """相手が TCP を閉じずに `state` だけ止めたら、自分で閉じて繋ぎ直し、`hello` を送り直す。
 
