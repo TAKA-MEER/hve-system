@@ -1,5 +1,50 @@
 #include "hal_core.h"
 
+namespace {
+
+int apply_ctrl(int base, int ctrl_mode) {
+  if (ctrl_mode == kPcntReverse) {
+    if (base == kPcntInc) {
+      return kPcntDec;
+    }
+    if (base == kPcntDec) {
+      return kPcntInc;
+    }
+    return base;
+  }
+  if (ctrl_mode == kPcntKeep) {
+    return base;
+  }
+  return 0;  // DISABLE などは数えない
+}
+
+int to_delta(int mode) {
+  if (mode == kPcntInc) {
+    return +1;
+  }
+  if (mode == kPcntDec) {
+    return -1;
+  }
+  return 0;
+}
+
+}  // namespace
+
+int pcnt_quad_step(const PcntQuadConfig& cfg, int prev_a, int prev_b, int now_a, int now_b) {
+  int total = 0;
+  // ch0: パルス=A・制御=B
+  if (now_a != prev_a) {
+    const int base = (now_a != 0) ? cfg.ch0_pos : cfg.ch0_neg;
+    total += to_delta(apply_ctrl(base, (now_b != 0) ? cfg.ch0_hctrl : cfg.ch0_lctrl));
+  }
+  // ch1: パルス=B・制御=A
+  if (now_b != prev_b) {
+    const int base = (now_b != 0) ? cfg.ch1_pos : cfg.ch1_neg;
+    total += to_delta(apply_ctrl(base, (now_a != 0) ? cfg.ch1_hctrl : cfg.ch1_lctrl));
+  }
+  return total;
+}
+
 void EncoderHeight::update(int32_t count, bool bottom_pressed, int up_sign) {
   last_count_ = count;
   last_sign_ = (up_sign >= 0) ? +1 : -1;

@@ -33,9 +33,8 @@ class LiftEsp32Hal : public LiftHal {
 
  private:
   EncoderHeight encoder_;
-  // PCNT の 16 bit の生の値の累積（原点に依らない）と前回の生の値
+  // 溢れの累積 + 今のカウンタの合計（原点に依らない）
   int32_t total_count_ = 0;
-  int16_t prev_raw_ = 0;
   bool pcnt_ready_ = false;
 
   // --- loop() だけが触る値 ---

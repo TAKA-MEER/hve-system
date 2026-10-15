@@ -133,21 +133,50 @@ void test_below_home_is_negative() {
   TEST_ASSERT_EQUAL_INT(-10, h.height_mm());
 }
 
-// --- PCNT の差の足し込み ---
+// --- PCNT の A/B 4 逓倍 ---
 
-void test_accumulate_normal() {
-  TEST_ASSERT_EQUAL_INT32(1010, accumulate_pcnt(1000, 100, 110));
-  TEST_ASSERT_EQUAL_INT32(990, accumulate_pcnt(1000, 100, 90));
+namespace {
+// (A,B) の列を 1 段ずつ進めた合計
+int run_quad_steps(const PcntQuadConfig& cfg, const int* ab, int n) {
+  int total = 0;
+  for (int i = 1; i < n; ++i) {
+    total += pcnt_quad_step(cfg, ab[2 * (i - 1)], ab[2 * (i - 1) + 1], ab[2 * i], ab[2 * i + 1]);
+  }
+  return total;
+}
+}  // namespace
+
+void test_quad_forward_cycle_is_minus4() {
+  // (A,B) = 00→10→11→01→00 の 1 周（A が B より進む向き）で −4
+  const int ab[] = {0, 0, 1, 0, 1, 1, 0, 1, 0, 0};
+  TEST_ASSERT_EQUAL_INT(-4, run_quad_steps(kPcntQuadEncoder, ab, 5));
 }
 
-void test_accumulate_wraps_forward() {
-  // 32767 → -32768 をまたぐ +1
-  TEST_ASSERT_EQUAL_INT32(1001, accumulate_pcnt(1000, 32767, -32768));
+void test_quad_backward_cycle_is_plus4() {
+  // 逆向きの 1 周で +4
+  const int ab[] = {0, 0, 0, 1, 1, 1, 1, 0, 0, 0};
+  TEST_ASSERT_EQUAL_INT(4, run_quad_steps(kPcntQuadEncoder, ab, 5));
 }
 
-void test_accumulate_wraps_backward() {
-  // -32768 → 32767 をまたぐ -1
-  TEST_ASSERT_EQUAL_INT32(999, accumulate_pcnt(1000, -32768, 32767));
+void test_quad_two_cycles_are_plusminus8() {
+  // 2 周で ±8（1 周の 2 倍）
+  const int fwd[] = {0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0};
+  TEST_ASSERT_EQUAL_INT(-8, run_quad_steps(kPcntQuadEncoder, fwd, 9));
+}
+
+void test_quad_no_edge_is_zero() {
+  // 変化が無ければ 0（両方同時に変わることは無い）
+  TEST_ASSERT_EQUAL_INT(0, pcnt_quad_step(kPcntQuadEncoder, 0, 0, 0, 0));
+  TEST_ASSERT_EQUAL_INT(0, pcnt_quad_step(kPcntQuadEncoder, 1, 1, 1, 1));
+}
+
+// --- 溢れの累積 + 今のカウンタ ---
+
+void test_encoder_total_adds_overflow_and_raw() {
+  TEST_ASSERT_EQUAL_INT32(10000, encoder_total(10000, 0));
+  TEST_ASSERT_EQUAL_INT32(9999, encoder_total(10000, -1));
+  TEST_ASSERT_EQUAL_INT32(-10000, encoder_total(-10000, 0));
+  TEST_ASSERT_EQUAL_INT32(42, encoder_total(0, 42));
 }
 
 // --- 向きの符号 ---
@@ -232,9 +261,11 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_pressed_beyond_slack_is_fault);
   RUN_TEST(test_fault_stays_after_release_until_repress);
   RUN_TEST(test_below_home_is_negative);
-  RUN_TEST(test_accumulate_normal);
-  RUN_TEST(test_accumulate_wraps_forward);
-  RUN_TEST(test_accumulate_wraps_backward);
+  RUN_TEST(test_quad_forward_cycle_is_minus4);
+  RUN_TEST(test_quad_backward_cycle_is_plus4);
+  RUN_TEST(test_quad_two_cycles_are_plusminus8);
+  RUN_TEST(test_quad_no_edge_is_zero);
+  RUN_TEST(test_encoder_total_adds_overflow_and_raw);
   RUN_TEST(test_up_sign_minus_one_reverses);
   RUN_TEST(test_bottom_high_means_pressed);
   RUN_TEST(test_bottom_low_means_not_pressed);

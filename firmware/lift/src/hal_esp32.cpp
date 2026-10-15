@@ -7,8 +7,39 @@
 namespace {
 
 // PCNT の 1 単位。A/B の 4 逓倍で数える定番の構成
-//（ch0: パルス=A・制御=B、ch1: パルス=B・制御=A）。
+//（ch0: パルス=A・制御=B、ch1: パルス=B・制御=A。
+// ch1 は ch0 と逆の符号。ESP-IDF の rotary_encoder の例と同じ）。
 constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
+
+// hal_core の設定値と driver/pcnt.h が食い違っていないことをビルドで確かめる。
+static_assert(kPcntInc == PCNT_COUNT_INC, "kPcntInc differs from PCNT_COUNT_INC");
+static_assert(kPcntDec == PCNT_COUNT_DEC, "kPcntDec differs from PCNT_COUNT_DEC");
+static_assert(kPcntKeep == PCNT_MODE_KEEP, "kPcntKeep differs from PCNT_MODE_KEEP");
+static_assert(kPcntReverse == PCNT_MODE_REVERSE, "kPcntReverse differs from PCNT_MODE_REVERSE");
+
+// 上限・下限に達するたびに割り込みが足す溢れの累積。loop() が読むときは
+// クリティカル区間でカウンタと一緒に読む（合計 = 溢れの累積 + 今のカウンタ）。
+volatile int32_t g_overflow = 0;
+portMUX_TYPE g_pcnt_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// ENC_PCNT_LIMIT に達した溢れを累積し、カウンタを 0 に戻す。
+// 上限・下限のどちらに当たっても合計が続く。
+// IRAM に置く。呼ぶのはレジスタ読み書きだけで、Serial も delay も使わない。
+void IRAM_ATTR pcnt_limit_isr(void* /*arg*/) {
+  portENTER_CRITICAL_ISR(&g_pcnt_mux);
+  uint32_t status = 0;
+  pcnt_get_event_status(kPcntUnit, &status);
+  if ((status & PCNT_EVT_H_LIM) != 0) {
+    g_overflow += ENC_PCNT_LIMIT;
+  }
+  if ((status & PCNT_EVT_L_LIM) != 0) {
+    g_overflow -= ENC_PCNT_LIMIT;
+  }
+  // 上限・下限で止まらず次の分を数えられるように 0 に戻す。
+  // 割り込みに入るまでの数カウントは落ちることがある（10000 に対して微小）。
+  pcnt_counter_clear(kPcntUnit);
+  portEXIT_CRITICAL_ISR(&g_pcnt_mux);
+}
 
 // ENC_GLITCH_FILTER_NS [ns] を APB 80 MHz のクロック数に直す。上限 1023 に丸める。
 uint16_t glitch_filter_ticks() {
@@ -22,16 +53,21 @@ uint16_t glitch_filter_ticks() {
   return static_cast<uint16_t>(ticks);
 }
 
-void config_pcnt_channel(pcnt_channel_t channel, int pulse_pin, int ctrl_pin) {
+// 数え方は hal_core の kPcntQuadEncoder から取る（符号の判断を native で縛るため）。
+// ここで別の値を書かないこと。
+void config_pcnt_channel(pcnt_channel_t channel, int pulse_pin, int ctrl_pin, int pos_mode,
+                         int neg_mode, int lctrl_mode, int hctrl_mode) {
   pcnt_config_t cfg = {};
   cfg.pulse_gpio_num = pulse_pin;
   cfg.ctrl_gpio_num = ctrl_pin;
   cfg.channel = channel;
   cfg.unit = kPcntUnit;
-  cfg.pos_mode = PCNT_COUNT_INC;
-  cfg.neg_mode = PCNT_COUNT_DEC;
-  cfg.lctrl_mode = PCNT_MODE_REVERSE;
-  cfg.hctrl_mode = PCNT_MODE_KEEP;
+  cfg.pos_mode = static_cast<pcnt_count_mode_t>(pos_mode);
+  cfg.neg_mode = static_cast<pcnt_count_mode_t>(neg_mode);
+  cfg.lctrl_mode = static_cast<pcnt_ctrl_mode_t>(lctrl_mode);
+  cfg.hctrl_mode = static_cast<pcnt_ctrl_mode_t>(hctrl_mode);
+  cfg.counter_h_lim = static_cast<int16_t>(ENC_PCNT_LIMIT);
+  cfg.counter_l_lim = static_cast<int16_t>(-ENC_PCNT_LIMIT);
   pcnt_unit_config(&cfg);
 }
 
@@ -55,16 +91,23 @@ void LiftEsp32Hal::begin() {
   // --- 高さのエンコーダ（オープンコレクタ。外付けで 3.3 V へプルアップが前提）---
   pinMode(ENC_A_PIN, INPUT_PULLUP);
   pinMode(ENC_B_PIN, INPUT_PULLUP);
-  config_pcnt_channel(PCNT_CHANNEL_0, ENC_A_PIN, ENC_B_PIN);
-  config_pcnt_channel(PCNT_CHANNEL_1, ENC_B_PIN, ENC_A_PIN);
+  config_pcnt_channel(PCNT_CHANNEL_0, ENC_A_PIN, ENC_B_PIN, kPcntQuadEncoder.ch0_pos,
+                      kPcntQuadEncoder.ch0_neg, kPcntQuadEncoder.ch0_lctrl,
+                      kPcntQuadEncoder.ch0_hctrl);
+  config_pcnt_channel(PCNT_CHANNEL_1, ENC_B_PIN, ENC_A_PIN, kPcntQuadEncoder.ch1_pos,
+                      kPcntQuadEncoder.ch1_neg, kPcntQuadEncoder.ch1_lctrl,
+                      kPcntQuadEncoder.ch1_hctrl);
   pcnt_set_filter_value(kPcntUnit, glitch_filter_ticks());
   pcnt_filter_enable(kPcntUnit);
+  // 上限・下限の割り込みで溢れの累積へ移す（unit_config が切るのでここで有効にする）
+  pcnt_event_enable(kPcntUnit, PCNT_EVT_H_LIM);
+  pcnt_event_enable(kPcntUnit, PCNT_EVT_L_LIM);
+  pcnt_isr_service_install(0);
+  pcnt_isr_handler_add(kPcntUnit, &pcnt_limit_isr, nullptr);
   pcnt_counter_pause(kPcntUnit);
+  g_overflow = 0;
   pcnt_counter_clear(kPcntUnit);
   pcnt_counter_resume(kPcntUnit);
-  int16_t raw = 0;
-  pcnt_get_counter_value(kPcntUnit, &raw);
-  prev_raw_ = raw;
   pcnt_ready_ = true;
 }
 
@@ -72,11 +115,14 @@ void LiftEsp32Hal::poll(uint32_t now_ms) {
   if (!pcnt_ready_) {
     return;
   }
-  // PCNT の生の値を読み、差を足し込む
-  int16_t raw = prev_raw_;
+  // 溢れの累積と今のカウンタを一緒に読み、合計にする
+  int32_t overflow = 0;
+  int16_t raw = 0;
+  portENTER_CRITICAL(&g_pcnt_mux);
+  overflow = g_overflow;
   pcnt_get_counter_value(kPcntUnit, &raw);
-  total_count_ = accumulate_pcnt(total_count_, prev_raw_, raw);
-  prev_raw_ = raw;
+  portEXIT_CRITICAL(&g_pcnt_mux);
+  total_count_ = encoder_total(overflow, raw);
   // 下端スイッチの状態と一緒に渡す。判断は EncoderHeight 側
   encoder_.update(total_count_, bottom_pressed(), ENC_UP_SIGN);
   height_mm_ = encoder_.height_mm();
