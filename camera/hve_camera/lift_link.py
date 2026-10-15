@@ -69,13 +69,13 @@ class LiftPort(ABC):
     async def send_hold(
         self,
         direction: str,
-        duty: int,
+        speed: int,
         press: int,
         ceiling_status: str,
         ceiling_mm: Optional[int],
         ceiling_age_ms: int,
     ) -> None:
-        """昇降部へ `hold` を送る。`ceiling_mm` は `MEASURED` のときだけ値が入る。"""
+        """昇降部へ `hold` を送る。`speed` は目標の速さ [mm/s] の整数。`ceiling_mm` は `MEASURED` のときだけ値が入る。"""
 
     @abstractmethod
     async def send_release(self, press: int) -> None:
@@ -159,13 +159,13 @@ class LiftLink(LiftPort):
     async def send_hold(
         self,
         direction: str,
-        duty: int,
+        speed: int,
         press: int,
         ceiling_status: str,
         ceiling_mm: Optional[int],
         ceiling_age_ms: int,
     ) -> None:
-        """`hold` を送る。**繋がっていなければ捨てる**（昇降部は途絶えで止まる）。"""
+        """`hold` を送る。**繋がっていなければ捨てる**（昇降部は途絶えで止まる）。**`duty` は送らない**（protocol §2.1。`duty` だけの `hold` は昇降部が捨てる）。"""
         ws = self._ws
         if ws is None or ws.closed:
             return
@@ -179,7 +179,7 @@ class LiftLink(LiftPort):
             "t": "hold",
             "press": int(press),
             "dir": direction,
-            "duty": int(duty),
+            "speed": int(speed),
             "ceiling": ceiling,
         }
         with contextlib.suppress(Exception):

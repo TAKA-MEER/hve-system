@@ -11,8 +11,8 @@
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
 const SETTING_AXES = [
-  {key: 'lift_up',   name: '上昇',   unit: '%',     abs_low: 0,   abs_high: 100, step: 1},
-  {key: 'lift_down', name: '下降',   unit: '%',     abs_low: 0,   abs_high: 100, step: 1},
+  {key: 'lift_up',   name: '上昇',   unit: 'mm/s',  abs_low: 0,   abs_high: 100, step: 1},
+  {key: 'lift_down', name: '下降',   unit: 'mm/s',  abs_low: 0,   abs_high: 100, step: 1},
   {key: 'pitch',     name: 'ピッチ', unit: 'deg/s', abs_low: 0.1, abs_high: 60,  step: 0.5},
   {key: 'yaw',       name: 'ヨー',   unit: 'deg/s', abs_low: 0.1, abs_high: 60,  step: 0.5},
 ];
@@ -22,6 +22,7 @@ let settings_draft = null;
 
 /**
  * 設定の検証。`min ≦ init ≦ max` と絶対的な範囲を見る（protocol §3）。
+ * 昇降の 2 軸は整数 [mm/s]（刻み 1）でないと落とす。
  * @param {object} draft 4 項目の {min, max, init}
  * @returns {{ok: boolean, errors: Array<{key: string, text: string}>}}
  */
@@ -49,6 +50,12 @@ function validateSettingsDraft(draft) {
 
     if (!(numbers.min <= numbers.init && numbers.init <= numbers.max)) {
       errors.push({key: axis.key, text: `${axis.name}: 下限 ≦ 初期値 ≦ 上限 にしてください`});
+      continue;
+    }
+    // 昇降の 2 軸は整数 [mm/s]（刻み 1）。ピッチ・ヨーは小数も許す
+    if ((axis.key === 'lift_up' || axis.key === 'lift_down')
+        && fields.some((field) => !Number.isInteger(numbers[field]))) {
+      errors.push({key: axis.key, text: `${axis.name}: 整数を入れてください`});
       continue;
     }
     const outside = fields.some(

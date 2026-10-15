@@ -191,7 +191,8 @@ async def test_hold_from_the_browser_reaches_the_esp32(rig: Rig) -> None:
     hold = rig.last_hold()
     assert hold["t"] == "hold"
     assert hold["dir"] == "up"
-    assert hold["duty"] == 30
+    assert hold["speed"] == 30
+    assert "duty" not in hold
     assert hold["press"] == 1
     assert hold["ceiling"]["status"] == "MEASURED"
     assert rig.esp32 is not None and rig.esp32.hello_history[0]["ceiling_sensor"] is True
@@ -499,7 +500,7 @@ async def test_put_settings_relays_and_saves(rig: Rig) -> None:
     await rig.wait_axis("lift_up")
     await rig.pump()
     await rig.wait_holds(1)
-    assert rig.last_hold()["duty"] == 20, "保存した設定の上限を使う"
+    assert rig.last_hold()["speed"] == 20, "保存した設定の上限を使う"
     await ws.close()
 
 

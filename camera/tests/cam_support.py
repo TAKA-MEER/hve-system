@@ -244,6 +244,8 @@ class FakeEsp32:
                 "seq": self._seq,
                 "dir": "stop",
                 "duty": 0,
+                "speed": 0,
+                "speed_meas": 0,
                 "reason": "CMD_STOP",
                 "bottom": False,
                 "height_mm": 0,

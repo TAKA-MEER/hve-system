@@ -48,7 +48,7 @@ async def test_hello_ignores_the_ceiling_state() -> None:
 
 
 async def test_hold_and_release_shapes() -> None:
-    """`hold`・`release` の形（protocol §2.1）。"""
+    """`hold`・`release` の形（protocol §2.1）。速さは `speed` [mm/s] で送り、`duty` は送らない。"""
     clock = ManualClock()
     esp32 = FakeEsp32(clock)
     url = await esp32.start()
@@ -62,7 +62,8 @@ async def test_hold_and_release_shapes() -> None:
         await wait_until(lambda: len(esp32.release_history) >= 1)
         hold = esp32.hold_history[-1]
         assert hold["t"] == "hold"
-        assert (hold["press"], hold["dir"], hold["duty"]) == (7, "up", 30)
+        assert (hold["press"], hold["dir"], hold["speed"]) == (7, "up", 30)
+        assert "duty" not in hold, "duty を送ると昇降部が捨てる（変異 a の芯）"
         assert hold["ceiling"] == {"status": "MEASURED", "mm": 2000, "age_ms": 80}
         assert esp32.release_history[-1] == {"t": "release", "press": 7}
     finally:

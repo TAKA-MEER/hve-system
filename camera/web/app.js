@@ -37,7 +37,8 @@ const REASON_TEXT = {
   CEILING_NEAR: ['ng', '天井が近いため上昇できません'],
   CEILING: ['ng', '天井の許可が得られないため上昇できません'],
   CEILING_STALE: ['ng', '天井センサの値が届かないため上昇できません'],
-  HEIGHT_UNKNOWN: ['ng', '高さセンサが読めないため上昇できません'],
+  HEIGHT_UNKNOWN: ['ng', '高さが分からないため上昇できません。一度下端まで下げてください'],
+  ENCODER_STALL: ['warn', 'エンコーダが回らないため停止しました。反対方向へは動かせます'],
   LINK_LOST: ['ng', '昇降部と繋がっていません。昇降できません'],
   MAX_RUN: ['warn', '同じ方向へ動き続けた時間が上限（10 秒）を超えたため停止しました。反対方向へは動かせます'],
   TOP: ['warn', '上端に達しました'],
@@ -98,10 +99,10 @@ function sliderSpec(setting, step) {
   };
 }
 
-/** 速度の数値の書式（`%` は整数・`deg/s` は小数 1 桁） */
+/** 速度の数値の書式（`%`・`mm/s` は整数・`deg/s` は小数 1 桁） */
 function formatSpeed(value, unit) {
   const number = Number(value);
-  const text = unit === '%' ? String(Math.round(number)) : number.toFixed(1);
+  const text = (unit === '%' || unit === 'mm/s') ? String(Math.round(number)) : number.toFixed(1);
   return `${text} ${unit}`;
 }
 
@@ -165,6 +166,22 @@ function liftLink(ip) {
 /** 静止画（`hve_video` の `/snapshot`）の URL。**宿主は画面と同じ・ポートは映像と同じ**（spec §1.5.1） */
 function snapshotUrl(protocol, hostname, port) {
   return `${protocol}//${hostname}:${port}/snapshot`;
+}
+
+/** 昇降の状態の表示。動いている間は目標と測った速さ [mm/s]（`speed_meas` が無ければ目標だけ） */
+function liftStateText(lift) {
+  const value = lift || {};
+  if (value.dir === 'up' || value.dir === 'down') {
+    const word = value.dir === 'up' ? '上昇中' : '下降中';
+    const target = Number(value.speed);
+    if (!isFinite(target)) return `${word}`;
+    // `speed_meas` が無い（`null` を含む）ときは目標だけ
+    if (value.speed_meas === null || value.speed_meas === undefined) return `${word} ${Math.round(target)} mm/s`;
+    const meas = Number(value.speed_meas);
+    if (!isFinite(meas)) return `${word} ${Math.round(target)} mm/s`;
+    return `${word} ${Math.round(target)} mm/s（測定 ${Math.round(meas)} mm/s）`;
+  }
+  return value.bottom ? '停止中・下端' : '停止中';
 }
 
 /** 高さの OSD の文言。読めない値と値なしを区別する */
@@ -443,8 +460,7 @@ function render() {
     bar.className = 'stopbar';
   }
 
-  if (lift.dir === 'up') $('liftState').textContent = `上昇中 ${lift.duty}%`;
-  else if (lift.dir === 'down') $('liftState').textContent = `下降中 ${lift.duty}%`;
+  if (lift.dir === 'up' || lift.dir === 'down') $('liftState').textContent = liftStateText(lift);
   else $('liftState').textContent = lift.bottom ? '停止中・下端' : '停止中';
 
   document.querySelector('[data-axis=lift_up]').classList.toggle('blocked', holdBlocked(state, 'lift_up'));
@@ -551,6 +567,6 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, zoomMessage, zoomTarget, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
-    topDetectText, ownerText, liftUiText, liftLink, snapshotUrl,
+    topDetectText, ownerText, liftUiText, liftLink, snapshotUrl, liftStateText,
   };
 }

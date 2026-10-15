@@ -137,22 +137,38 @@ def test_several_problems_are_all_listed():
 
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
-def test_lift_duty_0_to_100_is_inclusive(axis):
+def test_lift_speed_0_to_100_is_inclusive(axis):
     assert validate_settings(variant(**{axis: {"min": 0, "max": 100, "init": 0}}), PARAMS) == []
 
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
-def test_lift_duty_over_100_is_reported(axis):
+def test_lift_speed_over_100_is_reported(axis):
     errors = validate_settings(variant(**{axis: {"min": 10, "max": 101, "init": 30}}), PARAMS)
     assert len(errors) == 1
     assert f"{axis}.max" in errors[0]
 
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
-def test_lift_duty_below_0_is_reported(axis):
+def test_lift_speed_below_0_is_reported(axis):
     errors = validate_settings(variant(**{axis: {"min": -1, "max": 60, "init": 30}}), PARAMS)
     assert len(errors) == 1
     assert f"{axis}.min" in errors[0]
+
+
+@pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
+@pytest.mark.parametrize("field,value", [("min", 10.5), ("max", 60.5), ("init", 30.5)])
+def test_lift_speed_must_be_an_integer(axis, field, value):
+    """昇降の速さは mm/s の整数（protocol §3）。小数は落とす（順序は保った値で）。"""
+    errors = validate_settings(with_field(axis, field, value), PARAMS)
+    assert len(errors) == 1
+    assert f"{axis}.{field}" in errors[0]
+
+
+@pytest.mark.parametrize("axis", ["pitch", "yaw"])
+def test_axis_speed_may_be_fractional(axis):
+    """ピッチ・ヨーは小数を許す（昇降だけが整数）。"""
+    data = variant(**{axis: {"min": 0.5, "max": 30, "init": 10}})
+    assert validate_settings(data, PARAMS) == []
 
 
 @pytest.mark.parametrize("axis", ["pitch", "yaw"])
