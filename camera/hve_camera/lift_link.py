@@ -216,6 +216,19 @@ class LiftLink(LiftPort):
             log.info("昇降部の名前を引けない: %s", exc)
             return None
 
+    async def _resolve_url_async(self) -> Optional[str]:
+        """`_resolve_url` と同じ。関数が `avahi-resolve-host-name` を待つ間も
+        イベントループを止めないよう、別スレッドで引く（`app.py` の設定の中継と同じ）。
+        止めるときの取り消しはここで受け、裏のスレッドは待たずに抜ける。"""
+        if isinstance(self._url, str):
+            return self._url
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, self._url)
+        except Exception as exc:  # noqa: BLE001 - 引けない間も繋ぎ直し続ける
+            log.info("昇降部の名前を引けない: %s", exc)
+            return None
+
     def _hello(self) -> str:
         """繋いだら 1 度送る `hello`。`ceiling_sensor` は常に `true`（§3.1）。"""
         return json.dumps(
@@ -242,7 +255,7 @@ class LiftLink(LiftPort):
             await asyncio.sleep(_RECONNECT_DELAY_S)
 
     async def _connect_once(self) -> None:
-        url = self._resolve_url()
+        url = await self._resolve_url_async()
         if url is None:
             await asyncio.sleep(_RECONNECT_DELAY_S)
             return
