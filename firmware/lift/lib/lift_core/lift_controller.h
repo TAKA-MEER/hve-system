@@ -1,5 +1,5 @@
 // 受け付け・持ち主・天井・判定を偽 HAL のモータに効かせるところ。
-// docs/plan/detailed/DetailedDesign.md §3・§4.1。Arduino.h は include しない。
+// docs/plan/detailed/DetailedDesign.md §3・§4.1・§4.1.2。Arduino.h は include しない。
 #pragma once
 
 #include <cstdint>
@@ -8,6 +8,7 @@
 #include "hal.h"
 #include "lift_arbiter.h"
 #include "lift_decide.h"
+#include "speed_loop.h"
 
 class LiftController {
  public:
@@ -42,7 +43,7 @@ class LiftController {
   // 持ち主の命令の中身（LiftArbiter が「誰のものか」だけを持ち、ここが中身を持つ）
   struct OwnerCmd {
     LiftDir dir = LiftDir::STOP;
-    int duty = 0;
+    int speed_mm_s = 0;
     bool has_sensor = true;
     CeilingReport ceiling;
   };
@@ -80,5 +81,24 @@ class LiftController {
   LiftDir run_dir_;     // run_ms_ を数えている方向（変われば 0 に戻す）
   bool turning_;        // 直前の step でモータを回していたか
   uint32_t run_at_ms_;  // 積算の起点（直前の step の時刻）
+  // 速さの制御（DetailedDesign.md §4.1.2）
+  SpeedLoop speed_loop_;
+  int last_duty_ = 0;          // 直前にモータへ出したデューティ（#8a の「動かしている」判定用）
+  uint32_t loop_at_ms_ = 0;    // SpeedLoop を最後に進めた時刻
+  bool loop_started_ = false;  // SpeedLoop を進めたことがあるか
+  LiftDir loop_dir_ = LiftDir::STOP;  // SpeedLoop が持っている向き
+  int loop_owner_ = -1;               // SpeedLoop が持っている持ち主の接続番号
+  int loop_press_ = 0;               // 同じく press
+  // 速さの測定（窓の起点。LIFT_SPEED_WINDOW_MS ごとに取り直す）
+  int32_t speed_win_count_ = 0;
+  uint32_t speed_win_ms_ = 0;
+  bool speed_win_valid_ = false;
+  float speed_up_mm_s_ = 0.0f;  // 測った速さ（上向きが正）
+  // #8a の数え（DetailedDesign.md §4.1）。持ち主が替わっても数え直さない
+  bool stalled_ = false;
+  LiftDir stall_dir_ = LiftDir::STOP;  // 数えている方向（替われば取り直す）
+  int32_t stall_anchor_ = 0;           // 起点の数
+  uint32_t stall_at_ms_ = 0;           // 起点の時刻
+  bool stall_valid_ = false;
   LiftState state_;
 };

@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "hal_core.h"  // ENC_UP_SIGN・LIFT_UM_PER_COUNT（速さの測定・#8a の数え用）
+
 namespace {
 
 // 「LIFT_MAX_RUN_MS を超えた」ことを残すので +1 で頭打ちにする。
@@ -18,6 +20,16 @@ void copy_name(char* out, size_t out_size, const char* in) {
   }
   std::strncpy(out, in, out_size - 1);
   out[out_size - 1] = '\0';
+}
+
+// 進行方向へ進んだ数。上昇なら上向きが正、下降なら下向きが正。
+// 逆向きに進んだら負になり、「進んでいない」と数える（§4.1 #8a）。
+int32_t forward_counts(int32_t now_count, int32_t anchor_count, LiftDir dir) {
+  const int32_t delta = now_count - anchor_count;
+  if (dir == LiftDir::DOWN) {
+    return -delta * static_cast<int32_t>(ENC_UP_SIGN);
+  }
+  return delta * static_cast<int32_t>(ENC_UP_SIGN);
 }
 
 }  // namespace
@@ -110,7 +122,7 @@ void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t n
     return;
   }
   owner_cmd_.dir = hold.dir;
-  owner_cmd_.duty = hold.duty;
+  owner_cmd_.speed_mm_s = hold.speed;
   owner_cmd_.has_sensor = sensor_of(conn.id, conn.kind);
   if (hold.has_ceiling) {
     owner_cmd_.ceiling = hold.ceiling;
@@ -134,7 +146,7 @@ void LiftController::on_release(const ConnId& conn, int press) {
   if (arbiter_.on_release(conn, press)) {
     has_owner_cmd_ = false;
     owner_cmd_.dir = LiftDir::STOP;
-    owner_cmd_.duty = 0;
+    owner_cmd_.speed_mm_s = 0;
     idle_reason_ = StopReason::CMD_STOP;
     had_owner_ = false;
   }
@@ -149,7 +161,7 @@ void LiftController::on_close(int conn_id) {
     // 持ち主の接続が閉じたらその場で止める（DetailedDesign-protocol.md §1）
     has_owner_cmd_ = false;
     owner_cmd_.dir = LiftDir::STOP;
-    owner_cmd_.duty = 0;
+    owner_cmd_.speed_mm_s = 0;
     idle_reason_ = StopReason::OWNER_GONE;
     had_owner_ = false;
   }
@@ -187,11 +199,55 @@ LiftState LiftController::step(uint32_t now_ms) {
   }
   run_dir_ = cmd_dir;
 
+  // 速さを測る（窓の起点から LIFT_SPEED_WINDOW_MS 以上経てば取り直す。原点に依らない）
+  const int32_t enc_now = hal_->encoder_count();
+  if (!speed_win_valid_) {
+    speed_win_count_ = enc_now;
+    speed_win_ms_ = now_ms;
+    speed_win_valid_ = true;
+    speed_up_mm_s_ = 0.0f;
+  } else if (elapsed_ms(now_ms, speed_win_ms_) >=
+             static_cast<int32_t>(LIFT_SPEED_WINDOW_MS)) {
+    speed_up_mm_s_ = speed_from_counts(speed_win_count_, enc_now, speed_win_ms_, now_ms,
+                                       LIFT_UM_PER_COUNT, ENC_UP_SIGN);
+    speed_win_count_ = enc_now;
+    speed_win_ms_ = now_ms;
+  }
+
+  // #8a の数え（§4.1）。命令が stop になるか向きが替わるまで続ける。
+  // 持ち主が替わっても数え直さない
+  if (cmd_dir == LiftDir::STOP || cmd_dir != stall_dir_) {
+    stalled_ = false;
+    stall_dir_ = cmd_dir;
+    stall_anchor_ = enc_now;
+    stall_at_ms_ = now_ms;
+    stall_valid_ = true;
+  } else if (last_duty_ > 0) {
+    // 動かしている（出力が 0 より大きい）間だけ数える
+    if (!stall_valid_) {
+      stall_anchor_ = enc_now;
+      stall_at_ms_ = now_ms;
+      stall_valid_ = true;
+    } else if (forward_counts(enc_now, stall_anchor_, cmd_dir) >= LIFT_STALL_MIN_COUNTS) {
+      // 進行方向へ進んだら起点を取り直す。逆向きは「進んでいない」
+      stall_anchor_ = enc_now;
+      stall_at_ms_ = now_ms;
+    } else if (elapsed_ms(now_ms, stall_at_ms_) > static_cast<int32_t>(LIFT_STALL_MS)) {
+      stalled_ = true;
+    }
+  } else {
+    // 出していない間は起点を取り直す（止まっていた時間を数えない）
+    stall_anchor_ = enc_now;
+    stall_at_ms_ = now_ms;
+    stall_valid_ = true;
+  }
+
   LiftDecideInput in;
   in.has_cmd = has_owner;
   in.owner_empty_reason = idle_reason_;
   in.dir = cmd_dir;
-  in.duty = owner_cmd_.duty;
+  in.speed_mm_s = owner_cmd_.speed_mm_s;
+  in.stalled = stalled_;
   in.ceiling = owner_cmd_.ceiling;
   // hello が hold のあとに届いても、その時点の値を向き先で使う
   const bool owner_has_sensor = has_owner ? sensor_of(owner.id, owner.kind) : false;
@@ -206,16 +262,56 @@ LiftState LiftController::step(uint32_t now_ms) {
 
   // 判定の結果をモータへ出す。指令をそのまま流さないこと（§4.1）
   const LiftDecideResult decided = lift_decide(in);
-  hal_->motor_set(decided.dir, decided.duty);
+  const bool moving =
+      has_owner && decided.reason == StopReason::NONE &&
+      (decided.dir == LiftDir::UP || decided.dir == LiftDir::DOWN) && decided.dir == cmd_dir;
+  int duty = 0;
+  if (moving) {
+    // 止まった・向きが替わった・持ち主が替わったら積分を 0 に戻す（§4.1.2）
+    if (!loop_started_ || decided.dir != loop_dir_ || owner.id != loop_owner_ ||
+        owner_press != loop_press_) {
+      speed_loop_.reset();
+    }
+    // LIFT_SPEED_CTRL_MS ごとに進める。loop が詰まったら経過時間で割る
+    const int32_t loop_elapsed = loop_started_ ? elapsed_ms(now_ms, loop_at_ms_) :
+                                                 static_cast<int32_t>(LIFT_SPEED_CTRL_MS);
+    if (!loop_started_ || loop_elapsed >= static_cast<int32_t>(LIFT_SPEED_CTRL_MS)) {
+      const float measured_fwd =
+          (decided.dir == LiftDir::DOWN) ? -speed_up_mm_s_ : speed_up_mm_s_;
+      const uint32_t dt = loop_elapsed <= 0 ? 0u : static_cast<uint32_t>(loop_elapsed);
+      duty = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt);
+      loop_at_ms_ = now_ms;
+      loop_started_ = true;
+      loop_dir_ = decided.dir;
+      loop_owner_ = owner.id;
+      loop_press_ = owner_press;
+    } else {
+      duty = last_duty_;
+    }
+    hal_->motor_set(decided.dir, duty);
+  } else {
+    hal_->motor_set(LiftDir::STOP, 0);
+    speed_loop_.reset();
+    loop_started_ = false;
+    loop_dir_ = LiftDir::STOP;
+    duty = 0;
+  }
+  last_duty_ = duty;
 
-  turning_ = decided.reason == StopReason::NONE &&
-             (decided.dir == LiftDir::UP || decided.dir == LiftDir::DOWN) &&
-             has_owner && decided.dir == cmd_dir;
+  turning_ = moving && duty > 0;
   run_at_ms_ = now_ms;
 
-  state_.dir = decided.dir;
-  state_.duty = decided.duty;
+  state_.dir = moving ? decided.dir : LiftDir::STOP;
+  state_.duty = duty;
   state_.reason = decided.reason;
+  // 止めるときの dir は STOP（指令ではなく実際に出している方向）
+  if (!moving) {
+    state_.dir = LiftDir::STOP;
+    state_.duty = 0;
+  }
+  state_.speed = decided.speed_mm_s;
+  state_.speed_meas = static_cast<int>(speed_up_mm_s_ >= 0.0f ? speed_up_mm_s_ + 0.5f
+                                                              : speed_up_mm_s_ - 0.5f);
   state_.bottom = in.bottom_pressed;
   state_.height_mm = in.height_mm;
   // 高さは表示と配信だけに使い続ける（W-1）。鮮度の判断は height_is_fresh の 1 か所
