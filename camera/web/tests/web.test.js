@@ -55,6 +55,8 @@ test('スライダーは範囲が下限〜上限、位置が初期値（spec §1
 test('速度の数値の書式', () => {
   assert.equal(app.formatSpeed(30, '%'), '30 %');
   assert.equal(app.formatSpeed(29.6, '%'), '30 %');
+  assert.equal(app.formatSpeed(40, 'mm/s'), '40 mm/s');
+  assert.equal(app.formatSpeed(39.6, 'mm/s'), '40 mm/s');
   assert.equal(app.formatSpeed(10, 'deg/s'), '10.0 deg/s');
   assert.equal(app.formatSpeed(12.25, 'deg/s'), '12.3 deg/s');
 });
@@ -85,6 +87,14 @@ test('停止理由の文言（names §3 → 画面に出る日本語）', () => 
   assert.equal(app.reasonText('CEILING').cls, 'ng');
   assert.equal(app.reasonText('CMD_TIMEOUT').cls, 'warn');
 
+  // 2026-10-15 の設計変更: ENCODER_STALL と HEIGHT_UNKNOWN の文言
+  assert.deepEqual(app.reasonText('ENCODER_STALL'), {
+    cls: 'warn', text: 'エンコーダが回らないため停止しました。反対方向へは動かせます',
+  });
+  assert.deepEqual(app.reasonText('HEIGHT_UNKNOWN'), {
+    cls: 'ng', text: '高さが分からないため上昇できません。一度下端まで下げてください',
+  });
+
   // 知らない理由は黙って隠さない（帯を出して名前も出す）
   const unknown = app.reasonText('SOMETHING_NEW');
   assert.equal(unknown.cls, 'warn');
@@ -101,6 +111,16 @@ test('IO_LOST・OWNER_GONE の文言（names §3）', () => {
   // 知らない理由の文言（「理由が分かりません」）に落ちていない
   assert.doesNotMatch(app.reasonText('IO_LOST').text, /分かりません/);
   assert.doesNotMatch(app.reasonText('OWNER_GONE').text, /分かりません/);
+});
+
+test('動いている間の表示は目標と測った速さ（brief §1）', () => {
+  assert.equal(app.liftStateText({dir: 'up', speed: 40, speed_meas: 39}), '上昇中 40 mm/s（測定 39 mm/s）');
+  assert.equal(app.liftStateText({dir: 'down', speed: 30, speed_meas: -30}), '下降中 30 mm/s（測定 -30 mm/s）');
+  // speed_meas が無ければ目標だけ
+  assert.equal(app.liftStateText({dir: 'up', speed: 40}), '上昇中 40 mm/s');
+  assert.equal(app.liftStateText({dir: 'up', speed: 40, speed_meas: null}), '上昇中 40 mm/s');
+  assert.equal(app.liftStateText({dir: 'stop', bottom: false}), '停止中');
+  assert.equal(app.liftStateText({dir: 'stop', bottom: true}), '停止中・下端');
 });
 
 test('上端の検知: top_detect が true でなければ「一時無効」（W-1）', () => {
@@ -218,6 +238,16 @@ test('絶対的な範囲を外すのも保存できない（protocol §3）', ()
   assert.equal(settings.validateSettingsDraft(withChange('lift_up', 'min', -1)).ok, false);
   assert.equal(settings.validateSettingsDraft(withChange('pitch', 'max', 61)).ok, false);
   assert.equal(settings.validateSettingsDraft(withChange('pitch', 'init', 0)).ok, false);
+});
+
+test('昇降の設定は mm/s・整数（brief §1）', () => {
+  const axes = Object.fromEntries(settings.SETTING_AXES.map((a) => [a.key, a]));
+  assert.equal(axes.lift_up.unit, 'mm/s');
+  assert.equal(axes.lift_down.unit, 'mm/s');
+  assert.equal(axes.lift_up.step, 1);
+  // 整数でない昇降の値は保存できない。ピッチ・ヨーの小数は通す
+  assert.equal(settings.validateSettingsDraft(withChange('lift_up', 'init', 30.5)).ok, false);
+  assert.equal(settings.validateSettingsDraft(withChange('pitch', 'init', 10.5)).ok, true);
 });
 
 test('数値でない・空欄は保存できない', () => {

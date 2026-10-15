@@ -289,6 +289,71 @@ async def test_state_shape() -> None:
     assert state["ceiling"]["reason"] == "NONE"
 
 
+async def test_hold_sends_speed_not_duty() -> None:
+    """昇降部への `hold` は `speed` [mm/s] で送り、`duty` は載せない（変異 a の芯）。"""
+    rig = Loop()
+    await rig.prime()
+    rig.loop.hold("lift_up", 40)
+    await rig.step()
+    hold = rig.holds[-1]
+    assert hold["dir"] == "up"
+    assert hold["speed"] == 40
+    assert "duty" not in hold
+
+
+async def test_state_lift_carries_speed_and_speed_meas() -> None:
+    """`state.lift` に昇降部の `speed`・`speed_meas` を写す（変異 b の芯）。"""
+    rig = Loop()
+    await rig.prime()
+    rig.loop.hold("lift_up", 40)
+    state = await rig.step()
+    assert state["lift"]["speed"] == 40
+    assert state["lift"]["speed_meas"] == 40
+    assert state["lift"]["duty"] == 40, "モータへの出力はそのまま残す"
+
+
+async def test_state_lift_speed_is_null_when_the_lift_does_not_send_it() -> None:
+    """古い昇降部が `speed` を返さなくても `null` で載せる（落とさない）。"""
+    rig = Loop()
+    await rig.prime()
+    raw = rig.lift.latest_state()
+    assert raw is not None
+    for key in ("speed", "speed_meas"):
+        raw.pop(key, None)
+    rig.lift._state = raw  # noqa: SLF001 - 欠けた state を直接置く
+    state = rig.loop.build_state(1)
+    assert "speed" in state["lift"]
+    assert "speed_meas" in state["lift"]
+    assert state["lift"]["speed"] is None
+    assert state["lift"]["speed_meas"] is None
+
+
+async def test_fake_lift_moves_by_speed_times_time() -> None:
+    """偽物の高さは `speed` [mm/s] × 経過時間で動く。"""
+    rig = Loop()
+    await rig.prime()
+    for _ in range(10):  # 100 ms ずつ 10 回（`hold_timeout_ms` を超えないよう押し直す）
+        rig.loop.hold("lift_up", 40)
+        await rig.step(100)
+    assert rig.lift.latest_state()["height_mm"] == 40
+    for _ in range(5):
+        rig.loop.hold("lift_down", 40)
+        await rig.step(100)
+    assert rig.lift.latest_state()["height_mm"] == 20
+
+
+async def test_fake_lift_does_not_take_a_duty_only_hold() -> None:
+    """`duty` だけの旧式の `hold` は偽物でも受けない（protocol §2.1）。"""
+    rig = Loop()
+    try:
+        await rig.lift.send_hold(direction="up", press=1, ceiling_status="MEASURED", ceiling_mm=2000, ceiling_age_ms=0, duty=40)  # type: ignore[call-arg]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("duty だけの hold を受けてはいけない")
+    assert rig.lift.hold_history == []
+
+
 # --- ピッチ・ヨー・倍率（旧版のまま） -----------------------------------------------------------------
 
 
