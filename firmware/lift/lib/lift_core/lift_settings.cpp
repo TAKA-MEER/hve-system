@@ -5,16 +5,16 @@
 namespace {
 
 bool axis_ok(const LiftAxisSettings& axis) {
-  if (axis.min_pct < 0 || axis.min_pct > 100) {
+  if (axis.min_mm_s < 0 || axis.min_mm_s > LIFT_SPEED_ABS_MAX_MM_S) {
     return false;
   }
-  if (axis.max_pct < 0 || axis.max_pct > 100) {
+  if (axis.max_mm_s < 0 || axis.max_mm_s > LIFT_SPEED_ABS_MAX_MM_S) {
     return false;
   }
-  if (axis.init_pct < 0 || axis.init_pct > 100) {
+  if (axis.init_mm_s < 0 || axis.init_mm_s > LIFT_SPEED_ABS_MAX_MM_S) {
     return false;
   }
-  return axis.min_pct <= axis.init_pct && axis.init_pct <= axis.max_pct;
+  return axis.min_mm_s <= axis.init_mm_s && axis.init_mm_s <= axis.max_mm_s;
 }
 
 bool read_axis(JsonObject obj, const char* key, LiftAxisSettings* out) {
@@ -25,17 +25,17 @@ bool read_axis(JsonObject obj, const char* key, LiftAxisSettings* out) {
   if (!axis["min"].is<int>() || !axis["max"].is<int>() || !axis["init"].is<int>()) {
     return false;
   }
-  out->min_pct = axis["min"].as<int>();
-  out->max_pct = axis["max"].as<int>();
-  out->init_pct = axis["init"].as<int>();
+  out->min_mm_s = axis["min"].as<int>();
+  out->max_mm_s = axis["max"].as<int>();
+  out->init_mm_s = axis["init"].as<int>();
   return true;
 }
 
 void write_axis(JsonObject obj, const char* key, const LiftAxisSettings& axis) {
   JsonObject child = obj[key].to<JsonObject>();
-  child["min"] = axis.min_pct;
-  child["max"] = axis.max_pct;
-  child["init"] = axis.init_pct;
+  child["min"] = axis.min_mm_s;
+  child["max"] = axis.max_mm_s;
+  child["init"] = axis.init_mm_s;
 }
 
 }  // namespace
