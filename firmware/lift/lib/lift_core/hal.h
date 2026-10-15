@@ -16,7 +16,10 @@ class LiftHal {
   // 下端スイッチが押されているか
   virtual bool bottom_pressed() = 0;
 
-  // 高さの超音波の最新の読み値・その値の有効性・その値を得た時刻
+  // エンコーダから数えた生の数（原点に依らない。速さの制御が使う）
+  virtual int32_t encoder_count() const = 0;
+
+  // 高さのエンコーダの最新の読み値・その値の有効性・その値を得た時刻
   virtual int height_mm() const = 0;
   virtual bool height_ok() const = 0;
   virtual uint32_t height_at_ms() const = 0;

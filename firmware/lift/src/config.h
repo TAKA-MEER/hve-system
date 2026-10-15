@@ -19,20 +19,20 @@ constexpr bool MOTOR_DIR_UP_LEVEL = true;
 // 下端リミットスイッチ。**仮**。INPUT_PULLUP + 常時閉（NC）配線
 constexpr uint8_t BOTTOM_PIN = 27;
 
-// HC-SR04。**仮**。TRIG は 3.3 V の出力でそのまま動く。
-// ECHO は 5 V が返るので、分圧（例 1 kΩ / 2 kΩ）で 3.3 V に落としてから入れる
-constexpr uint8_t SONAR_TRIG_PIN = 25;
-constexpr uint8_t SONAR_ECHO_PIN = 26;
+// 高さのエンコーダ E6A2-CW3C（DetailedDesign-hardware.md §1.1。**仮**）。
+// A/B 2 相・オープンコレクタ。3.3 V へ 2.2 kΩ でプルアップ（5 V へプルアップしない）
+constexpr uint8_t ENC_A_PIN = 25;
+constexpr uint8_t ENC_B_PIN = 26;
+// 要確認: 手元の個体の型番の末尾（100/200/360/500）
+constexpr int ENC_PPR = 360;
+// PCNT のノイズ除去の幅 [ns]。**仮**
+constexpr int ENC_GLITCH_FILTER_NS = 1000;
 
 // --- PWM（先行試作と同じ。LEDC ch0 / 5 kHz / 8 bit）---
 
 constexpr uint8_t PWM_CH = 0;
 constexpr uint32_t PWM_FREQ_HZ = 5000;
 constexpr uint8_t PWM_RESOLUTION = 8;
-
-// --- HC-SR04 の測定周期（names.md §5。**仮**。1 回の測定に 60 ms 以上空ける）---
-
-constexpr uint32_t SONAR_PERIOD_MS = 100;
 
 // --- 状態の出し方（DetailedDesign-protocol.md §1・§2.2）---
 
