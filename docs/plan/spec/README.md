@@ -50,7 +50,7 @@
 | [Spec-module.md](Spec-module.md) | 昇降部と上部モジュールの取り決め | 初版 |
 | [Spec-safety.md](Spec-safety.md) | 上下端と天井（検知手段・止め方） | 初版（上端はエンコーダの高さで検知。実装まで一時無効） |
 | [Spec-ui.md](Spec-ui.md) | 操作画面（カメラモジュールの画面・昇降部の画面） | 初版 |
-| [mockup/index.html](mockup/index.html) | カメラモジュールの画面の見た目（旧版から写した） | 旧版のまま |
+| [mockup/index.html](mockup/index.html) | カメラモジュールの画面の見た目（旧版から写した） | 旧版のまま（**昇降の速さの単位は旧版の % のまま**。正は [Spec-ui.md](Spec-ui.md) §1 の mm/s） |
 
 **領域ごとの詳細ファイル（`Spec-<領域>.md`）は、書く内容ができた時点で足す。**
 `docs/plan/README.md` の運用ルール（本体は結論と表だけ・200 行超で分割）に従う。

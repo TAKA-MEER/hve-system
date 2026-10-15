@@ -157,19 +157,20 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 ### `WP-LIFT-05` 高さをエンコーダにする
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.1、[-hardware.md](DetailedDesign-hardware.md) §1.1、[-names.md](DetailedDesign-names.md) §3・§5.1、spec [Spec-safety.md](../spec/Spec-safety.md) §1.2
-- 作るもの: `lib/hal_core` の `EncoderHeight`（PCNT の 16 bit の差の足し込み・原点・`P-14`）とホスト試験。`hal_esp32` の PCNT（A/B の 4 逓倍・ノイズ除去）。**HC-SR04 のコード（`sonar_*`・`HeightFilter`・`SONAR_*`）と試験を消す**。`hal.h` のコメント。`config.h` のピン
+- 作るもの: `lib/hal_core` の `EncoderHeight`（PCNT の 16 bit の差の足し込み・原点・`P-14`）とホスト試験。`hal_esp32` の PCNT（A/B の 4 逓倍・ノイズ除去）。**HC-SR04 のコード（`sonar_*`・`HeightFilter`・`SONAR_*`）と試験を消す**。`hal.h` のコメント。`config.h` のピン。**`docs/使い方.md`**（エンコーダの配線・HC-SR04 を外す・電源を入れたらまず下端まで下げる）。`docs/試験項目.md` の HC-SR04 の行は実機の試験を組むときに直す。**ブリーフの前に**、`espressif32@7.0.1` の Arduino コアで使える PCNT の API（`driver/pcnt.h` か `pulse_cnt`）をビルド環境で確かめる
 - 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev` が成功。`grep -rn SONAR firmware/lift` が空。**次の変異がそれぞれ赤になる**（`LiftController` を通した試験で縛るものに ※）
   1. ※ 起動直後（下端に一度も着いていない）に `height_ok` を真にする（上昇できてしまう。`W-1` の間でも `state.height_ok` で縛る）
-  2. 下端スイッチが押されても原点を取り直さない
-  3. スイッチが押されたまま数が `HOME_SLACK_MM` を超えて進んでも `height_ok` を偽にしない（`P-14`）
-  4. PCNT の 16 bit の差を符号なしで足す（−1 が +65535 になる）
-  5. `ENC_UP_SIGN` を掛け忘れる
+  2. 下端スイッチが押された瞬間に原点を取り直さない（2 回目以降の着地を含む）
+  3. スイッチが押されている間、上昇側へ進んだときも原点を動かす（★が働かなくなる）
+  4. スイッチが押されたまま原点から `HOME_SLACK_MM` を超えて上昇側へ進んでも `height_ok` を偽にしない（`P-14`）
+  5. PCNT の 16 bit の差を符号なしで足す（−1 が +65535 になる）
+  6. `ENC_UP_SIGN` を掛け忘れる
 - **実機で管理担当が確かめる**: 手で巻き取り軸を回して数が増減する向き・起動直後は `height_ok: false`・下端に着けると 0・上げると増える・A/B の線を 1 本抜くと数が進まない
 
 ### `WP-LIFT-06` 速さのフィードバック
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.2、[-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §3・§5.1、spec [Spec-ui.md](../spec/Spec-ui.md) §1・[Spec-safety.md](../spec/Spec-safety.md) #4d
-- 作るもの: `lib/lift_core` の `SpeedLoop`（PI・前向き・積分の扱い）・`lift_decide` の #8a と #9・`LiftController` で `SpeedLoop` の出力をモータへ・`cmd_codec`（`hold` の `speed`・`state` の `speed`・`speed_meas`・`ENCODER_STALL`）・`lift_settings` の範囲（mm/s）・`LIFT_NVS_NAMESPACE`
+- 作るもの: `lib/lift_core` の `SpeedLoop`（PI・前向き・積分の扱い）・`lift_decide` の #8a と #9・`LiftController` で `SpeedLoop` の出力をモータへ・`cmd_codec`（`hold` の `speed`・`state` の `speed`・`speed_meas`・`ENCODER_STALL`）・`lift_settings` の範囲（mm/s）・`LIFT_NVS_NAMESPACE`・**`docs/使い方.md`**（速さの単位・`ENCODER_STALL` で止まったときの扱い）
 - 受け入れ: native の試験・esp32dev のビルドが成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL で、モータに出した値を見て縛る）
   1. ※ 測った速さが目標より遅くても出力を上げない（前向きだけで動く）
   2. ※ 数が進まないのに出力を出し続ける（#8a を消す）
@@ -183,18 +184,18 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 ### `WP-LIFTUI-02` 昇降部の画面・道具を速さ（mm/s）に
 
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §3、spec [Spec-ui.md](../spec/Spec-ui.md) §1・§2
-- 作るもの: `firmware/lift/web/`（`hold` の `speed`・スライダーと設定の単位 mm/s・測った速さの表示・`ENCODER_STALL` と「下端まで下げて高さの原点を取ってください」（`HEIGHT_UNKNOWN`）の文言）・`tools/fake_lift_server.py`・`tools/lift_probe.py`
+- 作るもの: `firmware/lift/web/`（`hold` の `speed`・スライダーと設定の単位 mm/s・測った速さの表示・`ENCODER_STALL` と「下端まで下げて高さの原点を取ってください」（`HEIGHT_UNKNOWN`）の文言）・`tools/fake_lift_server.py`・`tools/lift_probe.py`・**`docs/使い方.md`**（画面の文言）
 - 受け入れ: node の試験・`tools/tests`・スクロールの検査が通る。**変異**: `hold` に `duty` を送る → 赤
 
 ### `WP-CAM-06` カメラモジュールを速さ（mm/s）に
 
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§4、[-names.md](DetailedDesign-names.md) §3
-- 作るもの: `camera/hve_camera`（`lift_link` の `hold` の `speed`・設定の中継の範囲・`state.lift` の `speed`・`speed_meas`）・`camera/web`（単位 mm/s・`ENCODER_STALL`・`HEIGHT_UNKNOWN` の文言）・偽物のモード
+- 作るもの: `camera/hve_camera`（`lift_link` の `hold` の `speed`・設定の中継の範囲・`state.lift` の `speed`・`speed_meas`）・`camera/web`（単位 mm/s・`ENCODER_STALL`・`HEIGHT_UNKNOWN` の文言）・偽物のモード・**`docs/使い方.md`**（画面の文言）
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験が通る。**変異**: 昇降部へ `duty` を送る／`state.lift` から `speed_meas` を落とす → 赤
 
 ### `WP-LIFT-07` 上端の検知を戻す（`W-1` を閉じる）
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1、[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)
-- 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）
+- 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）。**`docs/使い方.md`**（起動直後は上昇しない・「上端の検知: 一時無効」が出なくなる）
 - 受け入れ: native の試験が成功。`grep -rn 'WAIVER(demo): W-1'` が空。**変異**: ※ 原点を取る前に上昇できる／※ `LIFT_TOP_MM` を設定して高さがそれ以上でも上昇できる → 赤
 - **実機で管理担当が確かめる**: 起動直後は上昇しない（`HEIGHT_UNKNOWN`）→ 下げて下端に着けると上昇できる／`LIFT_TOP_MM` を仮に低く置いて、そこで止まる
