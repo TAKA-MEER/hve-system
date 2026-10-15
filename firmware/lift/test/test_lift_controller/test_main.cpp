@@ -1,12 +1,14 @@
 // Unity の試験（env:native）。LiftController に偽 HAL を差し、hello / hold /
 // release / close → step のあと偽モータへ実際に出た値を確かめる
 // （DetailedDesign.md DD-2）。純関数だけでは不可。
+// 速さの制御は SpeedLoop の出力（デューティ）をモータで見る（§4.1.2）。
 #include <unity.h>
 
 #include <cstring>
 
 #include "fake_hal.h"
 #include "lift_controller.h"
+#include "speed_loop.h"
 
 namespace {
 
@@ -32,11 +34,11 @@ HelloMsg hello_with_sensor(bool has_sensor) {
 }
 
 // 距離計を持つ接続からの上昇の hold（天井 MEASURED・十分遠い・送った瞬間は新しい）
-HoldMsg up_hold(int press, int duty, uint32_t at_ms, int age_ms = 80) {
+HoldMsg up_hold(int press, int speed, uint32_t at_ms, int age_ms = 80) {
   HoldMsg hold;
   hold.press = press;
   hold.dir = LiftDir::UP;
-  hold.duty = duty;
+  hold.speed = speed;
   hold.has_ceiling = true;
   hold.ceiling.status = CeilingStatus::MEASURED;
   hold.ceiling.mm = 1450;
@@ -45,11 +47,11 @@ HoldMsg up_hold(int press, int duty, uint32_t at_ms, int age_ms = 80) {
   return hold;
 }
 
-HoldMsg down_hold(int press, int duty = 40) {
+HoldMsg down_hold(int press, int speed = 40) {
   HoldMsg hold;
   hold.press = press;
   hold.dir = LiftDir::DOWN;
-  hold.duty = duty;
+  hold.speed = speed;
   hold.has_ceiling = false;
   return hold;
 }
@@ -58,11 +60,13 @@ void assert_reason(StopReason expected, const LiftState& state) {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(expected), static_cast<int>(state.reason));
 }
 
-// 持ち主の hold を出し直しながら回し続ける（天井は新しいまま）
+// 持ち主の hold を出し直しながら回し続ける（天井は新しいまま）。
+// エンコーダも 20 mm/s で進める（#8a で止まらない・出力が 0 に落ちない速さ）
 void hold_from_to(uint32_t start_ms, uint32_t end_ms, LiftController* ctrl, FakeHal* hal,
                   const ConnId& conn, int press) {
   for (uint32_t t = start_ms; t <= end_ms; t += 100) {
     hal->set_height(500, true, t);
+    hal->set_encoder_count(static_cast<int32_t>(t / 5));
     ctrl->on_hold(conn, up_hold(press, 40, t), t);
     ctrl->step(t);
   }
@@ -94,13 +98,14 @@ void test_ui_up_without_ceiling_reaches_motor() {
   HoldMsg hold;
   hold.press = 1;
   hold.dir = LiftDir::UP;
-  hold.duty = 40;
+  hold.speed = 40;
   hold.has_ceiling = false;
   ctrl.on_hold(ui(1), hold, 0);
   const LiftState state = ctrl.step(0);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hal.motor_dir()));
-  TEST_ASSERT_EQUAL_INT(40, hal.motor_duty());
+  TEST_ASSERT_TRUE(hal.motor_moving());
   assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_EQUAL_INT(40, state.speed);
   TEST_ASSERT_TRUE(state.has_owner);
   TEST_ASSERT_EQUAL_INT(0, state.owner_kind);  // ui
   TEST_ASSERT_FALSE(state.ceiling_used);
@@ -110,10 +115,13 @@ void test_watchdog_stops_motor_at_600ms() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
   ctrl.on_hold(ui(1), up_hold(1, 40, 0), 0);
   ctrl.step(0);
   TEST_ASSERT_TRUE(hal.motor_moving());
 
+  // エンコーダも進める（進めないと #8a が先に止める）
+  hal.set_encoder_count(120);
   ctrl.step(600);
   TEST_ASSERT_TRUE(hal.motor_moving());  // ちょうど 600 ms までは動かしてよい
 
@@ -134,7 +142,7 @@ void test_module_hold_without_hello_is_treated_as_having_sensor() {
   HoldMsg hold;
   hold.press = 1;
   hold.dir = LiftDir::UP;
-  hold.duty = 40;
+  hold.speed = 40;
   hold.has_ceiling = false;
   ctrl.on_hold(module(2), hold, 0);
   const LiftState state = ctrl.step(0);
@@ -150,7 +158,7 @@ void test_module_hold_without_ceiling_stops_with_stale() {
   HoldMsg hold;
   hold.press = 1;
   hold.dir = LiftDir::UP;
-  hold.duty = 40;
+  hold.speed = 40;
   hold.has_ceiling = false;  // ceiling を持つ接続の ceiling 無し hold
   ctrl.on_hold(module(2), hold, 0);
   const LiftState state = ctrl.step(0);
@@ -170,7 +178,7 @@ void test_second_hello_with_no_sensor_is_ignored() {
   HoldMsg hold;
   hold.press = 1;
   hold.dir = LiftDir::UP;
-  hold.duty = 40;
+  hold.speed = 40;
   hold.has_ceiling = false;
   ctrl.on_hold(module(2), hold, 0);
   const LiftState state = ctrl.step(0);
@@ -216,13 +224,14 @@ void test_old_press_from_non_owner_does_not_steal() {
   hal.set_height(500, true, 0);
   ctrl.on_hold(ui(1), up_hold(5, 20, 1000), 1000);
   ctrl.on_hold(module(2), up_hold(3, 60, 1100), 1100);
-  // 取って代わられた側の古い press では持ち主は替わらない（モータは module の 60 のまま）
+  // 取って代わられた側の古い press では持ち主は替わらない（持ち主は module のまま）
   HoldMsg old = up_hold(5, 20, 1200);
   ctrl.on_hold(ui(1), old, 1200);
   const LiftState state = ctrl.step(1200);
-  TEST_ASSERT_EQUAL_INT(60, hal.motor_duty());
+  TEST_ASSERT_TRUE(hal.motor_moving());
   TEST_ASSERT_EQUAL_INT(1, state.owner_kind);  // module
   assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_EQUAL_INT(60, state.speed);
 }
 
 void test_owner_close_stops_immediately_with_owner_gone() {
@@ -321,7 +330,128 @@ void test_ceiling_age_counts_transit_through_controller() {
   assert_reason(StopReason::CEILING_STALE, state);
 }
 
-// --- release と下端・デューティ ---
+// --- 速さのフィードバック（§4.1.2。モータに出した値で縛る） ---
+
+// (a) 目標に届かないとモータへ出したデューティが上がっていく
+void test_duty_rises_while_speed_stays_below_target() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);  // 進まない（#8a の 500 ms より短く回す）
+  ctrl.on_hold(ui(1), up_hold(1, 40, 0), 0);
+  const int d0 = ctrl.step(0).duty;
+  ctrl.on_hold(ui(1), up_hold(1, 40, 100), 100);
+  const int d1 = ctrl.step(100).duty;
+  ctrl.on_hold(ui(1), up_hold(1, 40, 200), 200);
+  const int d2 = ctrl.step(200).duty;
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  TEST_ASSERT_GREATER_THAN(d0, d1);
+  TEST_ASSERT_GREATER_THAN(d1, d2);
+}
+
+// (b) 数が進まなければ LIFT_STALL_MS 後に ENCODER_STALL でモータが 0
+void test_stall_when_encoder_never_moves() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
+  for (uint32_t t = 0; t <= 500; t += 100) {
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    const LiftState state = ctrl.step(t);
+    TEST_ASSERT_TRUE(hal.motor_moving());
+    assert_reason(StopReason::NONE, state);
+  }
+  ctrl.on_hold(ui(1), up_hold(1, 40, 600), 600);
+  const LiftState stalled = ctrl.step(600);
+  TEST_ASSERT_FALSE(hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(0, hal.motor_duty());
+  assert_reason(StopReason::ENCODER_STALL, stalled);
+}
+
+// (c) 逆向きに進んでも (b) と同じ
+void test_stall_when_encoder_runs_backwards() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  for (uint32_t t = 0; t <= 500; t += 100) {
+    // 上昇の命令なのに数は減っていく（逆向き）
+    hal.set_encoder_count(-static_cast<int32_t>(t / 5));
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    TEST_ASSERT_TRUE(ctrl.step(t).dir == LiftDir::UP);
+  }
+  hal.set_encoder_count(-120);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 600), 600);
+  const LiftState stalled = ctrl.step(600);
+  TEST_ASSERT_FALSE(hal.motor_moving());
+  assert_reason(StopReason::ENCODER_STALL, stalled);
+}
+
+// (d) 止まって押し直すと積分が残っていない（最初の出力が前向きの値だけ）
+void test_integral_is_reset_after_stop_and_repress() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
+  // 積分を育てる（出力が上がる）
+  ctrl.on_hold(ui(1), up_hold(1, 40, 0), 0);
+  ctrl.step(0);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 100), 100);
+  ctrl.step(100);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 200), 200);
+  const int grown = ctrl.step(200).duty;
+  TEST_ASSERT_GREATER_THAN(50, grown);
+  // 離して押し直す（新しい press）
+  ctrl.on_release(ui(1), 1);
+  assert_reason(StopReason::CMD_STOP, ctrl.step(300));
+  ctrl.on_hold(ui(1), up_hold(2, 40, 400), 400);
+  const int fresh = ctrl.step(400).duty;
+  // 測った速さ 0・経過 20 ms の前向き＋比例だけ。積分が残っていれば grown 並みに大きい
+  SpeedLoop expect;
+  TEST_ASSERT_EQUAL_INT(expect.update(40, 0.0f, LiftDir::UP, LIFT_SPEED_CTRL_MS), fresh);
+  TEST_ASSERT_LESS_THAN(grown, fresh);
+}
+
+// (e) stalled のあと反対方向へは動かせる
+void test_opposite_direction_moves_after_stall() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
+  for (uint32_t t = 0; t <= 600; t += 100) {
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    ctrl.step(t);
+  }
+  assert_reason(StopReason::ENCODER_STALL, ctrl.state());
+  // 反対方向（下降）へは動かせる
+  ctrl.on_hold(ui(1), down_hold(2, 40), 700);
+  const LiftState state = ctrl.step(700);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(hal.motor_dir()));
+  assert_reason(StopReason::NONE, state);
+}
+
+// 持ち主が替わっても積分は持ち越さない
+void test_integral_is_reset_when_owner_changes() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
+  // 積分を育てる（100 ms ごとに 4 ずつ）
+  for (uint32_t t = 0; t <= 300; t += 100) {
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    ctrl.step(t);
+  }
+  const int grown = hal.motor_duty();
+  TEST_ASSERT_GREATER_THAN(60, grown);
+  // 別の持ち主が同じ速さで引き継ぐ。最初の出力は積分 0（100 ms ぶんだけ進む）に戻る
+  ctrl.on_hold(module(2), up_hold(9, 40, 400), 400);
+  const LiftState state = ctrl.step(400);
+  assert_reason(StopReason::NONE, state);
+  SpeedLoop expect;
+  TEST_ASSERT_EQUAL_INT(expect.update(40, 0.0f, LiftDir::UP, 100), hal.motor_duty());
+  TEST_ASSERT_LESS_THAN(grown, hal.motor_duty());
+}
+
+// --- release と下端・速さの丸め ---
 
 void test_release_from_owner_stops_with_cmd_stop() {
   FakeHal hal;
@@ -357,12 +487,14 @@ void test_bottom_pressed_stops_down_motor() {
   TEST_ASSERT_TRUE(state.bottom);
 }
 
-void test_duty_is_clamped_before_reaching_motor() {
+void test_speed_is_clamped_before_speed_loop() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(500, true, 0);
-  ctrl.on_hold(ui(1), up_hold(1, 150, 0), 0);
-  ctrl.step(0);
+  // LIFT_SPEED_ABS_MAX_MM_S を超える速さは丸める（出力の上限に当たる）
+  ctrl.on_hold(ui(1), up_hold(1, LIFT_SPEED_ABS_MAX_MM_S + 50, 0), 0);
+  const LiftState state = ctrl.step(0);
+  TEST_ASSERT_EQUAL_INT(LIFT_SPEED_ABS_MAX_MM_S, state.speed);
   TEST_ASSERT_EQUAL_INT(LIFT_DUTY_ABS_MAX_PCT, hal.motor_duty());
 }
 
@@ -388,7 +520,9 @@ void test_state_reports_top_detect_false_and_module() {
   ctrl.on_hold(module(2), up_hold(17, 40, 1000), 1000);
   const LiftState state = ctrl.step(1035);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(state.dir));
-  TEST_ASSERT_EQUAL_INT(40, state.duty);
+  TEST_ASSERT_TRUE(state.duty > 0);
+  TEST_ASSERT_EQUAL_INT(40, state.speed);
+  TEST_ASSERT_EQUAL_INT(0, state.speed_meas);
   TEST_ASSERT_FALSE(state.top_detect);  // W-1 の間は常に false
   TEST_ASSERT_TRUE(state.ceiling_present);
   TEST_ASSERT_TRUE(state.ceiling_used);
@@ -481,6 +615,7 @@ void test_height_ok_in_state_survives_millis_wrap_when_fresh() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(500, true, 0xFFFFFF00u);
+  hal.set_encoder_count(0x00000100);
   ctrl.on_hold(ui(1), up_hold(1, 40, 0x00000100u), 0x00000100u);
   const LiftState state = ctrl.step(0x00000100u);  // 経過 512 ms
   TEST_ASSERT_TRUE(state.height_ok);
@@ -520,10 +655,17 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_wrong_typed_ceiling_stops_at_once);
   RUN_TEST(test_ceiling_age_counts_transit_through_controller);
 
+  RUN_TEST(test_duty_rises_while_speed_stays_below_target);
+  RUN_TEST(test_stall_when_encoder_never_moves);
+  RUN_TEST(test_stall_when_encoder_runs_backwards);
+  RUN_TEST(test_integral_is_reset_after_stop_and_repress);
+  RUN_TEST(test_opposite_direction_moves_after_stall);
+  RUN_TEST(test_integral_is_reset_when_owner_changes);
+
   RUN_TEST(test_release_from_owner_stops_with_cmd_stop);
   RUN_TEST(test_release_from_non_owner_is_ignored);
   RUN_TEST(test_bottom_pressed_stops_down_motor);
-  RUN_TEST(test_duty_is_clamped_before_reaching_motor);
+  RUN_TEST(test_speed_is_clamped_before_speed_loop);
   RUN_TEST(test_motor_is_written_on_every_step);
 
   RUN_TEST(test_state_reports_top_detect_false_and_module);

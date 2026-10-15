@@ -44,7 +44,7 @@ constexpr uint16_t LIFT_HTTP_PORT = 80;
 // 口はコードの定数。設定で変えられるようにしない（DetailedDesign.md §3.1）
 constexpr const char* LIFT_WS_UI_PATH = "/ws/ui";
 constexpr const char* LIFT_WS_MODULE_PATH = "/ws/module";
-constexpr const char* LIFT_NVS_NAMESPACE = "hve_lift";
+constexpr const char* LIFT_NVS_NAMESPACE = "hve_lift_mm";
 constexpr int LIFT_UI_CLIENTS_MAX = 4;  // **仮**。超えた接続は閉じる（WP-LIFT-04）
 constexpr const char* LIFT_MDNS_NAME = "hve-lift";  // names.md §2
 

@@ -21,11 +21,12 @@ bool decode_hello(const char* text, HelloMsg* out);
 
 // hold。ceiling が欠けている・読めない・知らない status・型の違う中身のときは
 // hold を捨てず、has_ceiling を偽（status = MISSING）にして受け取る（protocol §2.1）。
-// それ以外（読めない JSON・知らない t・press / dir / duty が読めない）は捨てて false。
+// それ以外（読めない JSON・知らない t・press / dir / speed が読めない）は捨てて false。
+// duty だけの hold は読めない hold として捨てる。
 struct HoldMsg {
   int press = 0;
   LiftDir dir = LiftDir::STOP;
-  int duty = 0;
+  int speed = 0;  // 目標の速さ [mm/s]（0 以上の整数）
   bool has_ceiling = false;
   CeilingReport ceiling;  // 受け取った時刻（received_at_ms）を stamped して返す
 };

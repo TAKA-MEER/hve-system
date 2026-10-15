@@ -25,6 +25,8 @@ LiftState moving_state() {
   state.seq = 88;
   state.dir = LiftDir::UP;
   state.duty = 40;
+  state.speed = 40;
+  state.speed_meas = 39;
   state.reason = StopReason::NONE;
   state.bottom = false;
   state.height_mm = 812;
@@ -95,12 +97,12 @@ void test_decode_unreadable_hello_is_true_but_rejected() {
 
 void test_decode_valid_hold() {
   HoldMsg hold;
-  TEST_ASSERT_TRUE(decode_hold("{\"t\":\"hold\",\"press\":17,\"dir\":\"up\",\"duty\":40,"
+  TEST_ASSERT_TRUE(decode_hold("{\"t\":\"hold\",\"press\":17,\"dir\":\"up\",\"speed\":40,"
                                "\"ceiling\":{\"status\":\"MEASURED\",\"mm\":1450,\"age_ms\":80}}",
                                &hold, 1000));
   TEST_ASSERT_EQUAL_INT(17, hold.press);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hold.dir));
-  TEST_ASSERT_EQUAL_INT(40, hold.duty);
+  TEST_ASSERT_EQUAL_INT(40, hold.speed);
   TEST_ASSERT_TRUE(hold.has_ceiling);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MEASURED),
                         static_cast<int>(hold.ceiling.status));
@@ -113,40 +115,49 @@ void test_decode_broken_hold_is_dropped() {
   assert_hold_never_moves_up("{\"t\":\"hold\",\"dir\":\"up\",");
   assert_hold_never_moves_up("not json at all");
   assert_hold_never_moves_up("");
-  assert_hold_never_moves_up("{\"t\":\"cmd\",\"press\":1,\"dir\":\"up\",\"duty\":40}");
-  assert_hold_never_moves_up("{\"t\":\"hold\",\"dir\":\"up\",\"duty\":40}");  // press が無い
-  assert_hold_never_moves_up("{\"t\":\"hold\",\"press\":1,\"duty\":40}");  // dir が無い
+  assert_hold_never_moves_up("{\"t\":\"cmd\",\"press\":1,\"dir\":\"up\",\"speed\":40}");
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"dir\":\"up\",\"speed\":40}");  // press が無い
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"press\":1,\"speed\":40}");  // dir が無い
   assert_hold_never_moves_up(
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"sideways\",\"duty\":40}");  // 知らない方向
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"sideways\",\"speed\":40}");  // 知らない方向
   assert_hold_never_moves_up(
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\"}");  // duty が無い
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\"}");  // speed が無い
   assert_hold_never_moves_up(
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":\"40\"}");  // duty の型が違う
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":\"40\"}");  // speed の型が違う
+  // duty だけの hold は読めない hold として捨てる（speed が無い）
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40}");
+  assert_hold_never_moves_up(
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,"
+      "\"ceiling\":{\"status\":\"MEASURED\",\"mm\":1450,\"age_ms\":80}}");
   assert_hold_never_moves_up(nullptr);
+}
+
+void test_decode_hold_with_negative_speed_is_dropped() {
+  assert_hold_never_moves_up("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":-1}");
 }
 
 void test_decode_hold_without_ceiling_is_missing() {
   HoldMsg hold;
-  TEST_ASSERT_TRUE(decode_hold("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40}", &hold,
+  TEST_ASSERT_TRUE(decode_hold("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40}", &hold,
                                1000));
   TEST_ASSERT_FALSE(hold.has_ceiling);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MISSING),
                         static_cast<int>(hold.ceiling.status));
-  // dir・duty は読めた値のまま（天井が無いので上昇は止まる）
+  // dir・speed は読めた値のまま（天井が無いので上昇は止まる）
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hold.dir));
-  TEST_ASSERT_EQUAL_INT(40, hold.duty);
+  TEST_ASSERT_EQUAL_INT(40, hold.speed);
 }
 
 void test_decode_hold_with_broken_ceiling_is_missing() {
   // 知らない status・型の違う中身は hold を捨てず MISSING として受ける
   const char* cases[] = {
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":{\"status\":\"NEAR\"}}",
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":{\"status\":1}}",
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":{\"status\":\"MEASURED\"}}",
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,"
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,\"ceiling\":{\"status\":\"NEAR\"}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,\"ceiling\":{\"status\":1}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,\"ceiling\":{\"status\":\"MEASURED\"}}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,"
       "\"ceiling\":{\"status\":\"MEASURED\",\"mm\":\"1450\",\"age_ms\":80}}",
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":\"MEASURED\"}",
-      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,\"ceiling\":null}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,\"ceiling\":\"MEASURED\"}",
+      "{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,\"ceiling\":null}",
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     HoldMsg hold;
@@ -160,7 +171,7 @@ void test_decode_hold_with_broken_ceiling_is_missing() {
 void test_decode_hold_ceiling_statuses() {
   const char* statuses[] = {"MEASURED", "TOO_NEAR", "NO_ECHO", "READ_ERROR"};
   for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); ++i) {
-    std::string text = std::string("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"duty\":40,"
+    std::string text = std::string("{\"t\":\"hold\",\"press\":1,\"dir\":\"up\",\"speed\":40,"
                                    "\"ceiling\":{\"status\":\"") +
                        statuses[i] + "\",\"mm\":1450,\"age_ms\":80}}";
     HoldMsg hold;
@@ -196,6 +207,8 @@ void test_state_encode_contains_v2_fields() {
   // v2 の形（protocol §2.2 の例どおり）を持っていること
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"t\":\"state\""));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"dir\":\"up\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"speed\":40"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"speed_meas\":39"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"top_detect\":false"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling\":{"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"status\":\"MEASURED\""));
@@ -211,6 +224,8 @@ void test_state_encode_contains_v2_fields() {
   TEST_ASSERT_EQUAL_INT(88, back.seq);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(back.dir));
   TEST_ASSERT_EQUAL_INT(40, back.duty);
+  TEST_ASSERT_EQUAL_INT(40, back.speed);
+  TEST_ASSERT_EQUAL_INT(39, back.speed_meas);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(StopReason::NONE), static_cast<int>(back.reason));
   TEST_ASSERT_EQUAL_INT(812, back.height_mm);
   TEST_ASSERT_TRUE(back.height_ok);
@@ -251,7 +266,7 @@ void test_state_encode_reports_every_stop_reason() {
       StopReason::NONE,          StopReason::CMD_STOP,     StopReason::CMD_TIMEOUT,
       StopReason::OWNER_GONE,    StopReason::CEILING_NEAR, StopReason::CEILING_STALE,
       StopReason::HEIGHT_UNKNOWN, StopReason::TOP,         StopReason::BOTTOM,
-      StopReason::MAX_RUN,       StopReason::OUT_OF_RANGE,
+      StopReason::MAX_RUN,       StopReason::ENCODER_STALL, StopReason::OUT_OF_RANGE,
   };
   for (size_t i = 0; i < sizeof(reasons) / sizeof(reasons[0]); ++i) {
     LiftState state = moving_state();
@@ -299,6 +314,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
   RUN_TEST(test_decode_valid_hold);
   RUN_TEST(test_decode_broken_hold_is_dropped);
+  RUN_TEST(test_decode_hold_with_negative_speed_is_dropped);
   RUN_TEST(test_decode_hold_without_ceiling_is_missing);
   RUN_TEST(test_decode_hold_with_broken_ceiling_is_missing);
   RUN_TEST(test_decode_hold_ceiling_statuses);

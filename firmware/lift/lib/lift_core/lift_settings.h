@@ -4,11 +4,13 @@
 
 #include <cstddef>
 
-// 1 軸ぶんの下限・上限・初期値 [%]
+#include "lift_decide.h"  // LIFT_SPEED_ABS_MAX_MM_S（検証の上限は判定と同じものを使う）
+
+// 1 軸ぶんの下限・上限・初期値 [mm/s]
 struct LiftAxisSettings {
-  int min_pct = 10;
-  int max_pct = 60;
-  int init_pct = 30;
+  int min_mm_s = 10;
+  int max_mm_s = 60;
+  int init_mm_s = 30;
 };
 
 // 昇降の設定（DetailedDesign-names.md §1・既定値は §5.1）
@@ -18,7 +20,7 @@ struct LiftSettings {
 };
 
 // 検証（protocol §3）: 2 項目が揃うのは構造体が保証する。
-// min ≦ init ≦ max・0〜100 の整数なら true
+// min ≦ init ≦ max・0〜LIFT_SPEED_ABS_MAX_MM_S の整数なら true
 bool validate_lift_settings(const LiftSettings& settings);
 
 // JSON ⇔ 構造体。形は {"lift_up":{"min":..,"max":..,"init":..},"lift_down":{...}}。

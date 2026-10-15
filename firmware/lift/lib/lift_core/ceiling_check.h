@@ -16,6 +16,7 @@ enum class StopReason : uint8_t {
   TOP,             // WAIVER(demo): W-1 上端の検知を一時無効の間は出ない
   BOTTOM,
   MAX_RUN,
+  ENCODER_STALL,  // モータへ出力しているのにエンコーダが回らない・逆に回る（spec #4d）
   OUT_OF_RANGE,  // 天井の理由のみ（停止理由ではない）。反射が返らない。上昇は許す
 };
 

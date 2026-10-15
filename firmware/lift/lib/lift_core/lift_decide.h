@@ -21,12 +21,17 @@ constexpr int LIFT_TOP_MM = -1;                // 上端の閾値。-1 は未設
 constexpr bool LIFT_TOP_DETECT_ENABLED = false;
 constexpr uint32_t LIFT_MAX_RUN_MS = 10000;     // 同じ方向へ動き続けてよい時間の上限（仮値）
 constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上限 [%]
+constexpr int LIFT_SPEED_ABS_MAX_MM_S = 100;    // 速さの絶対上限 [mm/s]（仮。H-V3）
+constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進まなければ止めるまでの時間（仮）
+constexpr int LIFT_STALL_MIN_COUNTS = 8;        // 止めずに済む進行方向への最小の進み [counts]（仮）
 
 // 昇降部からカメラ部へ返す状態（DetailedDesign-protocol.md §2.2）
 struct LiftState {
   int seq = 0;                  // 送出ごとの連番
   LiftDir dir = LiftDir::STOP;  // 指令ではなく、実際にモータへ出している方向
   int duty = 0;                 // 実際にモータへ出しているデューティ [%]
+  int speed = 0;                // 目標の速さ [mm/s]
+  int speed_meas = 0;           // エンコーダで測った速さ [mm/s]（上向きが正）
   StopReason reason = StopReason::NONE;
   bool bottom = false;
   int height_mm = 0;
@@ -57,7 +62,8 @@ struct LiftDecideInput {
   bool has_cmd = false;  // 持ち主がいるか（いないときは owner_empty_reason で止める）
   StopReason owner_empty_reason = StopReason::CMD_TIMEOUT;  // 持ち主がいないときの停止理由
   LiftDir dir = LiftDir::STOP;  // 持ち主の命令の方向
-  int duty = 0;                 // 持ち主の命令のデューティ
+  int speed_mm_s = 0;           // 持ち主の命令の速さ [mm/s]
+  bool stalled = false;         // 出力しているのにエンコーダが進んでいない（#8a。呼び出し側が数える）
   CeilingReport ceiling;        // 持ち主の最後の hold に載っていた天井の値
   bool connection_has_sensor = true;  // 持ち主の接続が距離計を持つか
   uint32_t now_ms = 0;
@@ -71,7 +77,7 @@ struct LiftDecideInput {
 
 struct LiftDecideResult {
   LiftDir dir = LiftDir::STOP;
-  int duty = 0;
+  int speed_mm_s = 0;  // 目標の速さ [mm/s]。デューティは SpeedLoop が決める
   StopReason reason = StopReason::NONE;
 };
 
