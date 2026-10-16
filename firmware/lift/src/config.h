@@ -10,9 +10,9 @@
 
 // --- ピン（DetailedDesign-hardware.md §1。ストラッピングの 0・2・5・12・15 は避ける）---
 
-// MD10C（DIR + PWM の 2 線）。先行試作と同じ
-constexpr uint8_t MOTOR_DIR_PIN = 14;
-constexpr uint8_t MOTOR_PWM_PIN = 27;
+// MD10C（DIR + PWM の 2 線）。先行試作から付け替えた（2026-10-16）
+constexpr uint8_t MOTOR_DIR_PIN = 27;
+constexpr uint8_t MOTOR_PWM_PIN = 14;
 // DIR = HIGH で上昇するか。**実機配線で確認するまで仮**（false にすると逆向きになる）
 constexpr bool MOTOR_DIR_UP_LEVEL = true;
 
