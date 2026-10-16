@@ -207,6 +207,7 @@ const GOOD = {
   lift_down: {min: 10, max: 60, init: 30},
   pitch: {min: 1, max: 30, init: 10},
   yaw: {min: 1, max: 30, init: 10},
+  motor_max_pct: 50,
 };
 
 const withChange = (axis, field, value) => {
@@ -215,10 +216,31 @@ const withChange = (axis, field, value) => {
   return draft;
 };
 
-test('設定の検証は 4 項目が Save できる形を通す（spec §2）', () => {
+const withMotor = (value) => {
+  const draft = JSON.parse(JSON.stringify(GOOD));
+  draft.motor_max_pct = value;
+  return draft;
+};
+
+test('設定の検証は 4 項目＋上限が Save できる形を通す（spec §2）', () => {
   const result = settings.validateSettingsDraft(GOOD);
   assert.equal(result.ok, true);
   assert.deepEqual(result.errors, []);
+});
+
+test('モータへの出力の上限は 10〜100 の整数（spec §2.1）', () => {
+  assert.equal(settings.validateSettingsDraft(withMotor(10)).ok, true);
+  assert.equal(settings.validateSettingsDraft(withMotor(100)).ok, true);
+  assert.equal(settings.validateSettingsDraft(withMotor(9)).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor(101)).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor('')).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor('abc')).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor(50.5)).ok, false);
+  const missing = JSON.parse(JSON.stringify(GOOD));
+  delete missing.motor_max_pct;
+  assert.equal(settings.validateSettingsDraft(missing).ok, false);
+  const over = settings.validateSettingsDraft(withMotor(101));
+  assert.match(over.errors[0].text, /モータへの出力の上限/);
 });
 
 test('下限 > 上限は保存できない', () => {
@@ -265,6 +287,7 @@ test('理由の文言は 1 行にまとめる（画面からはみ出さない�
     lift_down: {min: 10, max: 5, init: 30},
     pitch: {min: 1, max: 30, init: 10},
     yaw: {min: 1, max: 30, init: 10},
+    motor_max_pct: 50,
   });
   assert.equal(many.errors.length, 2);
   assert.equal(settings.settingsErrorText(many.errors), '上昇: 下限 ≦ 初期値 ≦ 上限 にしてください（ほか 1 件）');

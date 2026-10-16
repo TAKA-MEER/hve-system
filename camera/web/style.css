@@ -124,6 +124,7 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}
 th,td{padding:4px;text-align:left;border-bottom:1px solid var(--bd);font-size:13px}
 th{color:var(--mut);font-weight:600;font-size:12px}
 th:first-child,td:first-child{width:4.2em;white-space:nowrap} th:last-child,td:last-child{width:3.8em}
+td.wrapcell{white-space:normal}
 td input{width:100%;padding:6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
 td input.bad{border-color:var(--ng)}
 .err{color:var(--ng-tx);font-size:12px;min-height:1.4em}
@@ -132,10 +133,18 @@ td input.bad{border-color:var(--ng)}
 .primary:disabled{opacity:.4;cursor:not-allowed}
 .prov{padding:6px 10px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:12px}
 .prov b{color:var(--warn-tx)}
-/* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう） */
-@media (max-height:480px){
-  .sheet{padding:8px 12px;gap:4px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
+/* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう。
+   4 項目＋上限で昇降部の画面より行が多いので、境目は 700px） */
+@media (max-height:700px){
+  .sheet{padding:8px 12px;gap:4px} .sheet h1{font-size:15px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
   .prov{font-size:11px;padding:4px 8px} .err{min-height:0}
+}
+/* さらに低い画面では表とボタンも詰める（横長・低丈の端末用） */
+@media (max-height:480px){
+  .sheet{padding:4px 12px;gap:2px} .sheet h1{font-size:14px}
+  th,td{font-size:12px} td input{padding:2px 6px;font-size:12px}
+  .row-actions .hbtn{padding:2px 8px;font-size:12px}
+  .prov{font-size:10px;padding:2px 6px} .err{font-size:11px}
 }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
 .toast.show{display:block}
