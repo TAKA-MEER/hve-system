@@ -20,7 +20,9 @@ constexpr int LIFT_TOP_MM = -1;                // 上端の閾値。-1 は未設
 // WAIVER(demo): W-1 上端の検知を一時無効（false の間は判定 #4・#6 を行わない）
 constexpr bool LIFT_TOP_DETECT_ENABLED = false;
 constexpr uint32_t LIFT_MAX_RUN_MS = 10000;     // 同じ方向へ動き続けてよい時間の上限（仮値）
-constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上限 [%]
+constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上限 [%]。% ⇔ PWM の換算の基準（モータ保護の上限ではない）
+constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上限の既定値 [%]（定格 12 V ÷ 電源 24 V。Spec-ui §2.1）
+constexpr int LIFT_MOTOR_MAX_PCT_MIN = 10;      // モータへの出力の上限の下限 [%]（同上。上限は LIFT_DUTY_ABS_MAX_PCT）
 constexpr int LIFT_SPEED_ABS_MAX_MM_S = 100;    // 速さの絶対上限 [mm/s]（仮。H-V3）
 constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進まなければ止めるまでの時間（仮）
 constexpr int LIFT_STALL_MIN_COUNTS = 8;        // 止めずに済む進行方向への最小の進み [counts]（仮）

@@ -10,7 +10,10 @@ LiftSettings defaults() { return LiftSettings(); }
 
 }  // namespace
 
-void test_defaults_are_valid() { TEST_ASSERT_TRUE(validate_lift_settings(defaults())); }
+void test_defaults_are_valid() {
+  TEST_ASSERT_TRUE(validate_lift_settings(defaults()));
+  TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, defaults().motor_max_pct);
+}
 
 void test_min_above_init_is_rejected() {
   LiftSettings settings = defaults();
@@ -41,6 +44,20 @@ void test_out_of_range_is_rejected() {
   TEST_ASSERT_FALSE(validate_lift_settings(settings));
 }
 
+void test_motor_max_pct_out_of_range_is_rejected() {
+  LiftSettings settings = defaults();
+  settings.motor_max_pct = LIFT_MOTOR_MAX_PCT_MIN - 1;  // 9
+  TEST_ASSERT_FALSE(validate_lift_settings(settings));
+  settings = defaults();
+  settings.motor_max_pct = LIFT_DUTY_ABS_MAX_PCT + 1;  // 101
+  TEST_ASSERT_FALSE(validate_lift_settings(settings));
+  settings = defaults();
+  settings.motor_max_pct = LIFT_MOTOR_MAX_PCT_MIN;
+  TEST_ASSERT_TRUE(validate_lift_settings(settings));
+  settings.motor_max_pct = LIFT_DUTY_ABS_MAX_PCT;
+  TEST_ASSERT_TRUE(validate_lift_settings(settings));
+}
+
 void test_boundary_values_are_accepted() {
   LiftSettings settings;
   settings.up.min_mm_s = 0;
@@ -54,7 +71,8 @@ void test_boundary_values_are_accepted() {
 
 void test_from_json_round_trip() {
   const char* text = "{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
-                     "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20}}";
+                     "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20},"
+                     "\"motor_max_pct\":50}";
   LiftSettings settings;
   TEST_ASSERT_TRUE(lift_settings_from_json(text, &settings));
   TEST_ASSERT_EQUAL_INT(10, settings.up.min_mm_s);
@@ -63,13 +81,46 @@ void test_from_json_round_trip() {
   TEST_ASSERT_EQUAL_INT(5, settings.down.min_mm_s);
   TEST_ASSERT_EQUAL_INT(50, settings.down.max_mm_s);
   TEST_ASSERT_EQUAL_INT(20, settings.down.init_mm_s);
+  TEST_ASSERT_EQUAL_INT(50, settings.motor_max_pct);
 
-  char json[160];
+  char json[192];
   TEST_ASSERT_GREATER_THAN(0, lift_settings_to_json(settings, json, sizeof(json)));
   LiftSettings back;
   TEST_ASSERT_TRUE(lift_settings_from_json(json, &back));
   TEST_ASSERT_EQUAL_INT(10, back.up.min_mm_s);
   TEST_ASSERT_EQUAL_INT(20, back.down.init_mm_s);
+  TEST_ASSERT_EQUAL_INT(50, back.motor_max_pct);
+}
+
+void test_from_json_rejects_missing_motor_max_pct() {
+  LiftSettings settings;
+  // motor_max_pct が無い古い形は通さない（全体が既定値になる。protocol §3）
+  TEST_ASSERT_FALSE(
+      lift_settings_from_json("{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+                              "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20}}",
+                              &settings));
+  // 9・101 は通さない
+  TEST_ASSERT_FALSE(
+      lift_settings_from_json("{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+                              "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20},"
+                              "\"motor_max_pct\":9}",
+                              &settings));
+  TEST_ASSERT_FALSE(
+      lift_settings_from_json("{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+                              "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20},"
+                              "\"motor_max_pct\":101}",
+                              &settings));
+  // 整数でないものも通さない
+  TEST_ASSERT_FALSE(
+      lift_settings_from_json("{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+                              "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20},"
+                              "\"motor_max_pct\":\"50\"}",
+                              &settings));
+  TEST_ASSERT_FALSE(
+      lift_settings_from_json("{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+                              "\"lift_down\":{\"min\":5,\"max\":50,\"init\":20},"
+                              "\"motor_max_pct\":true}",
+                              &settings));
 }
 
 void test_from_json_rejects_broken_input() {
@@ -104,8 +155,10 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_init_above_max_is_rejected);
   RUN_TEST(test_min_above_max_is_rejected);
   RUN_TEST(test_out_of_range_is_rejected);
+  RUN_TEST(test_motor_max_pct_out_of_range_is_rejected);
   RUN_TEST(test_boundary_values_are_accepted);
   RUN_TEST(test_from_json_round_trip);
+  RUN_TEST(test_from_json_rejects_missing_motor_max_pct);
   RUN_TEST(test_from_json_rejects_broken_input);
   RUN_TEST(test_to_json_reports_zero_when_buffer_is_short);
 

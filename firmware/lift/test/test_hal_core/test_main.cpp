@@ -268,6 +268,14 @@ void test_duty_is_linear_in_pwm() {
   TEST_ASSERT_EQUAL_UINT32(kFullScale / 4, motor_duty_to_pwm(25, kResolution));
 }
 
+void test_duty_uses_abs_max_as_full_scale_not_motor_cap() {
+  // 100 % = PWM の最大が基準（LIFT_DUTY_ABS_MAX_PCT で割る）。
+  // 上限の値（50）で割ると 50 % が PWM の最大（= 24 V そのまま）になるので、
+  // 50 % はフルスケールの半分であることを縛る（Spec-ui §2.1）
+  TEST_ASSERT_EQUAL_UINT32(kFullScale / 2, motor_duty_to_pwm(50, kResolution));
+  TEST_ASSERT_EQUAL_UINT32(2047, motor_duty_to_pwm(50, 12));  // 4095 × 50 / 100 = 2047（切り捨て）
+}
+
 void test_pwm_stays_inside_the_channel() {
   for (int duty = -20; duty <= 120; duty += 7) {
     TEST_ASSERT_TRUE(motor_duty_to_pwm(duty, kResolution) <= kFullScale);
@@ -311,6 +319,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_duty_full_gives_full_scale);
   RUN_TEST(test_duty_over_full_is_clamped);
   RUN_TEST(test_duty_is_linear_in_pwm);
+  RUN_TEST(test_duty_uses_abs_max_as_full_scale_not_motor_cap);
   RUN_TEST(test_pwm_stays_inside_the_channel);
   RUN_TEST(test_pwm_works_at_12_bit_too);
   return UNITY_END();

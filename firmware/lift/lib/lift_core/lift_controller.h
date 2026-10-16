@@ -33,6 +33,10 @@ class LiftController {
   // 呼び出し側で閉じること）
   void set_ui_clients(int count);
 
+  // モータへの出力の上限 [%]（Spec-ui §2.1）。tick が SpeedLoop::update に渡す。
+  // 動いている最中に変えたら次の周期から効く。範囲外は LIFT_DUTY_ABS_MAX_PCT に丸める
+  void set_motor_max_pct(int pct);
+
   // 判定して、その結果をモータへ出して、状態を更新する
   LiftState step(uint32_t now_ms);
 
@@ -83,6 +87,7 @@ class LiftController {
   uint32_t run_at_ms_;  // 積算の起点（直前の step の時刻）
   // 速さの制御（DetailedDesign.md §4.1.2）
   SpeedLoop speed_loop_;
+  int motor_max_pct_ = LIFT_MOTOR_MAX_PCT_DEFAULT;  // モータへの出力の上限 [%]。set_motor_max_pct で持たせる
   int last_duty_ = 0;          // 直前にモータへ出したデューティ（#8a の「動かしている」判定用）
   uint32_t loop_at_ms_ = 0;    // SpeedLoop を最後に進めた時刻
   bool loop_started_ = false;  // SpeedLoop を進めたことがあるか

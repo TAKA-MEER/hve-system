@@ -23,13 +23,16 @@ float speed_from_counts(int32_t prev_count, int32_t now_count, uint32_t prev_ms,
 
 // 目標の速さ [mm/s] と測った速さ（進行方向が正）からデューティ [%] を出す。
 // 出力 = 前向き（目標 × 上昇・下降の係数）＋ Kp × 偏差 ＋ Ki × 偏差の積分。
-// 0〜LIFT_DUTY_ABS_MAX_PCT に丸める。丸めに当たっている間は積分を進めない。
+// 0〜max_pct（モータへの出力の上限。LiftController が設定から渡す）に丸める。
+// 丸めに当たっている間は積分を進めない。
 // 止まった・向きが替わった・持ち主が替わったら reset() で 0 に戻す（§4.1.2）。
 class SpeedLoop {
  public:
-  // 目標・測った値・向き・前回からの経過時間 → デューティ [%]。
+  // 目標・測った値・向き・前回からの経過時間・出力の上限 → デューティ [%]。
   // 測った値が逆向きなら負で渡す（偏差が大きくなり、出力を上げる側に効く）。
-  int update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_t dt_ms);
+  // max_pct の外（LIFT_MOTOR_MAX_PCT_MIN〜LIFT_DUTY_ABS_MAX_PCT の外）は
+  // LIFT_DUTY_ABS_MAX_PCT に丸めて使う
+  int update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_t dt_ms, int max_pct);
   void reset();
 
  private:

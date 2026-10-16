@@ -41,6 +41,10 @@ void write_axis(JsonObject obj, const char* key, const LiftAxisSettings& axis) {
 }  // namespace
 
 bool validate_lift_settings(const LiftSettings& settings) {
+  if (settings.motor_max_pct < LIFT_MOTOR_MAX_PCT_MIN ||
+      settings.motor_max_pct > LIFT_DUTY_ABS_MAX_PCT) {
+    return false;
+  }
   return axis_ok(settings.up) && axis_ok(settings.down);
 }
 
@@ -61,6 +65,12 @@ bool lift_settings_from_json(const char* text, LiftSettings* out) {
   if (!read_axis(obj, "lift_up", &parsed.up) || !read_axis(obj, "lift_down", &parsed.down)) {
     return false;
   }
+  // motor_max_pct は必須。欠けた・整数でない・範囲外は通さない。
+  // 真偽値は ArduinoJson で int として読めるので除く
+  if (!obj["motor_max_pct"].is<int>() || obj["motor_max_pct"].is<bool>()) {
+    return false;
+  }
+  parsed.motor_max_pct = obj["motor_max_pct"].as<int>();
   if (!validate_lift_settings(parsed)) {
     return false;
   }
@@ -76,6 +86,7 @@ size_t lift_settings_to_json(const LiftSettings& settings, char* out, size_t out
   JsonObject obj = doc.to<JsonObject>();
   write_axis(obj, "lift_up", settings.up);
   write_axis(obj, "lift_down", settings.down);
+  obj["motor_max_pct"] = settings.motor_max_pct;
   const size_t needed = measureJson(doc);
   if (needed >= out_size) {
     return 0;
