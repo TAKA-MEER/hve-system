@@ -53,6 +53,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `ENC_PPR` の確認・`LIFT_UM_PER_COUNT`・速さの制御の係数・`LIFT_TOP_MM` を決める。
 
+**`WP-LIFT-08` と `WP-CAM-07`**: 設定 API の `motor_max_pct` は必須なので、片方だけ新しいと `PUT` が `400` になる。**2 つ揃えてから実機に入れる。**`docs/使い方.md` の設定の節は `WP-LIFT-08` が書き、`WP-CAM-07` はカメラモジュールの画面の欄だけ足す（LIFT-08 のマージ後に始める）。
+
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
 **2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
@@ -181,7 +183,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   5. ※ 出力の丸め（`LIFT_DUTY_ABS_MAX_PCT`）を外す
   6. `duty` だけの `hold` を受け付ける
   7. 設定の検証が `LIFT_SPEED_ABS_MAX_MM_S` を超える値を通す
-- **実機で管理担当が確かめる**: 同じ速さで上昇・下降の所要時間がほぼ同じ／巻き取り軸からエンコーダを外す（カップリングを抜く）と `ENCODER_STALL` で止まる／`state.speed_meas` が目標に収まる
+- **実機で管理担当が確かめる**（**`WP-LIFT-08` のマージ後**。それまでは出力が 100 % まで出る）: 同じ速さで上昇・下降の所要時間がほぼ同じ／巻き取り軸からエンコーダを外す（カップリングを抜く）と `ENCODER_STALL` で止まる／`state.speed_meas` が目標に収まる
 
 ### `WP-LIFTUI-02` 昇降部の画面・道具を速さ（mm/s）に
 
