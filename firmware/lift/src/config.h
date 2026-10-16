@@ -31,6 +31,13 @@ constexpr int ENC_GLITCH_FILTER_NS = 1000;
 // 戻し、割り込みで溢れの累積へ移す（合計 = 溢れの累積 + 今のカウンタ）
 constexpr int ENC_PCNT_LIMIT = 30000;
 
+// 組み立て用ファーム（env:esp32dev_manual・台帳 W-2）の <on>-off-<on> スイッチ。**仮**。
+// 共通端子を GND、両側をそれぞれのピンへ。INPUT_PULLUP で受け、入っている側が LOW
+constexpr uint8_t MANUAL_SW_UP_PIN = 33;
+constexpr uint8_t MANUAL_SW_DOWN_PIN = 13;
+// 組み立て用ファームのデューティ [%]（固定。変えるときはここを直して書き込み直す）
+constexpr int MANUAL_DUTY_PCT = 40;
+
 // --- PWM（先行試作と同じ。LEDC ch0 / 5 kHz / 8 bit）---
 
 constexpr uint8_t PWM_CH = 0;
