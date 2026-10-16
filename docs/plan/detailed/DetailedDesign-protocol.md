@@ -78,18 +78,19 @@
 | メソッド | パス | 中身 |
 | --- | --- | --- |
 | `GET` | `/` と画面のファイル | 昇降部の画面（埋め込み。[DetailedDesign.md](DetailedDesign.md) §4.2） |
-| `GET` | `/api/settings` | `{"settings":{"lift_up":{…},"lift_down":{…}},"using_defaults":false}` |
-| `PUT` | `/api/settings` | `{"lift_up":{"min":10,"max":60,"init":30},"lift_down":{…}}`（**mm/s**）をまるごと置き換える。検証に通らなければ `400` と `errors` を返し、**保存しない** |
+| `GET` | `/api/settings` | `{"settings":{"lift_up":{…},"lift_down":{…},"motor_max_pct":50},"using_defaults":false}` |
+| `PUT` | `/api/settings` | `{"lift_up":{"min":10,"max":60,"init":30},"lift_down":{…},"motor_max_pct":50}`（速度は **mm/s**、`motor_max_pct` は %）をまるごと置き換える（**3 つとも必須**）。検証に通らなければ `400` と `errors` を返し、**保存しない** |
 
-検証（`lift_settings`）: 2 項目が揃う／`min ≦ init ≦ max`／0〜`LIFT_SPEED_ABS_MAX_MM_S` の整数（mm/s）。**昇降部が自分で検証する**（カメラモジュール側の検証は便宜のため）。
+検証（`lift_settings`）: 3 項目が揃う／`min ≦ init ≦ max`／0〜`LIFT_SPEED_ABS_MAX_MM_S` の整数（mm/s）／`motor_max_pct` は `LIFT_MOTOR_MAX_PCT_MIN`（10）〜`LIFT_DUTY_ABS_MAX_PCT`（100）の整数（2026-10-16。spec [Spec-ui.md](../spec/Spec-ui.md) §2.1）。**昇降部が自分で検証する**（カメラモジュール側の検証は便宜のため）。
 保存は NVS（`Preferences` の名前空間 `LIFT_NVS_NAMESPACE`）。読めない・検証を通らないときは既定値で動き、`using_defaults` を `true` にする。
+**`motor_max_pct` が無い古い形で保存されていたら、検証を通らないので全体が既定値（`motor_max_pct` は 50）になる**（実機にはまだ mm/s の設定を保存していないので、移し替えは作らない）。
 
 ## 4. カメラモジュールの HTTP・WS（旧版からの変更だけ）
 
 | 変更 | 中身 |
 | --- | --- |
-| `GET /api/settings` | 自分のピッチ・ヨーの設定と、**昇降部から取った**昇降の設定をまとめて返す（形は旧版と同じ 4 軸）。昇降部に繋がらないときは `503` |
-| `PUT /api/settings` | 4 軸をまとめて受ける。**先に 4 軸とも自分で検証 → 昇降部へ `PUT`（昇降の 2 軸）→ 成功したら自分の 2 軸を保存**。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
+| `GET /api/settings` | 自分のピッチ・ヨーの設定と、**昇降部から取った**昇降の設定をまとめて返す（4 軸 ＋ 昇降部の `motor_max_pct`）。昇降部に繋がらないときは `503` |
+| `PUT /api/settings` | 4 軸と `motor_max_pct` をまとめて受ける。**先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`）→ 成功したら自分の 2 軸を保存**（`motor_max_pct` は自分では保存しない。持ち主は昇降部）。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
 | `state.lift` | 昇降部の `state` のうち `dir`・`duty`・`speed`・`speed_meas`・`reason`・`bottom`・`height_mm`・`height_ok`・`top_detect`・`owner`・`ui_clients` を載せる。**昇降部の IP**（`lift_ip`）も載せる（画面に昇降部へのリンクを出す。[DetailedDesign.md](DetailedDesign.md) §4.6） |
 | `state.ceiling` | 自分で測った値（`status`・`mm`・`age_ms`）と、**昇降部が返した判定**（`ok`・`reason`）。カメラモジュールは許可を計算しない。**判定は、カメラモジュールが持ち主で昇降部が判定を返しているときだけ載せ、それ以外（止まっている・別の画面が持ち主・昇降部が `ceiling` を返さない）は `ok`・`reason` を `null` にする**（昇降部と切れているときは `ok: false`・`reason: LINK_LOST`）。2026-10-07 実機: 判定が無いのに `CEILING_STALE` を入れていたので、止まっている間ずっと画面が「天井 値なし」になり、上昇ボタンも薄くなっていた |
 | 画面の天井のバッジ | **判定（`reason`）があればそれで出す。無ければ自分で測った `status` で出す**（`MEASURED` → 距離・`TOO_NEAR` → 近すぎ・`NO_ECHO` → 範囲外・`READ_ERROR`／値が無い → 値なし）。**上昇ボタンを薄くするのは、昇降部と切れているときと、判定が `ok: false` のときだけ**（判定が無いだけでは薄くしない。上昇してよいかは昇降部が決める） |

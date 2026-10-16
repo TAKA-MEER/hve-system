@@ -147,7 +147,10 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `LIFT_TOP_MM` | `lift_decide.h` | -1（未設定） | 旧版 |
 | **`LIFT_TOP_DETECT_ENABLED`** | `lift_decide.h` | `false` | **`W-1`**（spec [Spec-safety.md](../spec/Spec-safety.md) §1.1）。`true` に戻すのは台帳を閉じるとき |
 | `LIFT_MAX_RUN_MS` | `lift_decide.h` | 10000 | **仮**（旧版。spec #4b） |
-| `LIFT_DUTY_ABS_MAX_PCT` | `lift_decide.h` | 100 | MD10C |
+| `LIFT_DUTY_ABS_MAX_PCT` | `lift_decide.h` | 100 | MD10C（**% ⇔ PWM の換算の基準**。モータ保護の上限ではない） |
+| **`LIFT_MOTOR_MAX_PCT_DEFAULT`** / **`LIFT_MOTOR_MAX_PCT_MIN`** | `lift_decide.h` | 50 / 10 | spec [Spec-ui.md](../spec/Spec-ui.md) §2.1（定格 12 V ÷ 電源 24 V）。設定の `motor_max_pct` の既定値と下限（2026-10-16） |
+| **`LiftSettings::motor_max_pct`** / JSON の **`motor_max_pct`** | `lift_settings.h` | モータへの出力の上限 [%]（設定。NVS に保存） | 同上 |
+| **`LiftController::set_motor_max_pct`** | `lift_controller.h` | 上限を `SpeedLoop` へ渡すために持たせる | [DetailedDesign.md](DetailedDesign.md) §4.1.2 |
 | **`CEILING_MARGIN_MM`** | `ceiling_check.h` | 500 | **仮**（`H-V8`。v1 の `ceiling_margin_mm` を昇降部へ移した。spec `H-M4`） |
 | **`CEILING_STALE_MS`** | `ceiling_check.h` | 600 | **仮**（`H-V8`。v1 の `ceiling_stale_ms` を昇降部へ移した） |
 | 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}`（**mm/s**。spec 2026-10-15 で % から替えた） | **仮**（数だけ旧版の例の値。`H-V3`） |

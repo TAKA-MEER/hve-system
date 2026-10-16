@@ -46,6 +46,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-06` | 5 | **速さのフィードバック**（`SpeedLoop`・`ENCODER_STALL`・`hold` の `speed`・設定を mm/s・NVS の名前空間） | LIFT-05 | 要（同上） |
 | `WP-LIFTUI-02` | 5 | 昇降部の画面・偽の昇降部・`lift_probe` を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要 |
 | `WP-CAM-06` | 5 | カメラモジュール（アプリ・画面）を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-08` | 5 | **モータへの出力の上限を設定に**（`motor_max_pct`・`SpeedLoop` の丸め・設定 API・NVS・昇降部の画面・偽の昇降部）。spec 2026-10-16 | LIFT-06 | 不要（実機の確認は管理担当） |
+| `WP-CAM-07` | 5 | カメラモジュール（設定の検証・中継・偽物のモード・画面）に `motor_max_pct` を足す | LIFT-08（取り決め） | 不要（偽物のモード） |
 | `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
@@ -192,6 +194,25 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§4、[-names.md](DetailedDesign-names.md) §3
 - 作るもの: `camera/hve_camera`（`lift_link` の `hold` の `speed`・設定の中継の範囲・`state.lift` の `speed`・`speed_meas`）・`camera/web`（単位 mm/s・`ENCODER_STALL`・`HEIGHT_UNKNOWN` の文言）・偽物のモード・**`docs/使い方.md`**（画面の文言）
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験が通る。**変異**: 昇降部へ `duty` を送る／`state.lift` から `speed_meas` を落とす → 赤
+
+### `WP-LIFT-08` モータへの出力の上限を設定に
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.2・§4.2、[-protocol.md](DetailedDesign-protocol.md) §3、[-names.md](DetailedDesign-names.md) §5.1、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
+- 作るもの: `lift_decide.h` の `LIFT_MOTOR_MAX_PCT_DEFAULT`・`LIFT_MOTOR_MAX_PCT_MIN`・`lift_settings`（`motor_max_pct` の構造体・検証・JSON）・`SpeedLoop::update` に上限の引数（丸めと積分の止め方をその上限で）・`LiftController::set_motor_max_pct`・`main.cpp`（起動時と `PUT` 成功時に渡す・エラーの文言）・`firmware/lift/web/`（設定画面の欄と添え書き）・`tools/fake_lift_server.py`・**`docs/使い方.md`**（設定画面の欄・電源を替えたときの合わせ方）。`motor_duty_to_pwm` は変えない
+- 受け入れ: native の試験・esp32dev のビルド・node の試験・`tools/tests`・スクロールの検査が通る。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL で、モータに出した値を見て縛る。偽 HAL は数を目標より遅く進め、#8a で止まらずに出力が上がり続ける状況を作る）
+  1. ※ `tick` が `SpeedLoop` に上限ではなく `LIFT_DUTY_ABS_MAX_PCT` を渡す（50 % を超えて出る）
+  2. ※ `set_motor_max_pct` で上限を下げても、動いている最中の出力が古い上限のまま
+  3. `SpeedLoop` が上限に当たっている間も積分を進める（目標に追いついたあと出力が下がらない）
+  4. `motor_duty_to_pwm` を上限の値で割る（50 % が PWM の最大になる）
+  5. 設定の検証が `motor_max_pct` の欠けた本文・9・101 を通す
+  6. 偽の昇降部が `motor_max_pct` の欠けた `PUT` を通す
+- **実機で管理担当が確かめる**: 既定で `state.duty` が 50 を超えない（重く引っかけて速さが追いつかない状況）／設定画面で 30 にすると 30 で頭打ち／電源を入れ直しても残る
+
+### `WP-CAM-07` カメラモジュールにモータへの出力の上限を
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
+- 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
 
 ### `WP-LIFT-07` 上端の検知を戻す（`W-1` を閉じる）
 

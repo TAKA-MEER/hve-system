@@ -138,7 +138,7 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 | `ceiling_check()` | 純関数。天井の値・古さ・閾値・その接続が距離計を持つか → `(ok, 理由)`（§3.2） | ○ |
 | `LiftArbiter` | 操作の持ち主（§3.3）。接続 ID・`press`・受け取った時刻を持つ | ○ |
 | `LiftController` | 受け付け・持ち主・ウォッチドッグ・`lift_decide()` の結果を**モータに効かせる**。ハードウェアは `hal.h` の抽象を通す | ○（偽 HAL） |
-| `lift_settings` | 昇降の速度の設定の検証（下限 ≦ 初期値 ≦ 上限・0〜100）と JSON | ○ |
+| `lift_settings` | 昇降の設定の検証（速度は下限 ≦ 初期値 ≦ 上限・0〜`LIFT_SPEED_ABS_MAX_MM_S`、モータへの出力の上限 `motor_max_pct` は `LIFT_MOTOR_MAX_PCT_MIN`〜`LIFT_DUTY_ABS_MAX_PCT`）と JSON | ○ |
 | `cmd_codec` | JSON ⇔ 構造体。読めない `hold` は捨てる（持ち主の `hold` が途絶えれば止まる）。読めない `hello` は「距離計を持つ」 | ○ |
 | `EncoderHeight` | 純関数に近い小さな状態。エンコーダの数と下端スイッチ → 高さ・読めるか（§4.1.1） | ○ |
 | `SpeedLoop` | 速さのフィードバック（PI）。目標 mm/s・測った mm/s・経過時間 → デューティ（§4.1.2） | ○ |
@@ -157,7 +157,7 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 | 7 | 下降 かつ 下端スイッチが押されている | 停止 | `BOTTOM` |
 | 8 | 同じ方向へ `LIFT_MAX_RUN_MS` 超 連続 | 停止 | `MAX_RUN`（spec #4b） |
 | 8a | ★同じ方向の命令が続く間に、モータへ出力しているのに `LIFT_STALL_MS` の間エンコーダが進行方向へ `LIFT_STALL_MIN_COUNTS` 未満しか進まない（**逆向きに進んだ場合も**） | 停止。数え方は #8 と同じく、命令が `stop` になるか向きが替わるまで続ける（反対方向へは動かせる） | ★`ENCODER_STALL`（spec #4d） |
-| 9 | それ以外 | 指令どおりの向き。**速さ `speed`（mm/s）を `0`〜`LIFT_SPEED_ABS_MAX_MM_S` に丸め、`SpeedLoop` がデューティ（`0`〜`LIFT_DUTY_ABS_MAX_PCT`）に直す**（§4.1.2） | `NONE` |
+| 9 | それ以外 | 指令どおりの向き。**速さ `speed`（mm/s）を `0`〜`LIFT_SPEED_ABS_MAX_MM_S` に丸め、`SpeedLoop` がデューティ（`0`〜設定の `motor_max_pct`）に直す**（§4.1.2） | `NONE` |
 
 **`W-1`（上端の検知の一時無効）**: 判定 #4・#6 は**消さずに** `LIFT_TOP_DETECT_ENABLED`（`false`）で外す。
 その場所に `WAIVER(demo): W-1 上端の検知を一時無効` を置く（[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)）。
@@ -189,11 +189,13 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 | 項目 | 決まり |
 | --- | --- |
 | 測った速さ | エンコーダの数の直近 `LIFT_SPEED_WINDOW_MS` の差 × `LIFT_UM_PER_COUNT` から mm/s。**原点の有無に依らない**（原点を取る前の下降でも効く） |
-| 出力 | `duty = 前向き（目標 × LIFT_FF_UP/DOWN_PCT_PER_MM_S） ＋ Kp × 偏差 ＋ Ki × 偏差の積分`。`0`〜`LIFT_DUTY_ABS_MAX_PCT` に丸める。前向きの係数を上昇・下降で別に持つ（重力の分） |
+| 出力 | `duty = 前向き（目標 × LIFT_FF_UP/DOWN_PCT_PER_MM_S） ＋ Kp × 偏差 ＋ Ki × 偏差の積分`。**`0`〜`motor_max_pct`（設定。既定 `LIFT_MOTOR_MAX_PCT_DEFAULT` = 50）に丸める**（spec [Spec-ui.md](../spec/Spec-ui.md) §2.1）。前向きの係数を上昇・下降で別に持つ（重力の分） |
+| モータ保護の上限の渡し方 | `LiftController::set_motor_max_pct()` で持たせ、`tick` が `SpeedLoop::update` の引数で渡す。`main.cpp` は起動時（NVS を読んだあと）と `PUT /api/settings` の成功時に呼ぶ。**動いている最中に下げたら、次の周期から新しい上限で丸める** |
+| デューティ → PWM | `motor_duty_to_pwm` は**今までどおり 100 % ＝ PWM の最大**（`LIFT_DUTY_ABS_MAX_PCT` で割る）。上限は % の側で掛ける。**上限の値で割らない**（割ると 50 % が PWM の最大になり、24 V がそのままかかる） |
 | 周期 | `LIFT_SPEED_CTRL_MS` ごと（`LiftController::tick` の中。`loop` が詰まったら経過時間で割る） |
-| 積分の扱い | 出力が丸めに当たっている間は積分を進めない。**止まった・向きが替わった・持ち主が替わったら 0 に戻す**（前の向きの積分を持ち越さない） |
+| 積分の扱い | 出力が丸め（`0` と `motor_max_pct`）に当たっている間は積分を進めない。**止まった・向きが替わった・持ち主が替わったら 0 に戻す**（前の向きの積分を持ち越さない） |
 | 測った速さが逆向き | 偏差として扱い（出力を上げる方向に効く）、#8a が止める。`ENC_UP_SIGN` の取り違えをここで捕まえる |
-| 出しすぎの守り | 出力の上限 `LIFT_DUTY_ABS_MAX_PCT` と #8a（回らない・逆に回る）と #8（連続駆動の上限） |
+| 出しすぎの守り | 出力の上限 `motor_max_pct`（モータの定格）と #8a（回らない・逆に回る）と #8（連続駆動の上限） |
 
 **呼び出し側を縛る**: `SpeedLoop` の単体試験だけでなく、`LiftController` を偽 HAL（数を進める・進めない）で回し、
 「出力が上がって速さが目標に近づく」「数が進まなければ `ENCODER_STALL` で 0 になる」をモータに出した値で確かめる（[-packets.md](DetailedDesign-packets.md) `WP-LIFT-06`）。
@@ -207,7 +209,7 @@ spec [Spec-ui.md](../spec/Spec-ui.md) §0.2。**カメラモジュールの画�
 | 上昇・下降のボタン | 押している間 `ui_hold_period_ms` ごとに `hold`、離したら `release`（[-protocol.md](DetailedDesign-protocol.md) §2.1） |
 | 速度スライダー（上昇・下降） | 範囲と初期値は `GET /api/settings` |
 | 表示 | 高さ・下端・「上端の検知: 一時無効」・天井の扱い・停止理由・**いまの持ち主**（この画面／上部モジュール）・接続している画面の数と上部モジュールの有無・仮値で動作中 |
-| 設定画面 | 上昇・下降の速度の下限・上限・初期値（オーバーレイ） |
+| 設定画面 | 上昇・下降の速度の下限・上限・初期値と、モータへの出力の上限 [%]（「モータの定格電圧 ÷ 電源電圧。12 V のモータを 24 V で回すなら 50」と添える）（オーバーレイ） |
 
 spec §0.1（スクロールさせない）を守る。検査は旧版の `check_noscroll` の方式を使う（[-packets.md](DetailedDesign-packets.md) `WP-LIFTUI-01`）。
 **ESP32 無しで画面を作れるように、偽の昇降部 `tools/fake_lift_server.py` が同じ口（画面・`/ws/ui`・`/ws/module`・設定 API）を出す。**
