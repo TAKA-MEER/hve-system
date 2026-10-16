@@ -15,6 +15,7 @@ PARAMS = load_params()
 ABS_MAX_DPS = PARAMS["axis_speed_abs_max_dps"]
 
 # protocol §3 の例の値。実装の定数ではなく仕様どおりの値をここに固定する。
+# カメラモジュールのファイルが持つのは 4 軸だけ（`motor_max_pct` の持ち主は昇降部）。
 PROTOCOL_DEFAULTS = {
     "lift_up": {"min": 10, "max": 60, "init": 30},
     "lift_down": {"min": 10, "max": 60, "init": 30},
@@ -22,17 +23,29 @@ PROTOCOL_DEFAULTS = {
     "yaw": {"min": 1, "max": 30, "init": 10},
 }
 
+# `PUT /api/settings` の本文（4 軸＋`motor_max_pct`。`PUT` では必須）。
+FULL_DEFAULTS = {
+    **PROTOCOL_DEFAULTS,
+    "motor_max_pct": 50,
+}
+
+# 自分のファイルが持つ 2 軸（`motor_max_pct` の持ち主は昇降部なので書かない）。
+OWN_DEFAULTS = {
+    "pitch": {"min": 1, "max": 30, "init": 10},
+    "yaw": {"min": 1, "max": 30, "init": 10},
+}
+
 
 def variant(**changes):
-    """既定の設定を壊した設定を作る。"""
-    data = copy.deepcopy(PROTOCOL_DEFAULTS)
+    """既定の設定を壊した設定を作る（`PUT` の本文の形。`motor_max_pct` つき）。"""
+    data = copy.deepcopy(FULL_DEFAULTS)
     for axis, values in changes.items():
         data[axis] = values
     return data
 
 
 def with_field(axis, field, value):
-    data = copy.deepcopy(PROTOCOL_DEFAULTS)
+    data = copy.deepcopy(FULL_DEFAULTS)
     data[axis][field] = value
     return data
 
@@ -46,7 +59,7 @@ def settings_path(tmp_path):
 
 
 def test_the_protocol_example_settings_pass():
-    assert validate_settings(PROTOCOL_DEFAULTS, PARAMS) == []
+    assert validate_settings(FULL_DEFAULTS, PARAMS) == []
 
 
 def test_the_defaults_in_the_code_are_the_protocol_examples():
@@ -56,7 +69,7 @@ def test_the_defaults_in_the_code_are_the_protocol_examples():
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down", "pitch", "yaw"])
 def test_every_axis_is_required(axis):
-    data = copy.deepcopy(PROTOCOL_DEFAULTS)
+    data = copy.deepcopy(FULL_DEFAULTS)
     del data[axis]
     errors = validate_settings(data, PARAMS)
     assert len(errors) == 1
@@ -66,7 +79,7 @@ def test_every_axis_is_required(axis):
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down", "pitch", "yaw"])
 @pytest.mark.parametrize("field", ["min", "max", "init"])
 def test_every_field_is_required(axis, field):
-    data = copy.deepcopy(PROTOCOL_DEFAULTS)
+    data = copy.deepcopy(FULL_DEFAULTS)
     del data[axis][field]
     errors = validate_settings(data, PARAMS)
     assert len(errors) == 1
@@ -200,6 +213,51 @@ def test_negative_speed_is_reported_for_pitch_and_yaw(axis):
     assert f"{axis}.min" in errors[0]
 
 
+# --- 検証: モータへの出力の上限（spec Spec-ui §2.1） ----------------------------------------------
+
+
+@pytest.mark.parametrize("value", [10, 50, 100])
+def test_motor_max_pct_at_the_edges_passes(value):
+    data = copy.deepcopy(FULL_DEFAULTS)
+    data["motor_max_pct"] = value
+    assert validate_settings(data, PARAMS) == []
+
+
+@pytest.mark.parametrize("value", [9, 101, 50.5, True, "50", None])
+def test_motor_max_pct_outside_10_to_100_or_not_an_integer_is_reported(value):
+    """9・101・小数・真偽値・文字列・欠けは通さない（`PUT` では必須）。"""
+    data = copy.deepcopy(FULL_DEFAULTS)
+    data["motor_max_pct"] = value
+    errors = validate_settings(data, PARAMS)
+    assert len(errors) == 1
+    assert "motor_max_pct" in errors[0]
+
+
+def test_motor_max_pct_is_required_in_put():
+    data = copy.deepcopy(FULL_DEFAULTS)
+    del data["motor_max_pct"]
+    errors = validate_settings(data, PARAMS)
+    assert len(errors) == 1
+    assert "motor_max_pct" in errors[0]
+
+
+def test_motor_max_pct_is_not_checked_for_the_own_axes():
+    """自分の保存（`axes=OWN_AXES`）には含めない（持ち主は昇降部）。"""
+    own = {axis: copy.deepcopy(PROTOCOL_DEFAULTS[axis]) for axis in ("pitch", "yaw")}
+    assert validate_settings(own, PARAMS, axes=("pitch", "yaw")) == []
+
+
+def test_save_and_load_with_the_own_axes_do_not_keep_the_motor(settings_path):
+    """自分の 2 軸だけを保存する（`motor_max_pct` はファイルに書かない）。"""
+    own = {axis: copy.deepcopy(PROTOCOL_DEFAULTS[axis]) for axis in ("pitch", "yaw")}
+    save_settings(own, settings_path, PARAMS, axes=("pitch", "yaw"))
+    text = settings_path.read_text(encoding="utf-8")
+    assert "motor_max_pct" not in text
+    data, is_default = load_settings(settings_path, PARAMS, axes=("pitch", "yaw"))
+    assert is_default is False
+    assert data == own
+
+
 # --- 読み込み ---------------------------------------------------------------------------------
 
 
@@ -240,7 +298,7 @@ def test_load_returns_the_defaults_when_the_contents_do_not_validate(settings_pa
 
 
 def test_load_reads_a_valid_file(settings_path):
-    settings_path.write_text(json.dumps(PROTOCOL_DEFAULTS), encoding="utf-8")
+    settings_path.write_text(json.dumps(FULL_DEFAULTS), encoding="utf-8")
     data, is_default = load_settings(settings_path, PARAMS)
     assert is_default is False
     assert data == PROTOCOL_DEFAULTS
@@ -249,10 +307,10 @@ def test_load_reads_a_valid_file(settings_path):
 def test_load_uses_the_settings_path_parameter_when_no_path_is_given(tmp_path, monkeypatch):
     params = dict(PARAMS)
     params["settings_path"] = str(tmp_path / "from-params.json")
-    save_settings(PROTOCOL_DEFAULTS, params=params)
-    data, is_default = load_settings(params=params)
+    save_settings(OWN_DEFAULTS, params=params, axes=("pitch", "yaw"))
+    data, is_default = load_settings(params=params, axes=("pitch", "yaw"))
     assert is_default is False
-    assert data == PROTOCOL_DEFAULTS
+    assert data == OWN_DEFAULTS
 
 
 def test_load_does_not_hand_out_the_defaults_by_reference(settings_path):
@@ -266,25 +324,25 @@ def test_load_does_not_hand_out_the_defaults_by_reference(settings_path):
 
 
 def test_save_then_load_round_trips(settings_path):
-    save_settings(PROTOCOL_DEFAULTS, settings_path, PARAMS)
-    data, is_default = load_settings(settings_path, PARAMS)
-    assert data == PROTOCOL_DEFAULTS
+    save_settings(OWN_DEFAULTS, settings_path, PARAMS, axes=("pitch", "yaw"))
+    data, is_default = load_settings(settings_path, PARAMS, axes=("pitch", "yaw"))
+    assert data == OWN_DEFAULTS
     assert is_default is False
 
 
 def test_save_creates_the_parent_directory(tmp_path):
     target = tmp_path / "not" / "yet" / "settings.json"
-    save_settings(PROTOCOL_DEFAULTS, target, PARAMS)
+    save_settings(OWN_DEFAULTS, target, PARAMS, axes=("pitch", "yaw"))
     assert target.is_file()
 
 
 def test_save_leaves_no_temporary_file_behind(settings_path):
-    save_settings(PROTOCOL_DEFAULTS, settings_path, PARAMS)
+    save_settings(OWN_DEFAULTS, settings_path, PARAMS, axes=("pitch", "yaw"))
     assert [p.name for p in settings_path.parent.iterdir()] == [settings_path.name]
 
 
 def test_save_does_not_change_the_file_when_validation_fails(settings_path):
-    save_settings(PROTOCOL_DEFAULTS, settings_path, PARAMS)
+    save_settings(OWN_DEFAULTS, settings_path, PARAMS, axes=("pitch", "yaw"))
     before = settings_path.read_text(encoding="utf-8")
 
     with pytest.raises(ValueError) as raised:
@@ -297,7 +355,7 @@ def test_save_does_not_change_the_file_when_validation_fails(settings_path):
 
 def test_save_keeps_the_original_when_the_replace_fails(settings_path, monkeypatch):
     """書き込みの最後の差し替えで失敗しても、元のファイルは残る。"""
-    save_settings(PROTOCOL_DEFAULTS, settings_path, PARAMS)
+    save_settings(OWN_DEFAULTS, settings_path, PARAMS, axes=("pitch", "yaw"))
     before = settings_path.read_text(encoding="utf-8")
 
     def boom(src, dst):
@@ -317,7 +375,7 @@ def test_save_keeps_the_original_when_the_directory_is_read_only(settings_path):
     if os.geteuid() == 0:
         pytest.skip("root では書き込み権限を落とす意味が無い")
 
-    save_settings(PROTOCOL_DEFAULTS, settings_path, PARAMS)
+    save_settings(OWN_DEFAULTS, settings_path, PARAMS, axes=("pitch", "yaw"))
     before = settings_path.read_text(encoding="utf-8")
     parent = settings_path.parent
     parent.chmod(stat.S_IRUSR | stat.S_IXUSR)
@@ -332,15 +390,23 @@ def test_save_keeps_the_original_when_the_directory_is_read_only(settings_path):
 
 
 def test_save_writes_readable_utf8_json(settings_path):
-    save_settings(PROTOCOL_DEFAULTS, settings_path, PARAMS)
+    save_settings(OWN_DEFAULTS, settings_path, PARAMS, axes=("pitch", "yaw"))
     text = settings_path.read_text(encoding="utf-8")
-    assert json.loads(text) == PROTOCOL_DEFAULTS
+    assert json.loads(text) == OWN_DEFAULTS
     assert text.endswith("\n")
+
+
+def test_save_drops_the_motor_even_when_it_is_given(settings_path):
+    """`motor_max_pct` はカメラモジュールのファイルに書かない（持ち主は昇降部）。"""
+    save_settings(FULL_DEFAULTS, settings_path, PARAMS)
+    text = settings_path.read_text(encoding="utf-8")
+    assert "motor_max_pct" not in text
+    assert json.loads(text) == PROTOCOL_DEFAULTS
 
 
 def test_save_expands_a_tilde_in_the_settings_path(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     params = dict(PARAMS)
     params["settings_path"] = "~/hve_data/settings.json"
-    save_settings(PROTOCOL_DEFAULTS, params=params)
+    save_settings(OWN_DEFAULTS, params=params, axes=("pitch", "yaw"))
     assert (tmp_path / "hve_data" / "settings.json").is_file()
