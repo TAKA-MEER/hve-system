@@ -41,6 +41,8 @@ LIFT_DUTY_ABS_MAX_PCT = 100
 LIFT_SPEED_ABS_MAX_MM_S = 100  # 仮（設定の検証の上限・命令の丸め）
 LIFT_STALL_MS = 500  # 仮（spec #4d。動き出しの遅れより長く）
 LIFT_STATE_PERIOD_MS = 100  # 仮
+LIFT_MOTOR_MAX_PCT_DEFAULT = 50  # モータへの出力の上限の既定値 [%]（Spec-ui §2.1）
+LIFT_MOTOR_MAX_PCT_MIN = 10  # 同・下限（上限は LIFT_DUTY_ABS_MAX_PCT）
 LIFT_WS_UI_PATH = "/ws/ui"
 LIFT_WS_MODULE_PATH = "/ws/module"
 FW = "fake-0.2.0"
@@ -49,6 +51,7 @@ PROVISIONAL = ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_MS"]
 DEFAULT_SETTINGS = {
     "lift_up": {"min": 10, "max": 60, "init": 30},
     "lift_down": {"min": 10, "max": 60, "init": 30},
+    "motor_max_pct": LIFT_MOTOR_MAX_PCT_DEFAULT,
 }
 
 CEILING_KNOWN = ("MEASURED", "TOO_NEAR", "NO_ECHO", "READ_ERROR")
@@ -83,8 +86,12 @@ def validate_settings(body: dict) -> list[str]:
     for key in ("lift_up", "lift_down"):
         if not isinstance(body.get(key), dict) or not validate_axis(body[key]):
             errors.append(f"{key}: 下限 ≦ 初期値 ≦ 上限・0〜100 mm/s の整数にしてください")
-    if set(body.keys()) != {"lift_up", "lift_down"}:
-        errors.append("lift_up と lift_down をまるごと送ってください")
+    motor = body.get("motor_max_pct")
+    if (not isinstance(motor, int) or isinstance(motor, bool)
+            or not LIFT_MOTOR_MAX_PCT_MIN <= motor <= LIFT_DUTY_ABS_MAX_PCT):
+        errors.append("motor_max_pct: モータへの出力の上限 10〜100（%）の整数にしてください")
+    if set(body.keys()) != {"lift_up", "lift_down", "motor_max_pct"}:
+        errors.append("lift_up と lift_down と motor_max_pct をまるごと送ってください")
     return errors
 
 
@@ -386,7 +393,8 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
         if errors:
             return web.json_response({"errors": errors}, status=400)
         lift.settings = {"lift_up": {k: int(body["lift_up"][k]) for k in ("min", "max", "init")},
-                         "lift_down": {k: int(body["lift_down"][k]) for k in ("min", "max", "init")}}
+                         "lift_down": {k: int(body["lift_down"][k]) for k in ("min", "max", "init")},
+                         "motor_max_pct": int(body["motor_max_pct"])}
         lift.using_defaults = False
         return web.json_response({"settings": lift.settings})
 

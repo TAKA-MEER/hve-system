@@ -327,11 +327,32 @@ def test_second_hello_does_not_remove_the_sensor():
 # --- 設定 API の検証 ---
 
 
+def good_settings() -> dict:
+    return {"lift_up": {"min": 10, "max": 60, "init": 30},
+            "lift_down": {"min": 10, "max": 60, "init": 30},
+            "motor_max_pct": 50}
+
+
 def test_settings_validation():
-    assert validate_settings({"lift_up": {"min": 10, "max": 60, "init": 30},
-                              "lift_down": {"min": 10, "max": 60, "init": 30}}) == []
-    assert validate_settings({"lift_up": {"min": 70, "max": 60, "init": 30},
-                              "lift_down": {"min": 10, "max": 60, "init": 30}}) != []
+    assert validate_settings(good_settings()) == []
+    bad_axis = good_settings()
+    bad_axis["lift_up"] = {"min": 70, "max": 60, "init": 30}
+    assert validate_settings(bad_axis) != []
+
+
+def test_settings_validation_rejects_missing_or_out_of_range_motor_max_pct():
+    """`motor_max_pct` の欠けた PUT・9・101 は通さない（protocol §3）。"""
+    missing = {"lift_up": {"min": 10, "max": 60, "init": 30},
+               "lift_down": {"min": 10, "max": 60, "init": 30}}
+    assert validate_settings(missing) != []
+    for bad in (9, 101, "50", True, 50.0, None):
+        body = good_settings()
+        body["motor_max_pct"] = bad
+        assert validate_settings(body) != []
+    for good in (10, 50, 100):
+        body = good_settings()
+        body["motor_max_pct"] = good
+        assert validate_settings(body) == []
 
 
 # --- HTTP・WS の端（aiohttp_client）---
@@ -342,11 +363,21 @@ async def test_settings_round_trip(aiohttp_client, tmp_path):
     client = await aiohttp_client(app)
     body = await (await client.get("/api/settings")).json()
     assert body["settings"]["lift_up"]["init"] == 30
+    assert body["settings"]["motor_max_pct"] == 50
     bad = await client.put("/api/settings", json={"lift_up": {"min": 70, "max": 60, "init": 30},
-                                                  "lift_down": {"min": 10, "max": 60, "init": 30}})
+                                                  "lift_down": {"min": 10, "max": 60, "init": 30},
+                                                  "motor_max_pct": 50})
     assert bad.status == 400
+    missing = await client.put("/api/settings", json={"lift_up": {"min": 10, "max": 60, "init": 30},
+                                                      "lift_down": {"min": 10, "max": 60, "init": 30}})
+    assert missing.status == 400
     kept = await (await client.get("/api/settings")).json()
     assert kept["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+    assert kept["settings"]["motor_max_pct"] == 50
+    ok = await client.put("/api/settings", json=good_settings())
+    assert ok.status == 200
+    saved = await (await client.get("/api/settings")).json()
+    assert saved["settings"]["motor_max_pct"] == 50
 
 
 async def test_module_hold_over_websocket(aiohttp_client, tmp_path):
