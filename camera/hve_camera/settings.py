@@ -6,9 +6,12 @@
 - 4 項目（`lift_up`・`lift_down`・`pitch`・`yaw`）すべてが揃う
 - `min ≦ init ≦ max`
 - `lift_*` は 0〜`LIFT_SPEED_ABS_MAX_MM_S`（100）[mm/s] の整数・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
+- `motor_max_pct`（`PUT` では必須。10〜100 の整数。真偽値は不可。spec
+  [Spec-ui.md](../../docs/plan/spec/Spec-ui.md) §2.1）
 
 **ピッチ・ヨーはここで保存、昇降は昇降部へ中継する**（v2）。
-そのため読み書きは軸を絞れる（`axes`）。`PUT /api/settings` の検証は 4 軸のまま。
+そのため読み書きは軸を絞れる（`axes`）。`PUT` の検証は 4 軸＋`motor_max_pct` のまま。
+`motor_max_pct` の持ち主は昇降部なので、自分の保存（`axes=OWN_AXES`）には含めない。
 保存は**一時ファイルに書いてから置き換える。**書き込み途中の電源断で壊れたファイルを
 読ませないため（[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §3）。
 """
@@ -54,6 +57,16 @@ OWN_AXES = ("pitch", "yaw")
 #: 昇降部へ中継する軸（昇降の 2 軸）。
 LIFT_AXES = ("lift_up", "lift_down")
 
+#: モータへの出力の上限 [%] の項目名（protocol §3・spec Spec-ui §2.1）。
+MOTOR_MAX_PCT_KEY = "motor_max_pct"
+
+#: モータへの出力の上限の既定値 [%]（spec §2.1）。
+MOTOR_MAX_PCT_DEFAULT = 50
+
+#: モータへの出力の上限の下限 [%]・上限 [%]（spec §2.1。上限は昇降部の `LIFT_DUTY_ABS_MAX_PCT`）。
+MOTOR_MAX_PCT_MIN = 10
+MOTOR_MAX_PCT_MAX = 100
+
 
 def validate_settings(
     data: Any,
@@ -63,7 +76,8 @@ def validate_settings(
 ) -> list[str]:
     """設定の検証。**通らなかった理由の一覧**を返す（空のリスト = 問題なし）。
 
-    `axes` を絞るとその軸だけを見る（自分の 2 軸の保存用）。`PUT` の検証は 4 軸のまま。
+    `axes` を絞るとその軸だけを見る（自分の 2 軸の保存用）。`PUT` の検証は 4 軸＋`motor_max_pct` のまま。
+    `motor_max_pct` は自分の保存（`axes=OWN_AXES`）のときだけ見ない（持ち主は昇降部）。
     """
     if params is None:
         params = load_params()
@@ -90,6 +104,9 @@ def validate_settings(
 
         _check_order(axis, values, errors)
         _check_range(axis, values, params, errors)
+
+    if set(axes) != set(OWN_AXES):
+        _check_motor_max_pct(data, errors)
 
     return errors
 
@@ -203,6 +220,21 @@ def _check_range(
             errors.append(f"{axis}.{field}: {high:g} より大きい（{value:g}）")
         if axis in _LIFT_SPEED_AXES and value != int(value):
             errors.append(f"{axis}.{field}: 整数でない（{value:g}）")
+
+
+def _check_motor_max_pct(data: Mapping[str, Any], errors: list[str]) -> None:
+    """`motor_max_pct`（10〜100 の整数。真偽値は不可。`PUT` では必須）を見る。"""
+    value = data.get(MOTOR_MAX_PCT_KEY)
+    if value is None:
+        errors.append(f"{MOTOR_MAX_PCT_KEY}: 無い")
+        return
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"{MOTOR_MAX_PCT_KEY}: 整数でない")
+        return
+    if not MOTOR_MAX_PCT_MIN <= value <= MOTOR_MAX_PCT_MAX:
+        errors.append(
+            f"{MOTOR_MAX_PCT_KEY}: {MOTOR_MAX_PCT_MIN}〜{MOTOR_MAX_PCT_MAX} の整数にしてください"
+        )
 
 
 def _unlink_quietly(name: str | os.PathLike[str]) -> None:
