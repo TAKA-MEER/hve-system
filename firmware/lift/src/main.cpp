@@ -341,19 +341,23 @@ void load_settings() {
   g_using_defaults = true;
   Preferences prefs;
   if (!prefs.begin(LIFT_NVS_NAMESPACE, true)) {
+    controller.set_motor_max_pct(g_settings.motor_max_pct);
     return;
   }
   const String saved = prefs.getString(kSettingsNvsKey, "");
   prefs.end();
   if (saved.length() == 0) {
+    controller.set_motor_max_pct(g_settings.motor_max_pct);
     return;
   }
   LiftSettings parsed;
-  // 読めない・検証を通らないときは既定値で動き、using_defaults を立てる
+  // 読めない・検証を通らないときは既定値で動き、using_defaults を立てる。
+  // motor_max_pct が無い古い形も検証を通らないので全体が既定値になる（protocol §3）
   if (lift_settings_from_json(saved.c_str(), &parsed)) {
     g_settings = parsed;
     g_using_defaults = false;
   }
+  controller.set_motor_max_pct(g_settings.motor_max_pct);
 }
 
 bool store_settings(const LiftSettings& settings) {
@@ -399,7 +403,9 @@ void apply_settings_put(AsyncWebServerRequest* request, const char* body_text) {
   }
   LiftSettings parsed;
   if (!lift_settings_from_json(body_text, &parsed)) {
-    send_settings_error(request, 400, "下限 ≦ 初期値 ≦ 上限・0〜100（mm/s）の整数にしてください");
+    send_settings_error(request, 400,
+                        "下限 ≦ 初期値 ≦ 上限・0〜100（mm/s）の整数・"
+                        "モータへの出力の上限 10〜100（%）の整数にしてください");
     return;
   }
   if (!store_settings(parsed)) {
@@ -408,6 +414,7 @@ void apply_settings_put(AsyncWebServerRequest* request, const char* body_text) {
   }
   g_settings = parsed;
   g_using_defaults = false;
+  controller.set_motor_max_pct(g_settings.motor_max_pct);
   char inner[128];
   lift_settings_to_json(g_settings, inner, sizeof(inner));
   char body[160];

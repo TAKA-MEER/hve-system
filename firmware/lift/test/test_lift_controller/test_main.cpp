@@ -332,10 +332,11 @@ void test_ceiling_age_counts_transit_through_controller() {
 
 // --- 速さのフィードバック（§4.1.2。モータに出した値で縛る） ---
 
-// (a) 目標に届かないとモータへ出したデューティが上がっていく
+// (a) 目標に届かないとモータへ出したデューティが上がっていく（上限を緩めた状態で見る）
 void test_duty_rises_while_speed_stays_below_target() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
+  ctrl.set_motor_max_pct(LIFT_DUTY_ABS_MAX_PCT);
   hal.set_height(500, true, 0);
   hal.set_encoder_count(0);  // 進まない（#8a の 500 ms より短く回す）
   ctrl.on_hold(ui(1), up_hold(1, 40, 0), 0);
@@ -347,6 +348,42 @@ void test_duty_rises_while_speed_stays_below_target() {
   TEST_ASSERT_TRUE(hal.motor_moving());
   TEST_ASSERT_GREATER_THAN(d0, d1);
   TEST_ASSERT_GREATER_THAN(d1, d2);
+}
+
+// (a2) 既定の上限（50 %）では出力が 50 を超えない（Spec-ui §2.1）
+void test_duty_never_exceeds_default_motor_cap() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);  // 既定 50 %
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);  // 進まない（測った速さ 0 のまま）
+  for (uint32_t t = 0; t <= 400; t += 100) {
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    const LiftState state = ctrl.step(t);
+    TEST_ASSERT_TRUE(hal.motor_moving());
+    TEST_ASSERT_LESS_OR_EQUAL(50, hal.motor_duty());
+    TEST_ASSERT_LESS_OR_EQUAL(50, state.duty);
+  }
+  // 上限が無ければ 50 を超える状況（t=200 で 58）。50 で頭打ちになる
+  TEST_ASSERT_EQUAL_INT(50, hal.motor_duty());
+}
+
+// (a3) 動いている最中に上限を下げたら次の周期から効く
+void test_lowering_cap_mid_motion_applies_on_next_cycle() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
+  for (uint32_t t = 0; t <= 200; t += 100) {
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    ctrl.step(t);
+  }
+  TEST_ASSERT_EQUAL_INT(50, hal.motor_duty());
+  ctrl.set_motor_max_pct(30);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 300), 300);
+  const LiftState state = ctrl.step(300);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(30, hal.motor_duty());
+  TEST_ASSERT_EQUAL_INT(30, state.duty);
 }
 
 // (b) 数が進まなければ LIFT_STALL_MS 後に ENCODER_STALL でモータが 0
@@ -392,14 +429,14 @@ void test_integral_is_reset_after_stop_and_repress() {
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(500, true, 0);
   hal.set_encoder_count(0);
-  // 積分を育てる（出力が上がる）
+  // 積分を育てる（出力が上がり、既定の上限 50 % で頭打ちになる）
   ctrl.on_hold(ui(1), up_hold(1, 40, 0), 0);
   ctrl.step(0);
   ctrl.on_hold(ui(1), up_hold(1, 40, 100), 100);
   ctrl.step(100);
   ctrl.on_hold(ui(1), up_hold(1, 40, 200), 200);
   const int grown = ctrl.step(200).duty;
-  TEST_ASSERT_GREATER_THAN(50, grown);
+  TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, grown);
   // 離して押し直す（新しい press）
   ctrl.on_release(ui(1), 1);
   assert_reason(StopReason::CMD_STOP, ctrl.step(300));
@@ -407,7 +444,9 @@ void test_integral_is_reset_after_stop_and_repress() {
   const int fresh = ctrl.step(400).duty;
   // 測った速さ 0・経過 20 ms の前向き＋比例だけ。積分が残っていれば grown 並みに大きい
   SpeedLoop expect;
-  TEST_ASSERT_EQUAL_INT(expect.update(40, 0.0f, LiftDir::UP, LIFT_SPEED_CTRL_MS), fresh);
+  TEST_ASSERT_EQUAL_INT(
+      expect.update(40, 0.0f, LiftDir::UP, LIFT_SPEED_CTRL_MS, LIFT_MOTOR_MAX_PCT_DEFAULT),
+      fresh);
   TEST_ASSERT_LESS_THAN(grown, fresh);
 }
 
@@ -435,19 +474,20 @@ void test_integral_is_reset_when_owner_changes() {
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(500, true, 0);
   hal.set_encoder_count(0);
-  // 積分を育てる（100 ms ごとに 4 ずつ）
+  // 積分を育てる（100 ms ごとに 4 ずつ。既定の上限 50 % で頭打ちになる）
   for (uint32_t t = 0; t <= 300; t += 100) {
     ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
     ctrl.step(t);
   }
   const int grown = hal.motor_duty();
-  TEST_ASSERT_GREATER_THAN(60, grown);
+  TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, grown);
   // 別の持ち主が同じ速さで引き継ぐ。最初の出力は積分 0（100 ms ぶんだけ進む）に戻る
   ctrl.on_hold(module(2), up_hold(9, 40, 400), 400);
   const LiftState state = ctrl.step(400);
   assert_reason(StopReason::NONE, state);
   SpeedLoop expect;
-  TEST_ASSERT_EQUAL_INT(expect.update(40, 0.0f, LiftDir::UP, 100), hal.motor_duty());
+  TEST_ASSERT_EQUAL_INT(expect.update(40, 0.0f, LiftDir::UP, 100, LIFT_MOTOR_MAX_PCT_DEFAULT),
+                        hal.motor_duty());
   TEST_ASSERT_LESS_THAN(grown, hal.motor_duty());
 }
 
@@ -491,11 +531,11 @@ void test_speed_is_clamped_before_speed_loop() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(500, true, 0);
-  // LIFT_SPEED_ABS_MAX_MM_S を超える速さは丸める（出力の上限に当たる）
+  // LIFT_SPEED_ABS_MAX_MM_S を超える速さは丸める。出力はモータへの出力の上限（既定 50 %）で頭打ち
   ctrl.on_hold(ui(1), up_hold(1, LIFT_SPEED_ABS_MAX_MM_S + 50, 0), 0);
   const LiftState state = ctrl.step(0);
   TEST_ASSERT_EQUAL_INT(LIFT_SPEED_ABS_MAX_MM_S, state.speed);
-  TEST_ASSERT_EQUAL_INT(LIFT_DUTY_ABS_MAX_PCT, hal.motor_duty());
+  TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, hal.motor_duty());
 }
 
 void test_motor_is_written_on_every_step() {
@@ -656,6 +696,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_ceiling_age_counts_transit_through_controller);
 
   RUN_TEST(test_duty_rises_while_speed_stays_below_target);
+  RUN_TEST(test_duty_never_exceeds_default_motor_cap);
+  RUN_TEST(test_lowering_cap_mid_motion_applies_on_next_cycle);
   RUN_TEST(test_stall_when_encoder_never_moves);
   RUN_TEST(test_stall_when_encoder_runs_backwards);
   RUN_TEST(test_integral_is_reset_after_stop_and_repress);

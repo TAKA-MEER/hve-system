@@ -173,6 +173,16 @@ void LiftController::on_close(int conn_id) {
 
 void LiftController::set_ui_clients(int count) { ui_clients_ = count < 0 ? 0 : count; }
 
+void LiftController::set_motor_max_pct(int pct) {
+  if (pct < 0) {
+    pct = 0;
+  }
+  if (pct > LIFT_DUTY_ABS_MAX_PCT) {
+    pct = LIFT_DUTY_ABS_MAX_PCT;
+  }
+  motor_max_pct_ = pct;
+}
+
 LiftState LiftController::step(uint32_t now_ms) {
   arbiter_.tick(now_ms);
   ConnId owner;
@@ -279,7 +289,8 @@ LiftState LiftController::step(uint32_t now_ms) {
       const float measured_fwd =
           (decided.dir == LiftDir::DOWN) ? -speed_up_mm_s_ : speed_up_mm_s_;
       const uint32_t dt = loop_elapsed <= 0 ? 0u : static_cast<uint32_t>(loop_elapsed);
-      duty = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt);
+      duty = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt,
+                                motor_max_pct_);
       loop_at_ms_ = now_ms;
       loop_started_ = true;
       loop_dir_ = decided.dir;

@@ -89,6 +89,8 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}
 th,td{padding:4px;text-align:left;border-bottom:1px solid var(--bd);font-size:13px}
 th{color:var(--mut);font-weight:600;font-size:12px}
 th:first-child,td:first-child{width:4.2em;white-space:nowrap} th:last-child,td:last-child{width:3.8em}
+/* モータへの出力の上限の行名は長いので折り返す（横にはみ出させない。Spec-ui §0.1） */
+td.wrapcell{white-space:normal}
 td input{width:100%;padding:6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
 td input.bad{border-color:var(--ng)}
 .err{color:var(--ng-tx);font-size:12px;min-height:1.4em}

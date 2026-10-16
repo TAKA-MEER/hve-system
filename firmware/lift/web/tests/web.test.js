@@ -126,6 +126,7 @@ test('state が ui_state_timeout_ms 届かないとき「接続切れ」', () =>
 const GOOD = {
   lift_up: {min: 10, max: 60, init: 30},
   lift_down: {min: 10, max: 60, init: 30},
+  motor_max_pct: 50,
 };
 
 const withChange = (axis, field, value) => {
@@ -134,10 +135,31 @@ const withChange = (axis, field, value) => {
   return draft;
 };
 
-test('設定の検証は 2 項目が Save できる形を通す（spec §2）', () => {
+const withMotor = (value) => {
+  const draft = JSON.parse(JSON.stringify(GOOD));
+  draft.motor_max_pct = value;
+  return draft;
+};
+
+test('設定の検証は 2 項目＋上限が Save できる形を通す（spec §2）', () => {
   const result = app.validateSettingsDraft(GOOD);
   assert.equal(result.ok, true);
   assert.deepEqual(result.errors, []);
+});
+
+test('モータへの出力の上限は 10〜100 の整数（spec §2.1）', () => {
+  assert.equal(app.validateSettingsDraft(withMotor(10)).ok, true);
+  assert.equal(app.validateSettingsDraft(withMotor(100)).ok, true);
+  assert.equal(app.validateSettingsDraft(withMotor(9)).ok, false);
+  assert.equal(app.validateSettingsDraft(withMotor(101)).ok, false);
+  assert.equal(app.validateSettingsDraft(withMotor('')).ok, false);
+  assert.equal(app.validateSettingsDraft(withMotor('abc')).ok, false);
+  assert.equal(app.validateSettingsDraft(withMotor(50.5)).ok, false);
+  const missing = JSON.parse(JSON.stringify(GOOD));
+  delete missing.motor_max_pct;
+  assert.equal(app.validateSettingsDraft(missing).ok, false);
+  const over = app.validateSettingsDraft(withMotor(101));
+  assert.match(over.errors[0].text, /モータへの出力の上限/);
 });
 
 test('下限 > 上限は保存できない', () => {
@@ -172,6 +194,7 @@ test('理由の文言は 1 行にまとめる（画面からはみ出さない�
   const many = app.validateSettingsDraft({
     lift_up: {min: 70, max: 60, init: 30},
     lift_down: {min: 10, max: 5, init: 30},
+    motor_max_pct: 50,
   });
   assert.equal(many.errors.length, 2);
   assert.equal(app.settingsErrorText(many.errors), '上昇: 下限 ≦ 初期値 ≦ 上限 にしてください（ほか 1 件）');

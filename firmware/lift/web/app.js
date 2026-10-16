@@ -32,6 +32,14 @@ const SETTING_AXES = [
   {key: 'lift_down', name: '下降', unit: 'mm/s', abs_low: 0, abs_high: 100, step: 1},
 ];
 
+/* モータへの出力の上限 [%]（Spec-ui §2.1）。速度の 3 値ではなく 1 値 */
+const SETTING_MOTOR = {
+  key: 'motor_max_pct', name: 'モータへの出力の上限', unit: '%',
+  abs_low: 10, abs_high: 100, step: 1,
+};
+/* 設定画面の添え書き（spec §2.1 の「モータの定格電圧 ÷ 電源電圧」） */
+const MOTOR_NOTE = 'モータの定格電圧 ÷ 電源電圧（12 V のモータを 24 V で回すなら 50）';
+
 /* 停止理由の文言（names §3。**文言は仮**） */
 const REASON_TEXT = {
   CEILING_NEAR: ['ng', '天井が近いため上昇できません'],
@@ -175,6 +183,20 @@ function validateSettingsDraft(draft) {
         text: `${axis.name}: ${axis.abs_low}〜${axis.abs_high} ${axis.unit} の範囲にしてください`,
       });
     }
+  }
+
+  // モータへの出力の上限（1 値。protocol §3: 10〜100 の整数。欠けても通さない）
+  const motorRaw = draft[SETTING_MOTOR.key];
+  const motorValue = Number(motorRaw);
+  if (motorRaw === '' || motorRaw === null || motorRaw === undefined || !isFinite(motorValue)) {
+    errors.push({key: SETTING_MOTOR.key, text: `${SETTING_MOTOR.name}: 数値を入れてください`});
+  } else if (!Number.isInteger(motorValue)) {
+    errors.push({key: SETTING_MOTOR.key, text: `${SETTING_MOTOR.name}: 整数にしてください`});
+  } else if (motorValue < SETTING_MOTOR.abs_low || motorValue > SETTING_MOTOR.abs_high) {
+    errors.push({
+      key: SETTING_MOTOR.key,
+      text: `${SETTING_MOTOR.name}: ${SETTING_MOTOR.abs_low}〜${SETTING_MOTOR.abs_high} ${SETTING_MOTOR.unit} の整数にしてください`,
+    });
   }
   return {ok: errors.length === 0, errors};
 }
@@ -427,6 +449,8 @@ function openSettingsOverlay(settings, provisional) {
       init: current.init === undefined ? '' : current.init,
     };
   }
+  const motorCurrent = (settings || {})[SETTING_MOTOR.key];
+  settings_draft[SETTING_MOTOR.key] = motorCurrent === undefined ? '' : motorCurrent;
 
   const body = document.getElementById('stBody');
   body.innerHTML = SETTING_AXES.map((axis) => {
@@ -438,11 +462,18 @@ function openSettingsOverlay(settings, provisional) {
       )
       .join('');
     return `<tr data-key="${axis.key}"><td>${axis.name}</td>${cells}<td>${axis.unit}</td></tr>`;
-  }).join('');
+  }).join('') +
+    `<tr data-key="${SETTING_MOTOR.key}"><td class="wrapcell">${SETTING_MOTOR.name}</td>` +
+    `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_MOTOR.key}"` +
+    ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>`;
 
   body.querySelectorAll('input').forEach((input) => {
     input.addEventListener('input', () => {
-      settings_draft[input.dataset.axis][input.dataset.f] = input.value;
+      if (input.dataset.axis === SETTING_MOTOR.key) {
+        settings_draft[SETTING_MOTOR.key] = input.value;
+      } else {
+        settings_draft[input.dataset.axis][input.dataset.f] = input.value;
+      }
       validateSettingsInputs();
     });
   });
@@ -471,6 +502,7 @@ async function saveSettingsOverlay() {
       init: Number(values.init),
     };
   }
+  payload[SETTING_MOTOR.key] = Number(settings_draft[SETTING_MOTOR.key]);
 
   const save = document.getElementById('stSave');
   save.disabled = true;
@@ -550,6 +582,6 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
     formatSpeed, reasonText, ceilingText, heightText, ownerText, moveText, stateStale,
-    validateSettingsDraft, settingsErrorText, SETTING_AXES,
+    validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, MOTOR_NOTE,
   };
 }
