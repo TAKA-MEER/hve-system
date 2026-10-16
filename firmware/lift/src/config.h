@@ -12,12 +12,12 @@
 
 // MD10C（DIR + PWM の 2 線）。先行試作と同じ
 constexpr uint8_t MOTOR_DIR_PIN = 14;
-constexpr uint8_t MOTOR_PWM_PIN = 32;
+constexpr uint8_t MOTOR_PWM_PIN = 27;
 // DIR = HIGH で上昇するか。**実機配線で確認するまで仮**（false にすると逆向きになる）
 constexpr bool MOTOR_DIR_UP_LEVEL = true;
 
 // 下端リミットスイッチ。**仮**。INPUT_PULLUP + 常時閉（NC）配線
-constexpr uint8_t BOTTOM_PIN = 27;
+constexpr uint8_t BOTTOM_PIN = 32;
 
 // 高さのエンコーダ E6A2-CW3C（DetailedDesign-hardware.md §1.1。**仮**）。
 // A/B 2 相・オープンコレクタ。3.3 V へ 2.2 kΩ でプルアップ（5 V へプルアップしない）
