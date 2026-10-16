@@ -121,9 +121,10 @@ class FakeEsp32:
         self.release_history: list[dict[str, Any]] = []
         self.state_history: list[dict[str, Any]] = []
         #: 昇降の設定（`GET /api/settings` が返す・`PUT /api/settings` が置き換える）
-        self.lift_settings: dict[str, dict[str, float]] = {
+        self.lift_settings: dict[str, Any] = {
             "lift_up": {"min": 10, "max": 60, "init": 30},
             "lift_down": {"min": 10, "max": 60, "init": 30},
+            "motor_max_pct": 50,
         }
         #: `True` にすると `PUT /api/settings` を `400` で返す（中継の変異 5 用）
         self.fail_put = False
@@ -228,6 +229,11 @@ class FakeEsp32:
             self.lift_settings[axis] = {
                 key: entry[key] for key in ("min", "max", "init") if key in entry
             }
+        motor = data.get("motor_max_pct")
+        if (not isinstance(motor, int) or isinstance(motor, bool)
+                or not 10 <= motor <= 100):
+            return web.json_response({"errors": ["motor_max_pct: 無いか範囲外"]}, status=400)
+        self.lift_settings["motor_max_pct"] = motor
         return web.json_response({"settings": self.lift_settings, "using_defaults": False})
 
     async def _send_states(self) -> None:

@@ -34,6 +34,8 @@ from hve_camera.lift_link import LiftPort
 from hve_camera.lift_resolve import resolve_lift_host
 from hve_camera.settings import (
     LIFT_AXES,
+    MOTOR_MAX_PCT_DEFAULT,
+    MOTOR_MAX_PCT_KEY,
     OWN_AXES,
     save_settings,
     validate_settings,
@@ -132,11 +134,13 @@ class CameraApp:
         self._settings = settings
         self._using_defaults = using_defaults
         #: プロセス内の偽物の昇降設定（`FakeLift` は設定 API を持たないのでここで持つ）
-        self._fake_lift_settings = (
-            {axis: dict(settings[axis]) for axis in LIFT_AXES}
-            if self._fake_lift() is not None
-            else None
-        )
+        if self._fake_lift() is not None:
+            self._fake_lift_settings: dict | None = {
+                axis: dict(settings[axis]) for axis in LIFT_AXES
+            }
+            self._fake_lift_settings[MOTOR_MAX_PCT_KEY] = MOTOR_MAX_PCT_DEFAULT
+        else:
+            self._fake_lift_settings = None
 
         #: 繋がっている画面
         self._clients: dict[web.WebSocketResponse, None] = {}
@@ -268,7 +272,7 @@ class CameraApp:
     # --- 設定 API（昇降は昇降部へ中継。protocol §4） ----------------------------------------------------
 
     async def get_settings(self, request: web.Request) -> web.Response:
-        """`GET /api/settings`。自分のピッチ・ヨーと、昇降部から取った昇降をまとめて返す。
+        """`GET /api/settings`。自分のピッチ・ヨーと、昇降部から取った昇降・上限をまとめて返す。
 
         昇降部に繋がらないときは `503`（形は旧版と同じ 4 軸）。
         """
@@ -281,11 +285,12 @@ class CameraApp:
         return web.json_response({"settings": merged, "using_defaults": self._using_defaults})
 
     async def put_settings(self, request: web.Request) -> web.Response:
-        """`PUT /api/settings`。4 軸をまとめて受ける。
+        """`PUT /api/settings`。4 軸と `motor_max_pct` をまとめて受ける。
 
-        先に 4 軸とも自分で検証 → 昇降部へ `PUT`（昇降の 2 軸）→
-        成功したら自分の 2 軸を保存。昇降部が `400` ならその `errors` を返し、
-        自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない。
+        先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`）→
+        成功したら自分の 2 軸を保存（`motor_max_pct` は自分では保存しない。持ち主は昇降部）。
+        昇降部が `400` ならその `errors` を返し、自分も保存しない。
+        昇降部に繋がらなければ `503` で何も保存しない。
         """
         try:
             data = await request.json()
@@ -297,6 +302,7 @@ class CameraApp:
             return web.json_response({"errors": errors}, status=400)
 
         lift_body = {axis: data[axis] for axis in LIFT_AXES}
+        lift_body[MOTOR_MAX_PCT_KEY] = data[MOTOR_MAX_PCT_KEY]
         status, lift_errors = await self._put_lift_settings(lift_body)
         if status is None:
             return web.json_response({"errors": ["昇降部に繋がらない"]}, status=503)
@@ -328,7 +334,7 @@ class CameraApp:
         return "http://%s:%d" % (host, int(self._params.get("lift_port", 80)))
 
     async def _fetch_lift_settings(self) -> dict | None:
-        """昇降部から昇降の 2 軸を取る。取れなければ `None`。"""
+        """昇降部から昇降の 2 軸と `motor_max_pct` を取る。取れなければ `None`。"""
         if self._fake_lift_settings is not None:
             return dict(self._fake_lift_settings)
         base = await self._lift_http_base()
@@ -349,14 +355,20 @@ class CameraApp:
         if not isinstance(settings, dict):
             return None
         body = {axis: settings[axis] for axis in LIFT_AXES if axis in settings}
+        if MOTOR_MAX_PCT_KEY in settings:
+            body[MOTOR_MAX_PCT_KEY] = settings[MOTOR_MAX_PCT_KEY]
         if validate_settings(body, self._params, axes=LIFT_AXES):
             return None
         return body
 
     async def _put_lift_settings(self, body: dict) -> tuple:
-        """昇降部へ昇降の 2 軸を `PUT`。`(状態, 理由の一覧)`。繋がらなければ `(None, None)`。"""
+        """昇降部へ昇降の 2 軸と `motor_max_pct` を `PUT`。`(状態, 理由の一覧)`。繋がらなければ `(None, None)`。"""
         if self._fake_lift_settings is not None:
+            errors = validate_settings(body, self._params, axes=LIFT_AXES)
+            if errors:
+                return 400, errors
             self._fake_lift_settings = {axis: dict(body[axis]) for axis in LIFT_AXES}
+            self._fake_lift_settings[MOTOR_MAX_PCT_KEY] = body[MOTOR_MAX_PCT_KEY]
             return 200, []
         base = await self._lift_http_base()
         if base is None:

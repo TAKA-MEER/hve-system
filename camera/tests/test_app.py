@@ -450,6 +450,7 @@ async def test_get_settings_merges_lift_settings(rig: Rig) -> None:
     assert body["using_defaults"] is True
     assert body["settings"]["pitch"] == SETTINGS["pitch"]
     assert body["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+    assert body["settings"]["motor_max_pct"] == 50
 
 
 async def test_get_settings_is_503_when_the_lift_is_gone(loop) -> None:
@@ -484,16 +485,20 @@ async def test_put_settings_relays_and_saves(rig: Rig) -> None:
         "lift_down": {"min": 10, "max": 60, "init": 30},
         "pitch": {"min": 1, "max": 30, "init": 10},
         "yaw": {"min": 2, "max": 30, "init": 10},
+        "motor_max_pct": 30,
     }
     response = await rig.client.put("/api/settings", json=good)
     assert response.status == 200
     body = await response.json()
     assert body["using_defaults"] is False
-    # 昇降の 2 軸は昇降部へ中継する
+    # 昇降の 2 軸と上限は昇降部へ中継する
     assert rig.esp32.lift_settings["lift_up"] == {"min": 10, "max": 20, "init": 15}
-    # 自分の 2 軸だけを保存する
+    assert rig.esp32.lift_settings["motor_max_pct"] == 30
+    # 自分の 2 軸だけを保存する（`motor_max_pct` は持ち主の昇降部が持つ）
     assert rig.settings["yaw"] == {"min": 2, "max": 30, "init": 10}
     assert rig.settings["lift_up"] == {"min": 10, "max": 20, "init": 15}
+    assert rig.settings["motor_max_pct"] == 30
+    assert body["settings"]["motor_max_pct"] == 30
 
     ws = await rig.browser()
     await ws.send_json({"t": "hold", "axis": "lift_up", "speed": 999})
@@ -502,6 +507,61 @@ async def test_put_settings_relays_and_saves(rig: Rig) -> None:
     await rig.wait_holds(1)
     assert rig.last_hold()["speed"] == 20, "保存した設定の上限を使う"
     await ws.close()
+
+
+async def test_put_settings_requires_the_motor_max_pct(rig: Rig) -> None:
+    """`motor_max_pct` が欠けた `PUT` は 400（昇降部の新しいファームに合わせる）。"""
+    assert rig.client is not None
+    assert rig.esp32 is not None
+    good = {
+        "lift_up": {"min": 10, "max": 20, "init": 15},
+        "lift_down": {"min": 10, "max": 60, "init": 30},
+        "pitch": {"min": 1, "max": 30, "init": 10},
+        "yaw": {"min": 2, "max": 30, "init": 10},
+    }
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 400
+    body = await response.json()
+    assert any("motor_max_pct" in error for error in body["errors"])
+    assert rig.settings["yaw"] == SETTINGS["yaw"], "保存せず、元のまま"
+
+
+@pytest.mark.parametrize("value", [9, 101, 50.5, True])
+async def test_put_settings_rejects_a_bad_motor_max_pct(rig: Rig, value: Any) -> None:
+    """範囲外・小数・真偽値の上限は 400 で、自分も昇降部も保存しない。"""
+    assert rig.client is not None
+    assert rig.esp32 is not None
+    good = {
+        "lift_up": {"min": 10, "max": 20, "init": 15},
+        "lift_down": {"min": 10, "max": 60, "init": 30},
+        "pitch": {"min": 1, "max": 30, "init": 10},
+        "yaw": {"min": 2, "max": 30, "init": 10},
+        "motor_max_pct": value,
+    }
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 400
+    assert rig.settings["yaw"] == SETTINGS["yaw"], "保存せず、元のまま"
+    assert rig.esp32.lift_settings["motor_max_pct"] == 50, "昇降部へ送らない"
+
+
+async def test_put_settings_does_not_store_the_motor_in_the_own_file(rig: Rig) -> None:
+    """`motor_max_pct` はカメラモジュールのファイルに保存しない（持ち主は昇降部）。"""
+    assert rig.client is not None
+    good = {
+        "lift_up": {"min": 10, "max": 20, "init": 15},
+        "lift_down": {"min": 10, "max": 60, "init": 30},
+        "pitch": {"min": 1, "max": 30, "init": 10},
+        "yaw": {"min": 2, "max": 30, "init": 10},
+        "motor_max_pct": 30,
+    }
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    text = Path(f"{SETTINGS_DIR}/settings-test.json").read_text(encoding="utf-8")
+    assert "motor_max_pct" not in text
+    assert json.loads(text) == {
+        "pitch": {"min": 1, "max": 30, "init": 10},
+        "yaw": {"min": 2, "max": 30, "init": 10},
+    }
 
 
 async def test_put_settings_does_not_save_when_the_lift_refuses(rig: Rig) -> None:
@@ -514,6 +574,7 @@ async def test_put_settings_does_not_save_when_the_lift_refuses(rig: Rig) -> Non
         "lift_down": {"min": 10, "max": 60, "init": 30},
         "pitch": {"min": 1, "max": 30, "init": 10},
         "yaw": {"min": 2, "max": 30, "init": 10},
+        "motor_max_pct": 50,
     }
     response = await rig.client.put("/api/settings", json=good)
     assert response.status == 400
@@ -531,6 +592,7 @@ async def test_put_settings_is_503_when_the_lift_is_gone(loop) -> None:
     try:
         assert r.client is not None
         good = copy.deepcopy(SETTINGS)
+        good["motor_max_pct"] = 50
         response = await r.client.put("/api/settings", json=good)
         assert response.status == 503
         assert r.settings == SETTINGS
@@ -613,11 +675,35 @@ async def test_fake_mode_settings_relay(fake_rig: Rig) -> None:
     response = await rig.client.get("/api/settings")
     assert response.status == 200
     assert (await response.json())["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+    assert (await response.json())["settings"]["motor_max_pct"] == 50
     good = copy.deepcopy(SETTINGS)
     good["lift_up"] = {"min": 10, "max": 20, "init": 15}
+    good["motor_max_pct"] = 30
     response = await rig.client.put("/api/settings", json=good)
     assert response.status == 200
     assert (await response.json())["settings"]["lift_up"] == {"min": 10, "max": 20, "init": 15}
+    assert (await response.json())["settings"]["motor_max_pct"] == 30
+    # 偽物の昇降部の設定にも上限が残る
+    assert rig.camera._fake_lift_settings is not None  # noqa: SLF001 - 中身を直接見る
+    assert rig.camera._fake_lift_settings["motor_max_pct"] == 30  # noqa: SLF001
+
+
+async def test_fake_lift_settings_are_validated_like_the_real_ones(fake_rig: Rig) -> None:
+    """偽物の昇降部の設定も同じ規則で検証する（101・欠けは 400）。"""
+    rig = fake_rig
+    good = {
+        "lift_up": {"min": 10, "max": 60, "init": 30},
+        "lift_down": {"min": 10, "max": 60, "init": 30},
+        "motor_max_pct": 50,
+    }
+    assert await rig.camera._put_lift_settings(dict(good)) == (200, [])  # noqa: SLF001
+    bad = dict(good, motor_max_pct=101)
+    status, errors = await rig.camera._put_lift_settings(bad)  # noqa: SLF001
+    assert status == 400
+    assert errors
+    missing = {key: good[key] for key in ("lift_up", "lift_down")}
+    status, _ = await rig.camera._put_lift_settings(missing)  # noqa: SLF001
+    assert status == 400
 
 
 @pytest.mark.parametrize(

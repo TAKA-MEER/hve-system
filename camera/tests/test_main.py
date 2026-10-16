@@ -83,6 +83,7 @@ async def test_fake_mode_saves_settings_under_a_host_writable_dir(monkeypatch, a
         "lift_down": {"min": 10, "max": 60, "init": 30},
         "pitch": {"min": 1, "max": 30, "init": 10},
         "yaw": {"min": 2, "max": 30, "init": 10},
+        "motor_max_pct": 50,
     }
     resp = await client.put("/api/settings", json=good)
     assert resp.status == 200, await resp.text()
