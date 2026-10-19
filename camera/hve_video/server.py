@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
+import struct
 
 from aiohttp import web
 
@@ -120,6 +122,25 @@ def _part(jpeg: bytes) -> bytes:
     )
 
 
+def _abort_with_reset(transport) -> None:
+    """接続を捨てる。閉じるときに FIN でなく RST を送らせ、送り残しごと即座に捨てる。
+
+    `abort()` だけだと、相手が生きていて受け取らない（ゼロウィンドウ）とき、カーネルが
+    送り残し約 27 KB を抱えたまま `FIN_WAIT1` で長く残る（DetailedDesign-hardware.md §2.1.1）。
+    """
+    if transport is None:
+        return
+    sock = transport.get_extra_info("socket")
+    if sock is not None:
+        try:
+            sock.setsockopt(
+                socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+            )
+        except OSError:
+            pass  # 設定できなくても abort() は行う
+    transport.abort()
+
+
 async def _write_within(coro, timeout: float) -> None:
     """`coro`（1 枚の書き込み）が `timeout` 秒で終わらなければ `asyncio.TimeoutError`。
 
@@ -164,8 +185,7 @@ async def _stream(request: web.Request) -> web.StreamResponse:
                 # 相手が受け取らない。`close()` は送り残しを送り切ってから閉じるので、
                 # 止まった相手だと閉じない。`abort()` で捨てる
                 log.warning("%s 秒以内に送れない接続を捨てる", send_timeout)
-                if request.transport is not None:
-                    request.transport.abort()
+                _abort_with_reset(request.transport)
                 break
     except ConnectionResetError:
         # 画面が切れた。配信は続けるので静かに戻る

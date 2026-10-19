@@ -627,3 +627,49 @@ async def test_connect_and_leave_probes_do_not_take_frames_from_a_viewer(fake_re
     await drop(viewer)
     await app.shutdown()
     assert len(response.writes) >= produced_total * 0.8
+
+
+def _timeout_transport(sock):
+    """捨てるときの呼び出し順を記録する偽の transport。"""
+    transport = mock.Mock()
+    calls = []
+    transport.get_extra_info.side_effect = lambda key: sock if key == "socket" else None
+    transport.abort.side_effect = lambda: calls.append("abort")
+    if sock is not None:
+        sock.setsockopt.side_effect = lambda *a: calls.append(("setsockopt",) + a)
+    return transport, calls
+
+
+async def _drop_stuck_connection(app, transport):
+    request = make_mocked_request(
+        "GET", "/stream", app=app, transport=transport, headers={"X-Block": "1"}
+    )
+    task = asyncio.ensure_future(video_server._stream(request))
+    done, _ = await asyncio.wait([task], timeout=1.0)
+    assert task in done
+    await app.shutdown()
+
+
+async def test_a_dropped_connection_gets_rst_linger_before_abort(fake_response):
+    """捨てるときは SO_LINGER (1, 0) を設定してから abort()（FIN_WAIT1 で残らないように）。"""
+    sock = mock.Mock()
+    transport, calls = _timeout_transport(sock)
+    await _drop_stuck_connection(fake_app(CountingPipeline(), send_timeout_ms=100), transport)
+    assert calls == [
+        ("setsockopt", socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)),
+        "abort",
+    ]
+
+
+async def test_a_dropped_connection_is_aborted_without_a_socket(fake_response):
+    transport, calls = _timeout_transport(None)
+    await _drop_stuck_connection(fake_app(CountingPipeline(), send_timeout_ms=100), transport)
+    assert calls == ["abort"]
+
+
+async def test_a_dropped_connection_is_aborted_when_setsockopt_fails(fake_response):
+    sock = mock.Mock()
+    transport, calls = _timeout_transport(sock)
+    sock.setsockopt.side_effect = OSError("boom")
+    await _drop_stuck_connection(fake_app(CountingPipeline(), send_timeout_ms=100), transport)
+    assert calls == ["abort"]
