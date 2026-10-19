@@ -85,6 +85,7 @@
 | 名前 | 置き場 | 中身 |
 | --- | --- | --- |
 | `topDetectText`・`ownerText`・`liftUiText`・`liftLink`・`snapshotUrl`・`openSnapshot`・`closeSnapshot`・`TOP_DETECT_OFF_TEXT` | `camera/web/app.js` | 上端の検知・持ち主・昇降部の画面の数・昇降部へのリンク・静止画の URL と重ね表示 |
+| `probeOutcome`・`video_probe_failures` | `camera/web/app.js` | 映像の確かめの結果から、続けて失敗した回数と「映像がありません」を出すかを決める（`WP-UI-03`。[DetailedDesign.md](DetailedDesign.md) §4.4.1） |
 | `bOwner`・`bLiftUi`・`bLiftLink`・`snapBtn`・`snapshot`・`snapImage`・`snapMsg`・`snapClose` ／ `.snapbtn`・`.snapshot`・`.snapmsg`・`.snapclose`・`.badge.link` | `camera/web/index.html`・`style.css` | 上の表示の DOM の id と CSS のクラス |
 
 ### 1.2 `cam_io` の実物の名前（`WP-IO-02` で足した。2026-10-07 に管理担当が登録）
