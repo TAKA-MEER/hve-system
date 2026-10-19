@@ -27,6 +27,7 @@ VIDEO_FPS = 20.0
 JPEG_QUALITY = 60
 ZOOM_MAX = 4.0
 ZOOM_STEP = 0.5
+SEND_TIMEOUT_MS = 5000
 OUT_SIZE = (320, OUT_HEIGHT)
 # 127.0.0.1 以外の接続元（`/zoom` は 403 になる）
 FOREIGN_PEER = "10.0.0.5"
@@ -41,7 +42,7 @@ def make_app(zoom: float = 1.0, video_fps: float = VIDEO_FPS) -> object:
         out_height=OUT_HEIGHT,
         jpeg_quality=JPEG_QUALITY,
     )
-    return video_server.create_app(pipeline, video_fps)
+    return video_server.create_app(pipeline, video_fps, SEND_TIMEOUT_MS)
 
 
 def pipeline_of(app) -> VideoPipeline:
@@ -212,7 +213,7 @@ def make_snapshot_app(camera_jpeg, zoom: float = 1.0):
         out_height=OUT_HEIGHT,
         jpeg_quality=JPEG_QUALITY,
     )
-    return video_server.create_app(pipeline, VIDEO_FPS)
+    return video_server.create_app(pipeline, VIDEO_FPS, SEND_TIMEOUT_MS)
 
 
 async def test_snapshot_returns_the_camera_jpeg_unmodified(aiohttp_client):

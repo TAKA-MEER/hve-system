@@ -25,5 +25,7 @@ def test_main_runs_the_app_with_aiohttp_3_6_run_app_and_releases_the_source(monk
     assert pipeline.next_frame() is not None
     import asyncio
 
-    asyncio.new_event_loop().run_until_complete(app.on_shutdown[0](app))
+    loop = asyncio.new_event_loop()
+    for handler in app.on_shutdown:  # 配信の停止 → 取り込みの解放の順
+        loop.run_until_complete(handler(app))
     assert pipeline.next_frame() is None  # 解放されて取り込みが止まる

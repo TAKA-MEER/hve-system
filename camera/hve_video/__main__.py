@@ -1,4 +1,4 @@
-"""`python3 -m hve_video [--fake] [--port N]` の入口（DetailedDesign.md §4.3）。"""
+"""`python3 -m hve_video [--fake] [--port N]` の入口（DetailedDesign.md §4.4）。"""
 
 from __future__ import annotations
 
@@ -69,7 +69,9 @@ def main(argv: list[str] | None = None) -> int:
         params["video_out_height"],
         params["video_jpeg_quality"],
     )
-    app = create_app(pipeline, params["video_fps"])
+    app = create_app(
+        pipeline, params["video_fps"], params["video_send_timeout_ms"]
+    )
     # aiohttp 3.6.2（UnitV2）の `run_app` には `on_shutdown` 引数が無いので、アプリに登録する
     app.on_shutdown.append(_release_pipeline)
     web.run_app(app, port=args.port)

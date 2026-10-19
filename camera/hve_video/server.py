@@ -1,4 +1,4 @@
-"""MJPEG の配信と倍率の受け付け（DetailedDesign.md §4.3・protocol §1 の経路）。"""
+"""MJPEG の配信と倍率の受け付け（DetailedDesign.md §4.4・protocol §1 の経路）。"""
 
 from __future__ import annotations
 
@@ -23,10 +23,107 @@ def is_local_peer(remote: str | None) -> bool:
     return remote == ZOOM_PEER
 
 
+class _Subscriber:
+    """1 本の接続の受け口。最新の 1 枚だけを持つ（古い 1 枚は上書きして溜めない）。"""
+
+    def __init__(self) -> None:
+        self.jpeg: bytes | None = None
+        self.event = asyncio.Event()
+
+    def offer(self, jpeg: bytes) -> None:
+        self.jpeg = jpeg
+        self.event.set()
+
+    def wake(self) -> None:
+        """待っているのを起こす（アプリの終了で使う。枚は無いまま）。"""
+        self.event.set()
+
+
+class Broadcaster:
+    """JPEG の作り直しを 1 か所にまとめて、全接続に同じ 1 枚を配る（DetailedDesign.md §4.4 「配り方」）。
+
+    作り直しは `video_fps` ごとに 1 回だけ。接続が 0 本のあいだは作り直さない
+    （最後の接続が抜けると、ループは次の周期の頭で止まり、次の接続が起こし直す）。
+    """
+
+    def __init__(self, pipeline: VideoPipeline, video_fps: float) -> None:
+        self._pipeline = pipeline
+        self._period = 1.0 / video_fps
+        self._subscribers: set[_Subscriber] = set()
+        self._task: asyncio.Future | None = None
+        self.closing = False
+
+    def subscribe(self) -> _Subscriber:
+        subscriber = _Subscriber()
+        self._subscribers.add(subscriber)
+        if self.closing:
+            subscriber.wake()
+        elif self._task is None:
+            self._task = asyncio.ensure_future(self._run())
+        return subscriber
+
+    def unsubscribe(self, subscriber: _Subscriber) -> None:
+        self._subscribers.discard(subscriber)
+
+    async def close(self) -> None:
+        """アプリの終了。ループを止め、待っている接続を起こして抜けさせる。"""
+        self.closing = True
+        for subscriber in list(self._subscribers):
+            subscriber.wake()
+        task, self._task = self._task, None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _run(self) -> None:
+        loop = asyncio.get_running_loop()
+        me = asyncio.current_task()
+        next_frame_at = loop.time()
+        try:
+            while self._subscribers:
+                try:
+                    # JPEG の処理は重いので、ループを止めないよう別スレッドに任せる
+                    # （Python 3.8 には asyncio.to_thread が無いので run_in_executor を使う）
+                    jpeg = await loop.run_in_executor(None, self._pipeline.jpeg_bytes)
+                except Exception:
+                    log.exception("JPEG の作り直しに失敗した")
+                    jpeg = None
+                if jpeg is not None:
+                    for subscriber in list(self._subscribers):
+                        subscriber.offer(jpeg)
+                next_frame_at += self._period
+                remaining = next_frame_at - loop.time()
+                if remaining > 0.0:
+                    await asyncio.sleep(remaining)
+                else:
+                    # 処理が video_fps より遅いときは追いつかず、今の時間から数え直す
+                    next_frame_at = loop.time()
+        finally:
+            if self._task is me:
+                self._task = None
+
+
+def _part(jpeg: bytes) -> bytes:
+    return (
+        b"--"
+        + STREAM_BOUNDARY.encode()
+        + b"\r\n"
+        b"Content-Type: image/jpeg\r\n"
+        b"Content-Length: "
+        + str(len(jpeg)).encode()
+        + b"\r\n\r\n"
+        + jpeg
+        + b"\r\n"
+    )
+
+
 async def _stream(request: web.Request) -> web.StreamResponse:
-    """`video_fps` ごとに 1 フレームを JPEG にして配る。"""
-    pipeline: VideoPipeline = request.app["pipeline"]
-    video_fps: float = request.app["video_fps"]
+    """作り直し済みの最新の 1 枚を配る。前の 1 枚を送り終えていなければ、その間の枚は飛ばす。"""
+    broadcaster: Broadcaster = request.app["broadcaster"]
+    send_timeout: float = request.app["video_send_timeout"]
     response = web.StreamResponse(
         status=200,
         headers={
@@ -35,36 +132,28 @@ async def _stream(request: web.Request) -> web.StreamResponse:
         },
     )
     await response.prepare(request)
-    period = 1.0 / video_fps
-    loop = asyncio.get_running_loop()
-    next_frame_at = loop.time()
+    subscriber = broadcaster.subscribe()
     try:
-        while True:
-            # JPEG の処理は重いので、ループを止めないよう別スレッドに任せる
-            # （Python 3.8 には asyncio.to_thread が無いので run_in_executor を使う）
-            jpeg = await loop.run_in_executor(None, pipeline.jpeg_bytes)
-            if jpeg is not None:
-                await response.write(
-                    b"--"
-                    + STREAM_BOUNDARY.encode()
-                    + b"\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Content-Length: "
-                    + str(len(jpeg)).encode()
-                    + b"\r\n\r\n"
-                    + jpeg
-                    + b"\r\n"
-                )
-            next_frame_at += period
-            remaining = next_frame_at - loop.time()
-            if remaining > 0.0:
-                await asyncio.sleep(remaining)
-            else:
-                # 処理が video_fps より遅いときは追いつかず、今の時間から数え直す
-                next_frame_at = loop.time()
+        while not broadcaster.closing:
+            await subscriber.event.wait()
+            subscriber.event.clear()
+            jpeg, subscriber.jpeg = subscriber.jpeg, None
+            if jpeg is None:
+                continue
+            try:
+                await asyncio.wait_for(response.write(_part(jpeg)), send_timeout)
+            except asyncio.TimeoutError:
+                # 相手が受け取らない。`close()` は送り残しを送り切ってから閉じるので、
+                # 止まった相手だと閉じない。`abort()` で捨てる
+                log.warning("%s 秒以内に送れない接続を捨てる", send_timeout)
+                if request.transport is not None:
+                    request.transport.abort()
+                break
     except ConnectionResetError:
         # 画面が切れた。配信は続けるので静かに戻る
         pass
+    finally:
+        broadcaster.unsubscribe(subscriber)
     return response
 
 
@@ -104,11 +193,20 @@ async def _snapshot(request: web.Request) -> web.Response:
     )
 
 
-def create_app(pipeline: VideoPipeline, video_fps: float) -> web.Application:
+async def _close_broadcaster(app: web.Application) -> None:
+    await app["broadcaster"].close()
+
+
+def create_app(
+    pipeline: VideoPipeline, video_fps: float, video_send_timeout_ms: float
+) -> web.Application:
     """`GET /stream`（MJPEG）・`GET /snapshot`・`POST /zoom` を持つアプリを作る。"""
     app = web.Application()
     app["pipeline"] = pipeline
     app["video_fps"] = float(video_fps)
+    app["video_send_timeout"] = float(video_send_timeout_ms) / 1000.0
+    app["broadcaster"] = Broadcaster(pipeline, float(video_fps))
+    app.on_shutdown.append(_close_broadcaster)
     app.add_routes(
         [
             web.get("/stream", _stream),
