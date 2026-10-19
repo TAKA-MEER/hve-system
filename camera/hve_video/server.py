@@ -120,6 +120,24 @@ def _part(jpeg: bytes) -> bytes:
     )
 
 
+async def _write_within(coro, timeout: float) -> None:
+    """`coro`（1 枚の書き込み）が `timeout` 秒で終わらなければ `asyncio.TimeoutError`。
+
+    `asyncio.wait_for` は使わない。Python 3.8 の `wait_for` は、完了と同時にキャンセルが来ると
+    そのキャンセルを握りつぶすことがあり、切れた画面のハンドラが抜けずに残る。
+    """
+    task = asyncio.ensure_future(coro)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout)
+    except BaseException:
+        task.cancel()
+        raise
+    if not done:
+        task.cancel()
+        raise asyncio.TimeoutError()
+    task.result()  # 書き込みの例外（ConnectionResetError 等）はここで出る
+
+
 async def _stream(request: web.Request) -> web.StreamResponse:
     """作り直し済みの最新の 1 枚を配る。前の 1 枚を送り終えていなければ、その間の枚は飛ばす。"""
     broadcaster: Broadcaster = request.app["broadcaster"]
@@ -141,7 +159,7 @@ async def _stream(request: web.Request) -> web.StreamResponse:
             if jpeg is None:
                 continue
             try:
-                await asyncio.wait_for(response.write(_part(jpeg)), send_timeout)
+                await _write_within(response.write(_part(jpeg)), send_timeout)
             except asyncio.TimeoutError:
                 # 相手が受け取らない。`close()` は送り残しを送り切ってから閉じるので、
                 # 止まった相手だと閉じない。`abort()` で捨てる
