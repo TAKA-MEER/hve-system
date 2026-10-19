@@ -21,6 +21,7 @@ const ui_hold_period_ms = 100;    // `hold` を送り続ける周期
 const ui_state_timeout_ms = 1000; // `state` がこの時間届かないと「接続切れ」
 const ui_tick_ms = 500;           // 画面が見直す周期
 const video_probe_ms = 1500;      // 映像：配信が居るかを見直す周期（映像が来るまで・途絶えたあいだ「映像がありません」を出し続ける）
+const video_probe_fail_count = 2; // 映像：確かめがこの回数続けて失敗したら「映像がありません」を出す（1 回では出さない）
 const zoom_max = 4;               // デジタルズームの上限
 const zoom_step = 0.5;            // 「＋」「−」の 1 段
 const lift_gauge_full_mm = 1800;  // 高さのゲージの満量（上端が未設定のあいだ）
@@ -223,6 +224,7 @@ let hold_timer = null;      // `hold` を送り続けるタイマー
 let hold_axis = null;       // いま押している軸
 let video_port = null;      // 映像のポート（`state` から。静止画も同じポート）
 let video_probe_timer = null;
+let video_probe_failures = 0; // 確かめが続けて失敗した回数
 let sliders = null;
 let outs = null;
 
@@ -385,6 +387,16 @@ function attachStream() {
   scheduleProbe();
 }
 
+/**
+ * 確かめの結果から、続けて失敗した回数と「映像がありません」を出すかを決める（純関数）。
+ * 成功したら 0 に戻す。`video_probe_fail_count` 回続けて失敗するまでは出さない。
+ */
+function probeOutcome(failures, ok) {
+  if (ok) return {failures: 0, hide: false};
+  const next = failures + 1;
+  return {failures: next, hide: next >= video_probe_fail_count};
+}
+
 function scheduleProbe() {
   if (video_probe_timer !== null) clearTimeout(video_probe_timer);
   video_probe_timer = setTimeout(probeStream, video_probe_ms);
@@ -393,24 +405,31 @@ function scheduleProbe() {
 /**
  * 配信が居るかを `video_probe_ms` ごとに見る。**MJPEG は配信が止まっても `<img>` に
  * `error` が来ず最後のフレームが残る**ので、`<img>` とは別に接続だけ試す（応答の先頭が
- * 来たらすぐ切る）。居なければ `<img>` を隠して「映像がありません」、居るのに映像が無ければ取り直す。
+ * 来たらすぐ切る）。`video_probe_fail_count` 回続けて居なければ `<img>` を隠して「映像がありません」（それまでは何も変えない）、居るのに映像が無ければ取り直す。
  */
 async function probeStream() {
   video_probe_timer = null;
   const image = $('videoImage');
   const controller = new AbortController();
   const giveup = setTimeout(() => controller.abort(), video_probe_ms);
+  let ok = true;
   try {
     await fetch(streamUrl(location.protocol, location.hostname, video_port),
       {mode: 'no-cors', cache: 'no-store', signal: controller.signal});
     clearTimeout(giveup);
     controller.abort();
+  } catch (err) {
+    clearTimeout(giveup);
+    ok = false;
+  }
+  const outcome = probeOutcome(video_probe_failures, ok);
+  video_probe_failures = outcome.failures;
+  if (ok) {
     if (!image.classList.contains('ready')) {
       attachStream(); // 配信が居るのに映像が無い: 取り直す（次の見直しも attachStream が入れる）
       return;
     }
-  } catch (err) {
-    clearTimeout(giveup);
+  } else if (outcome.hide) {
     image.classList.remove('ready');
     $('nosig').classList.add('show');
   }
@@ -568,5 +587,6 @@ if (typeof module === 'object' && module !== null) {
     holdMessage, releaseMessage, zoomMessage, zoomTarget, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
     topDetectText, ownerText, liftUiText, liftLink, snapshotUrl, liftStateText,
+    probeOutcome,
   };
 }
