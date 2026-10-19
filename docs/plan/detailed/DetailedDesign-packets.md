@@ -40,6 +40,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-CAM-04` | 3 | カメラモジュールのアプリを Python 3.8 へ移し、v2 の取り決めにする（`uno_link`・`uno_hw`・`lift_link`・設定の中継・偽物のモード） | BASE-02・LIFT-03・**MEAS-06 の 1・2・5** | 不要 |
 | `WP-VIDEO-02` | 3 | 映像を UnitV2 の取り込みに合わせる | MEAS-06 | 要（UnitV2） |
 | `WP-VIDEO-03` | 5 | **配信を 1 か所の作り直しにまとめ、送れない接続を切る**（2026-10-19 の実機調査） | VIDEO-02 | 不要（実機の確認は管理担当） |
+| `WP-UI-03` | 5 | **1 回の確かめの失敗で「映像がありません」を出さない**（2026-10-19。Wi-Fi の端末で数分に 1 回一瞬出た） | UI-02 | 不要（実機の確認は管理担当） |
 | `WP-UI-02` | 3 | カメラモジュールの画面を v2 にする | CAM-04 | 不要（偽物のモード） |
 | `WP-CAM-05` | 3 | UnitV2 への配備・自動起動・実機の結合 | MEAS-06・CAM-04・VIDEO-02・UI-02・IO-02・LIFT-04 | 要（全部） |
 | `WP-MEAS-01`〜`05` | 4 | 旧版と同じ（ストローク・遅延・無線の圧迫・古さと天井の余裕・電池） | 各実物 | 要 |
@@ -161,6 +162,17 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §4、spec [Spec-ui.md](../spec/Spec-ui.md)
 - 作るもの: 「上端の検知: 一時無効」・持ち主の表示・昇降部の画面の数・昇降部へのリンク・`IO_LOST`・新しい停止理由の文言・昇降の設定（中継）・**静止画のボタンと重ねた表示**（spec §1.5.1。`:8080/snapshot` を取り寄せる。モックアップにも足す）
 - 受け入れ: 旧版の node の試験とスクロールの検査が通る。**変異**: `top_detect` が `false` でも「一時無効」を出さない → 赤
+
+### `WP-UI-03` 映像の途絶えの見つけ方
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.4.1、[-names.md](DetailedDesign-names.md) §5.3.1
+- 作るもの: `camera/web/app.js`（`video_probe_fail_count`・続けて失敗した回数の数え方を純関数にして `module.exports` に足す・`probeStream` がそれを使う）・`camera/web/tests/web.test.js`（純関数）・`camera/web/tests/browser_paths.js`（経路。Playwright の `page.route` で `/stream` のうち**確かめの `fetch` だけ**を落とす。`<img>` の取り込みは落とさない）。名前は -names.md §1.4 に足す（管理担当）
+- 受け入れ: `node --test camera/web/tests/web.test.js` と `browser_paths.js`（全部）が通る。**次の変異がそれぞれ赤になる**（※ は `browser_paths.js` の経路で縛る）
+  1. ※ 1 回の失敗で「映像がありません」を出す（いまの振る舞い）
+  2. ※ 何回続けて失敗しても出さない
+  3. 成功しても続けて失敗した回数を 0 に戻さない（続かない 2 回の失敗で出る）
+  4. ※ 出したあと確かめが成功しても取り直さない（「映像がありません」が消えない）
+- **実機で管理担当が確かめる**: Wi-Fi の端末で数分開いても一瞬の「映像がありません」が出ない／`hve_video` を止めると約 5 秒以内に出て、戻すと消える
 
 ### `WP-CAM-05` 配備と結合
 

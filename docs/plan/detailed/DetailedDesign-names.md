@@ -212,6 +212,13 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`video_send_timeout_ms`** | 5000 | **仮**（1 枚の書き込みがこれを超えた接続を捨てる。[DetailedDesign.md](DetailedDesign.md) §4.4。無線の一時的な途切れで切らない長さ） |
 | `settings_path` | `/home/m5stack/hve_data/settings.json` | 実機調査（root で動かすので `~` を使わない。ルートに 117 MB 空き）。**ピッチ・ヨーの 2 軸だけを保存する** |
 
+### 5.3.1 カメラモジュールの画面（`camera/web/app.js`）
+
+| 名前 | 値 | 出どころ |
+| --- | --- | --- |
+| `video_probe_ms` | 1500 | **仮**（旧版と同じ。映像の確かめの周期と、1 回の確かめの待ちの上限） |
+| **`video_probe_fail_count`** | 2 | **仮**（この回数続けて確かめが失敗したら「映像がありません」。[DetailedDesign.md](DetailedDesign.md) §4.4.1） |
+
 ### 5.4 Arduino（`firmware/cam_io/`）
 
 | 名前 | 置き場 | 値 | 出どころ |
