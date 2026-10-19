@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+import gc
+from typing import Any
 
 from hve_camera.lift_link import LiftLink
 from hve_camera.lift_resolve import resolve_lift_host
@@ -184,6 +186,38 @@ async def test_silent_peer_is_dropped_and_reconnected_with_hello() -> None:
         await lift.send_hold("up", 30, 1, "MEASURED", 2000, 0)
         await wait_until(lambda: len(esp32.hold_history) > n)
         assert len(esp32.hello_history) == 2
+    finally:
+        await lift.close()
+        await esp32.stop()
+
+
+def _live_state_dicts(exclude: Any) -> int:
+    """プロセス内のどこにあっても（インスタンス・モジュール変数・クロージャ）、生きている `state` の dict の数。
+
+    `exclude` は偽の昇降部が持つ履歴（試験の道具）。その dict は数えない。"""
+    skip = {id(x) for x in exclude}
+    gc.collect()
+    return sum(
+        1
+        for o in gc.get_objects()
+        if type(o) is dict and o.get("t") == "state" and id(o) not in skip
+    )
+
+
+async def test_state_is_not_accumulated() -> None:
+    """受けた `state` を件数に比例して溜めない（WP-CAM-08。実機で RSS が約 58 MB/時で増えた）。
+
+    **`_accept` で受けた `state` を、どこ（インスタンス・モジュール変数）のリスト・deque に足しても赤になる。**
+    """
+    clock = ManualClock()
+    esp32 = FakeEsp32(clock, state_period_ms=1)
+    url = await esp32.start()
+    lift = LiftLink(url, clock)
+    try:
+        await lift.start()
+        await wait_until(lambda: len(esp32.state_history) >= 1500, timeout=10.0)
+        await wait_until(lambda: lift.latest_state() is not None)
+        assert _live_state_dicts(list(esp32.state_history)) <= 3
     finally:
         await lift.close()
         await esp32.stop()
