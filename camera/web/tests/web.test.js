@@ -292,3 +292,20 @@ test('理由の文言は 1 行にまとめる（画面からはみ出さない�
   assert.equal(many.errors.length, 2);
   assert.equal(settings.settingsErrorText(many.errors), '上昇: 下限 ≦ 初期値 ≦ 上限 にしてください（ほか 1 件）');
 });
+
+test('確かめの失敗は 1 回では「映像がありません」を出さず、2 回続けて出す', () => {
+  let r = app.probeOutcome(0, false);
+  assert.deepEqual(r, {failures: 1, hide: false});
+  r = app.probeOutcome(r.failures, false);
+  assert.deepEqual(r, {failures: 2, hide: true});
+  // 出したあとも失敗が続くあいだは出し続ける
+  assert.equal(app.probeOutcome(r.failures, false).hide, true);
+});
+
+test('確かめが成功したら数え直す（間に成功が挟まれば 2 回の失敗は続かない）', () => {
+  assert.deepEqual(app.probeOutcome(5, true), {failures: 0, hide: false});
+  let r = app.probeOutcome(0, false);
+  r = app.probeOutcome(r.failures, true);
+  r = app.probeOutcome(r.failures, false);
+  assert.deepEqual(r, {failures: 1, hide: false});
+});

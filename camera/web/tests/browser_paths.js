@@ -11,6 +11,7 @@
 // 5. 映像が無いときと途絶えたとき「映像がありません」が見え、壊れた画像（アイコン・alt 文字）が見えない
 //    ※5 は `hve_video` を立てて**いない**ときに始める（試験の中で立てたり止めたりする）
 // 純関数の試験（web.test.js）ではこの 4 本の経路は縛れないので、ブラウザで通す。
+// 11: 確かめの失敗が 1 回では出さない（WP-UI-03）。
 // 6〜9: 上端の検知の表示・IO_LOST の文言・静止画（WP-UI-02）。
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
@@ -446,6 +447,54 @@ test('10 止まっている間も天井のバッジは自分で測った値を�
     assert.deepEqual(errors, []);
   } finally {
     stopKeep();
+    await cleanup();
+  }
+});
+
+/* --- 11. 確かめ（fetch）の失敗が 1 回では「映像がありません」を出さない（WP-UI-03） ---------- */
+test('11 確かめが 1 回落ちても出さず、続けて落ちると出て、戻ると消える', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  let video = null;
+  const nosig = page.locator('#nosig');
+  const image = page.locator('#videoImage');
+  let drop = 0; // 落とす確かめの残り回数（Infinity で落とし続ける）
+  try {
+    await page.route('**/stream', (route) => {
+      // 確かめ（fetch）だけ落とす。<img>（image）は通す
+      if (route.request().resourceType() === 'fetch' && drop > 0) {
+        drop -= 1;
+        return route.abort();
+      }
+      return route.continue();
+    });
+    const port = Number(new URL(await image.getAttribute('src')).port);
+    video = await startVideo(port);
+    await image.waitFor({state: 'visible', timeout: VIDEO_MS});
+
+    // (a) 1 回だけ落とす: 次の確かめまでのあいだ一度も出ない
+    drop = 1;
+    let seen = false;
+    const until = Date.now() + 1500 * 3;
+    while (Date.now() < until) {
+      if (await nosig.isVisible()) seen = true;
+      await page.waitForTimeout(50);
+    }
+    assert.equal(drop, 0, '確かめを 1 回落とせていない');
+    assert.equal(seen, false, '確かめが 1 回落ちただけで「映像がありません」が出た');
+    assert.equal(await image.isVisible(), true);
+
+    // (b) 落とし続ける: 出る
+    drop = Infinity;
+    await nosig.waitFor({state: 'visible', timeout: 10000});
+    assert.equal(await image.isVisible(), false);
+
+    // (c) 落とすのをやめる: 消える（確かめが成功して取り直す）
+    drop = 0;
+    await nosig.waitFor({state: 'hidden', timeout: 10000});
+    await image.waitFor({state: 'visible', timeout: 10000});
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    if (video !== null) await stopVideo(video);
     await cleanup();
   }
 });
