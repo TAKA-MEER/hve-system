@@ -209,6 +209,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`video_device`** | `/dev/video0` | 実機調査 |
 | `video_out_height` | 480 | spec `H-V9` |
 | `video_fps` / `video_jpeg_quality` | 10 / **80** | **仮**（spec `H-V10`「帯域の数割に収まる範囲で画質を上げる」。1 コアで約 10 fps。上限は `WP-MEAS-03`） |
+| **`video_send_timeout_ms`** | 5000 | **仮**（1 枚の書き込みがこれを超えた接続を捨てる。[DetailedDesign.md](DetailedDesign.md) §4.4。無線の一時的な途切れで切らない長さ） |
 | `settings_path` | `/home/m5stack/hve_data/settings.json` | 実機調査（root で動かすので `~` を使わない。ルートに 117 MB 空き）。**ピッチ・ヨーの 2 軸だけを保存する** |
 
 ### 5.4 Arduino（`firmware/cam_io/`）

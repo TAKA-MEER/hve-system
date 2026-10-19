@@ -39,6 +39,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-IO-02` | 2 | UNO の実物（Timer2・Timer1 の PWM・`Wire`・ウォッチドッグ） | IO-01 | 要（UNO・モータ・SRF02） |
 | `WP-CAM-04` | 3 | カメラモジュールのアプリを Python 3.8 へ移し、v2 の取り決めにする（`uno_link`・`uno_hw`・`lift_link`・設定の中継・偽物のモード） | BASE-02・LIFT-03・**MEAS-06 の 1・2・5** | 不要 |
 | `WP-VIDEO-02` | 3 | 映像を UnitV2 の取り込みに合わせる | MEAS-06 | 要（UnitV2） |
+| `WP-VIDEO-03` | 5 | **配信を 1 か所の作り直しにまとめ、送れない接続を切る**（2026-10-19 の実機調査） | VIDEO-02 | 不要（実機の確認は管理担当） |
 | `WP-UI-02` | 3 | カメラモジュールの画面を v2 にする | CAM-04 | 不要（偽物のモード） |
 | `WP-CAM-05` | 3 | UnitV2 への配備・自動起動・実機の結合 | MEAS-06・CAM-04・VIDEO-02・UI-02・IO-02・LIFT-04 | 要（全部） |
 | `WP-MEAS-01`〜`05` | 4 | 旧版と同じ（ストローク・遅延・無線の圧迫・古さと天井の余裕・電池） | 各実物 | 要 |
@@ -141,6 +142,19 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 作るもの: `hve_video` の取り込み元を `MjpegPipeSource`（`v4l2-ctl` の子プロセス。**`ffmpeg`・OpenCV の `VideoCapture` は使わない**）に替え、区切りと作り直しを別スレッドにする。`GET /snapshot`（spec `H-U9`）を足す。3.8 で動く
 - 受け入れ: ホストの試験（偽の画像列・`split_mjpeg` に `v4l2-ctl` の文字が頭に付いたバイト列と途中で切れたバイト列を与える）が `.venv38` で成功。UnitV2 で 480p の MJPEG が `video_fps` 前後で出て、倍率が変わり、`/snapshot` が 1280×720 の JPEG を返す。**15 分続けて** fps が落ちず、温度監視（`check_thermal.py`）と `haveged` が生きている
 - **変異**（赤になること）: `split_mjpeg` が `FFD8` より前のバイトを捨てない／`/snapshot` が作り直した 480p（や切り出した絵）を返す／`/snapshot` を倍率に合わせて切り出す／作り直しが古い 1 枚を順に処理して遅れる（最新の 1 枚だけを使わない）
+
+### `WP-VIDEO-03` 配信のまとめと送れない接続の始末
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.4（「配り方」「送れない接続を切る」）、[-names.md](DetailedDesign-names.md) §5（`video_send_timeout_ms`）、[-hardware.md](DetailedDesign-hardware.md) §2.1.1（2026-10-19 の行）
+- 作るもの: `camera/hve_video/server.py`（作り直しを 1 か所にまとめて全接続へ配る・接続 0 本では作り直さない・書き込みのタイムアウトで接続を捨てる）・`__main__.py`（`video_send_timeout_ms` を渡す）・`camera/config/params.toml`（`video_send_timeout_ms` と `provisional`）。`pipeline.py`・`sources.py`・`/snapshot`・`/zoom` の振る舞いは変えない。画面（`camera/web/`）は変えない
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**次の変異がそれぞれ赤になる**（※ は偽の pipeline で `jpeg_bytes` の呼ばれた回数を数える、または書き込みが返らない偽の接続を使う）
+  1. ※ 接続ごとに `jpeg_bytes` を呼ぶ（2 本つなぐと 1 周期に 2 回になる）
+  2. ※ 接続が 0 本でも作り直し続ける
+  3. ※ 書き込みのタイムアウトを外す（返らない接続のハンドラが抜けない）
+  4. ※ タイムアウトしたとき、捨てずに `close()` で閉じる（送り残しを待つので閉じない）
+  5. ※ 1 本の接続の書き込みが返らないと、他の接続にも次の 1 枚が届かない
+  6. ※ つないですぐ切る接続（画面の状態確認の真似）があると、別の接続が受け取る枚数が減る
+- **実機で管理担当が確かめる**: 受け取らない接続が `video_send_timeout_ms` に少し足した時間で `netstat` から消える（`FIN_WAIT1` で残るなら手当てを考える）／2 本つないでも `hve_video` の CPU が増えない／状態確認の真似を足しても最大間隔が延びない／基準値（[-hardware.md](DetailedDesign-hardware.md) §2.1.1）より fps が落ちない
 
 ### `WP-UI-02` カメラモジュールの画面 v2
 
