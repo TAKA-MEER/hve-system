@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from collections import deque
+from typing import Any, List
 
 from hve_camera.lift_link import LiftLink
 from hve_camera.lift_resolve import resolve_lift_host
@@ -184,6 +186,46 @@ async def test_silent_peer_is_dropped_and_reconnected_with_hello() -> None:
         await lift.send_hold("up", 30, 1, "MEASURED", 2000, 0)
         await wait_until(lambda: len(esp32.hold_history) > n)
         assert len(esp32.hello_history) == 2
+    finally:
+        await lift.close()
+        await esp32.stop()
+
+
+def _retained_states(root: Any) -> int:
+    """`root` から入れ物（dict・list・tuple・set・deque・`__dict__`）をたどって届く `state` の dict の数。"""
+    seen = set()
+    stack: List[Any] = [root]
+    count = 0
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, dict):
+            if obj.get("t") == "state":
+                count += 1
+            stack.extend(obj.values())
+        elif isinstance(obj, (list, tuple, set, frozenset, deque)):
+            stack.extend(obj)
+        elif hasattr(obj, "__dict__") and type(obj).__module__.startswith("hve_camera"):
+            stack.extend(vars(obj).values())
+    return count
+
+
+async def test_state_is_not_accumulated() -> None:
+    """受けた `state` を件数に比例して溜めない（WP-CAM-08。実機で RSS が約 58 MB/時で増えた）。
+
+    **`_accept` で受けた `state` をリスト・deque に足す変異で赤になる。**
+    """
+    clock = ManualClock()
+    esp32 = FakeEsp32(clock, state_period_ms=1)
+    url = await esp32.start()
+    lift = LiftLink(url, clock)
+    try:
+        await lift.start()
+        await wait_until(lambda: len(esp32.state_history) >= 1500, timeout=10.0)
+        await wait_until(lambda: lift.latest_state() is not None)
+        assert _retained_states(lift) <= 2
     finally:
         await lift.close()
         await esp32.stop()

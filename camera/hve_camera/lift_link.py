@@ -123,8 +123,6 @@ class LiftLink(LiftPort):
         self._state_at_ms: Optional[float] = None
         #: 繋いだ先のホスト（`state.lift.lift_ip` 用。画面に昇降部へのリンクを出す）
         self._remote_host: Optional[str] = None
-        #: 受けた `state` の履歴（試験用）
-        self.state_history: list = []
 
     @property
     def current_host(self) -> Optional[str]:
@@ -313,5 +311,4 @@ class LiftLink(LiftPort):
             return False
         self._state = data
         self._state_at_ms = self._clock()
-        self.state_history.append(dict(data))
         return True
