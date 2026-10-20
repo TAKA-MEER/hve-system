@@ -1,14 +1,14 @@
 // 使い方: node check_noscroll.js <index.html のパス or http://...>
 //   playwright が require できないときは PLAYWRIGHT_PATH=<.../node_modules/playwright> を付ける。
 //   ブラウザは既定で /usr/bin/google-chrome（CHROME_PATH で変更）。
-//   17 の画面サイズ × 4 状態で、ページ・要素のスクロールと中身のはみ出し、操作部品の画面外・カード外・小さすぎを検出する。
+//   17 の画面サイズ × 5 状態で、ページ・要素のスクロールと中身のはみ出し、操作部品の画面外・カード外・小さすぎを検出する。
 // モックアップが、どの画面サイズ・状態でもスクロールせず、主要部品がはみ出さないかを検査する
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const target = process.argv[2];
 const url = /^https?:/.test(target) ? target : 'file://' + require('path').resolve(target);
 const sizes = [[360,640],[375,667],[390,844],[430,932],[768,1024],[810,1080],[1024,1366],
                [640,360],[667,375],[844,390],[932,430],[1024,600],[1024,768],[1280,800],[1366,768],[1920,1080],[2560,1440]];
-const states = ['', '?h=1100&ceil=stale&hold=lift_up&zoom=4', '?settings=1', '?mock=1'];
+const states = ['', '?h=1100&ceil=stale&hold=lift_up&zoom=4', '?settings=1', '?mock=1', '?snap=1&zoom=2'];
 (async () => {
   const b = await chromium.launch({executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome'});
   let fail = 0, n = 0;
