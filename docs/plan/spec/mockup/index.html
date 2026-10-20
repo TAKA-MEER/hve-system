@@ -192,26 +192,7 @@ td input.bad{border-color:var(--ng)}
 <main>
   <div class="video" id="video">
     <svg class="scene" id="scene" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-label="カメラ映像（モックアップでは絵）">
-      <g id="world">
-        <rect x="-2000" y="-4000" width="4640" height="8000" fill="#2b2f36"/>
-        <rect x="-2000" y="-4000" width="4640" height="2600" fill="#3a3e46"/>
-        <rect x="-2000" y="-1400" width="4640" height="14" fill="#555b66"/>
-        <rect x="80" y="-900" width="480" height="2000" fill="#b9bec6" stroke="#8a9099" stroke-width="4"/>
-        <rect x="100" y="-880" width="440" height="160" fill="#9aa1ab"/>
-        <text x="320" y="-790" fill="#39404a" font-size="34" text-anchor="middle" font-family="sans-serif">盤上部</text>
-        <g fill="#6d7580">
-          <rect x="130" y="-690" width="80" height="50"/><rect x="230" y="-690" width="80" height="50"/>
-          <rect x="330" y="-690" width="80" height="50"/><rect x="430" y="-690" width="80" height="50"/>
-        </g>
-        <g fill="#e0a52c"><circle cx="170" cy="-600" r="10"/><circle cx="270" cy="-600" r="10"/><circle cx="370" cy="-600" r="10"/></g>
-        <rect x="100" y="-560" width="440" height="6" fill="#8a9099"/>
-        <g fill="#7b838e">
-          <rect x="130" y="-500" width="380" height="30"/><rect x="130" y="-440" width="380" height="30"/>
-          <rect x="130" y="-380" width="380" height="30"/><rect x="130" y="-320" width="380" height="30"/>
-        </g>
-        <rect x="140" y="-200" width="360" height="300" fill="#a9afb8" stroke="#8a9099" stroke-width="3"/>
-        <text x="320" y="-40" fill="#5b636e" font-size="24" text-anchor="middle" font-family="sans-serif">盤面</text>
-      </g>
+      <g id="world"></g>  <!-- 中身は drawScene() が描く -->
     </svg>
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
     <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0.0°</span></div>
@@ -333,7 +314,7 @@ td input.bad{border-color:var(--ng)}
   // ---- 機体の状態（シミュレーション） ----
   // 高さは下端を 0 とする（下端のリミットスイッチで原点を取る。Spec-safety.md §1.2）。
   // origin が偽の間（電源投入から下端に着くまで）は、画面に高さを出せない
-  const S = {height:0, origin:true, ceilingAt:2000, pitch:0, yaw:0,
+  const S = {height:0, origin:true, ceilingAt:2400, pitch:0, yaw:0,
              link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true,
              active:null, reason:'NONE', runAxis:null, runT:0, meas:0};
   // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_MS・pitch_min/max_deg）
@@ -441,6 +422,131 @@ td input.bad{border-color:var(--ng)}
     requestAnimationFrame(tick);
   }
 
+  // ---- 映像の絵（モックアップ専用）: 配電盤の並ぶ部屋を 3D で描く ----
+  // 座標は mm。X＝右・Y＝前（盤の方）・Z＝上。カメラは盤の前面から CAM_DIST 手前、高さ CAM_BASE＋昇降の高さ。
+  // 昇降は視点が上下に動き（遠近で見え方が変わる）、ピッチは視線の向きが変わる。盤より高く上がって
+  // 下を向くと盤の上面が見える。値はどれも絵のためのもので、仕様ではない
+  const F = 475, NEAR = 30;                       // 焦点距離 [px]（水平の画角 約 68°）・手前で切る距離
+  const CAM_BASE = 900, CAM_DIST = 1100;           // 下端でのカメラの高さ・盤の前面までの距離
+  const PW = 800, PD = 600, PH = 2100, PY = CAM_DIST;  // 盤の幅・奥行き・高さ・前面の Y
+  const ROOM = {x0:-3500, x1:3500, y0:-2500, y1:PY + PD + 300};
+  const add = (a,b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+  const sub = (a,b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const mul = (a,k) => [a[0]*k, a[1]*k, a[2]*k];
+  const dot = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  let C = null, svg = [];
+  function setCamera(){
+    const ps = S.yaw * Math.PI / 180, th = S.pitch * Math.PI / 180;
+    C = {pos:[0, 0, CAM_BASE + S.height],
+         f:[Math.sin(ps)*Math.cos(th), Math.cos(ps)*Math.cos(th), Math.sin(th)],
+         u:[-Math.sin(ps)*Math.sin(th), -Math.cos(ps)*Math.sin(th), Math.cos(th)],
+         r:[Math.cos(ps), -Math.sin(ps), 0]};
+  }
+  const toCam = p => { const d = sub(p, C.pos); return [dot(d, C.r), dot(d, C.u), dot(d, C.f)]; };
+  const scr = c => [320 + F * c[0] / c[2], 240 - F * c[1] / c[2]];
+  function clipNear(pts){ // カメラの後ろに回る部分を切り落とす
+    const out = [];
+    for (let i = 0; i < pts.length; i++){
+      const a = pts[i], b = pts[(i + 1) % pts.length], ain = a[2] >= NEAR, bin = b[2] >= NEAR;
+      if (ain) out.push(a);
+      if (ain !== bin){ const t = (NEAR - a[2]) / (b[2] - a[2]); out.push([a[0] + t*(b[0]-a[0]), a[1] + t*(b[1]-a[1]), NEAR]); }
+    }
+    return out;
+  }
+  function poly(pts, fill, stroke){
+    const c = clipNear(pts.map(toCam)); if (c.length < 3) return;
+    svg.push(`<polygon points="${c.map(scr).map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}" fill="${fill}"` +
+             (stroke ? ` stroke="${stroke}" stroke-width="1.2" stroke-linejoin="round"` : '') + '/>');
+  }
+  const facing = fc => dot(fc.n, sub(C.pos, fc.o)) > 0;
+  // 面の上の座標 (u, v) → 3D。面は {o: 原点, U・V: 面に沿った向き, n: 外向きの法線, w・h: 大きさ}
+  const onF = (fc,u,v) => add(fc.o, add(mul(fc.U, u), mul(fc.V, v)));
+  const rectF = (fc,u0,v0,u1,v1,fill,stroke) => poly([onF(fc,u0,v0), onF(fc,u1,v0), onF(fc,u1,v1), onF(fc,u0,v1)], fill, stroke);
+  const circF = (fc,u,v,r,fill,stroke) => poly(Array.from({length:16}, (_,i) => onF(fc, u + r*Math.cos(i*Math.PI/8), v + r*Math.sin(i*Math.PI/8))), fill, stroke);
+  function textF(fc,u,v,size,str,fill){ // 面に貼った文字（3 点を写した affine で近似）
+    const p0 = toCam(onF(fc,u,v)), pu = toCam(onF(fc,u+100,v)), pv = toCam(onF(fc,u,v+100));
+    if (Math.min(p0[2], pu[2], pv[2]) < NEAR) return;
+    const a = scr(p0), b = scr(pu), c = scr(pv), m = [(b[0]-a[0])/100, (b[1]-a[1])/100, -(c[0]-a[0])/100, -(c[1]-a[1])/100, a[0], a[1]];
+    svg.push(`<text transform="matrix(${m.map(x => x.toFixed(4)).join(' ')})" font-size="${size}" fill="${fill}" font-family="sans-serif">${str}</text>`);
+  }
+  function box(x0,x1,y0,y1,z0,z1){
+    return {
+      front:{o:[x0,y0,z0], U:[1,0,0],  V:[0,0,1], n:[0,-1,0], w:x1-x0, h:z1-z0},
+      top:  {o:[x0,y0,z1], U:[1,0,0],  V:[0,1,0], n:[0,0,1],  w:x1-x0, h:y1-y0},
+      left: {o:[x0,y1,z0], U:[0,-1,0], V:[0,0,1], n:[-1,0,0], w:y1-y0, h:z1-z0},
+      right:{o:[x1,y0,z0], U:[0,1,0],  V:[0,0,1], n:[1,0,0],  w:y1-y0, h:z1-z0},
+      back: {o:[x1,y1,z0], U:[-1,0,0], V:[0,0,1], n:[0,1,0],  w:x1-x0, h:z1-z0},
+    };
+  }
+  const PANEL_COL = {front:'#b9bec6', top:'#d3d7dd', left:'#959ba4', right:'#959ba4', back:'#878d96'};
+  function drawBox(b, col, deco){ // 凸な箱なので、見えている面どうしは重ならない（順は問わない）
+    for (const k of ['back','left','right','front','top']){
+      const fc = b[k]; if (!facing(fc)) continue;
+      rectF(fc, 0, 0, fc.w, fc.h, col[k], '#5d636c');
+      if (deco && deco[k]) deco[k](fc);
+    }
+  }
+  function doorFront(fc, name){ // 盤の前面: 扉・取っ手・銘板
+    rectF(fc, 20, 60, 395, 2060, 'none', '#7d838c'); rectF(fc, 405, 60, 780, 2060, 'none', '#7d838c');
+    rectF(fc, 360, 980, 380, 1160, '#4a4f57'); rectF(fc, 420, 980, 440, 1160, '#4a4f57');
+    rectF(fc, 250, 1920, 550, 2020, '#ecebe2', '#8a8f96'); textF(fc, 285, 1945, 62, name, '#39404a');
+    for (let v = 150; v <= 330; v += 45){ rectF(fc, 80, v, 330, v + 18, '#9ba1aa'); rectF(fc, 470, v, 720, v + 18, '#9ba1aa'); }
+  }
+  function drawScene(){
+    const cz = CAM_BASE + (S.ceilOut ? 6000 : S.ceilingAt);  // 天井の高さ（天井までの距離と合わせる）
+    const key = [S.height.toFixed(0), S.pitch.toFixed(2), S.yaw.toFixed(2), cz].join('|');
+    if (key === drawScene.key) return; drawScene.key = key;
+    setCamera(); svg = ['<rect x="-2000" y="-2000" width="4640" height="4480" fill="#2b2f36"/>'];
+    const R = ROOM, H = cz;
+    // 部屋（内向きの面。カメラは中にいるので全部見える向き）
+    const floor = {o:[R.x0,R.y0,0], U:[1,0,0], V:[0,1,0], w:R.x1-R.x0, h:R.y1-R.y0};
+    const ceil  = {o:[R.x0,R.y1,H], U:[1,0,0], V:[0,-1,0], w:R.x1-R.x0, h:R.y1-R.y0};
+    const walls = [
+      {o:[R.x0,R.y1,0], U:[1,0,0],  V:[0,0,1], w:R.x1-R.x0, h:H, c:'#4a4f58'},  // 盤の後ろ
+      {o:[R.x1,R.y0,0], U:[-1,0,0], V:[0,0,1], w:R.x1-R.x0, h:H, c:'#454a53'},  // カメラの後ろ
+      {o:[R.x0,R.y0,0], U:[0,1,0],  V:[0,0,1], w:R.y1-R.y0, h:H, c:'#3f444c'},  // 左
+      {o:[R.x1,R.y1,0], U:[0,-1,0], V:[0,0,1], w:R.y1-R.y0, h:H, c:'#3f444c'},  // 右
+    ];
+    rectF(floor, 0, 0, floor.w, floor.h, '#30343b');
+    for (let x = 600; x < floor.w; x += 600) rectF(floor, x - 6, 0, x + 6, floor.h, '#3a3f47');
+    for (let y = 600; y < floor.h; y += 600) rectF(floor, 0, y - 6, floor.w, y + 6, '#3a3f47');
+    rectF(ceil, 0, 0, ceil.w, ceil.h, '#5a5f68');
+    for (const [x, y] of [[1500, 600], [4900, 600], [1500, 2800], [4900, 2800]]) rectF(ceil, x, y, x + 600, y + 1200, '#d9dde2', '#8e939a');
+    for (const w of walls){ rectF(w, 0, 0, w.w, w.h, w.c); rectF(w, 0, 0, w.w, 100, '#2a2e34'); }
+    rectF(walls[1], 2600, 0, 3500, 2000, '#5b5146', '#3a332c');               // 後ろの壁の出入口
+    // 盤（3 面並び。遠いものから描く）
+    const cables = () => { for (const [x, c] of [[-300,'#2d3138'], [-260,'#2d3138'], [-220,'#a8442a']])
+      poly([[x, PY+140, PH], [x+28, PY+140, PH], [x+28, PY+140, H], [x, PY+140, H]], c, '#1d2024'); };
+    const above = C.pos[2] > PH;
+    const panels = [
+      {x:-PW/2 - PW - 20, deco:{front: fc => doorFront(fc, '盤 No.1')}},
+      {x: PW/2 + 20,      deco:{front: fc => doorFront(fc, '盤 No.3')}},
+      {x:-PW/2, deco:{
+        front: fc => {
+          doorFront(fc, '盤 No.2');
+          for (const u of [150, 300, 500, 650]) circF(fc, u, 1700, 55, '#f4f4ef', '#4a4f57');
+          for (const [u, c] of [[120,'#4caf50'], [180,'#ef5350'], [240,'#ffb74d'], [560,'#4caf50'], [620,'#4caf50']]) circF(fc, u, 1520, 22, c, '#3a3f46');
+        },
+        top: fc => { // 盤の上面: 換気口・ケーブルダクト・端子箱・置き忘れの工具
+          rectF(fc, 60, 300, 380, 540, '#a7adb5', '#7d838c');
+          for (let u = 80; u < 370; u += 34) rectF(fc, u, 320, u + 16, 520, '#6f757e');
+          rectF(fc, 60, 90, 740, 190, '#767d88', '#5d636c'); rectF(fc, 60, 135, 740, 145, '#5f6670');
+          textF(fc, 230, 215, 48, '盤上面', '#4d545e');
+          poly([onF(fc,430,330), onF(fc,610,410), onF(fc,602,428), onF(fc,422,348)], '#e0a52c', '#7a5a14');
+          poly([onF(fc,610,410), onF(fc,690,446), onF(fc,686,454), onF(fc,602,428)], '#9aa0a8', '#5d636c');
+          if (above) drawBox(box(-PW/2 + 480, -PW/2 + 720, PY + 250, PY + 470, PH, PH + 140), PANEL_COL,
+                             {front: f2 => textF(f2, 50, 45, 42, '端子箱', '#39404a')});
+        },
+      }},
+    ];
+    const dist = p => Math.hypot(p.x + PW/2 - C.pos[0], PY + PD/2 - C.pos[1]);
+    panels.sort((a, b) => dist(b) - dist(a));
+    if (!above) cables();   // 盤より低い視点では盤の前面がケーブルの根元を隠す
+    for (const p of panels) drawBox(box(p.x, p.x + PW, PY, PY + PD, 0, PH), PANEL_COL, p.deco);
+    if (above) cables();
+    $('world').innerHTML = svg.join('');
+  }
+
   function setBadge(el, cls, text){ el.className = 'badge' + (cls ? ' ' + cls : ''); el.lastElementChild.textContent = text; }
 
   function ceilingBadge(){ // camera/web/app.js の ceilingText と同じ出し分け
@@ -462,8 +568,7 @@ td input.bad{border-color:var(--ng)}
     $('bLiftLink').style.display = S.link ? '' : 'none';
     $('bWs').style.display = S.ws ? 'none' : '';
     // 映像: 画面中央に来る世界の y。下端では盤面、上がるほど盤上部へ。ピッチ上向きでさらに上
-    const cy = -50 - S.height * 0.62 - S.pitch * 9, tx = -S.yaw * 6;
-    $('world').setAttribute('transform', `translate(${tx},${240 - cy})`);
+    drawScene();
     $('osdH').textContent = S.origin ? `高さ ${Math.round(S.height)} mm` : '高さ 読めない';
     $('osdP').textContent = `ピッチ ${S.pitch.toFixed(1)}°`;  $('cP').textContent = `↕ ${Math.round(S.pitch)}°`;
     const r = REASON[S.reason], bar = $('stopbar');
@@ -577,7 +682,7 @@ td input.bad{border-color:var(--ng)}
   $('mockRow').addEventListener('click', e => {
     const m = e.target.dataset.mock; if (!m) return;
     if (m === 'normal'){
-      Object.assign(S, {link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true, ceilingAt:2000});
+      Object.assign(S, {link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true, ceilingAt:2400});
       S.origin = true;
       $('bFake').style.display = 'none'; $('bClients').lastElementChild.textContent = '端末 1';
       document.querySelectorAll('#mockRow button').forEach(b => b.classList.toggle('on', b.dataset.mock === 'normal'));
@@ -599,15 +704,17 @@ td input.bad{border-color:var(--ng)}
     if (m === 'io') S.io = !on;
     if (m === 'ws') S.ws = !on;
     if (m === 'novideo') S.video = !on;
-    if (m === 'ceilNear') S.ceilingAt = on ? S.height + 450 : 2000;
+    if (m === 'ceilNear') S.ceilingAt = on ? S.height + 450 : 2400;
     if (m === 'fake') $('bFake').style.display = on ? '' : 'none';
     if (m === 'clients') $('bClients').lastElementChild.textContent = on ? '端末 2' : '端末 1';
   });
 
   applySliders();
-  // 確認用: ?h=<高さ>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&mock=1 で状態を作って開ける
+  // 確認用: ?h=<高さ>&pitch=<deg>&yaw=<deg>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&mock=1 で状態を作って開ける
   const q = new URLSearchParams(location.search);
   if (q.has('h')) S.height = +q.get('h');
+  if (q.has('pitch')) S.pitch = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, +q.get('pitch')));
+  if (q.has('yaw')) S.yaw = +q.get('yaw');
   if (q.get('ceil') === 'near') S.ceilingAt = S.height + 450;
   if (q.get('ceil') === 'stale') S.ceilStale = true;
   if (q.has('hold')) S.active = q.get('hold');

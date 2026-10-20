@@ -160,7 +160,7 @@ GitHub Pages で開ける: <https://taka-meer.github.io/hve-system/plan/spec/moc
 | 停止理由の文言 | 詳細設計の停止理由（[DetailedDesign-names.md](../detailed/DetailedDesign-names.md) §3）。実装の `camera/web/app.js` と同じ | 文言は仮 |
 
 ヘッダの紫の「モック」ボタンは状況（天井が近い・切断など）を再現するためのもので、実装の画面には無い。
-確認用に `?h=1100&hold=lift_up`・`?ceil=stale`・`?settings=1`・`?snap=1`・`?mock=1` のような URL の引数でも状態を作れる。
+確認用に `?h=1100&hold=lift_up`・`?h=1800&pitch=-40`（盤の上面）・`?ceil=stale`・`?settings=1`・`?snap=1`・`?mock=1` のような URL の引数でも状態を作れる。
 
 **§0.1（スクロールさせない）の検査**: [mockup/check_noscroll.js](mockup/check_noscroll.js) が 17 の画面サイズ × 5 状態で、
 ページや要素のスクロール・中身のはみ出し・操作部品の画面外／カード外／小ささを検出する（2026-10-20 に 85/85 通過）。
