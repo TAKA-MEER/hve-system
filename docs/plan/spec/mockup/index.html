@@ -445,7 +445,8 @@ td input.bad{border-color:var(--ng)}
 
   function ceilingBadge(){ // camera/web/app.js の ceilingText と同じ出し分け
     const lifting = S.active === 'lift_up' && S.link;  // 昇降部の判定が載るのはカメラモジュールが持ち主のときだけ
-    if (!S.link || ceilStale()) return ['ng', '天井 値なし'];
+    // 昇降部と切れていても、カメラ部が自分で測った値は出す（app.js では reason が LINK_LOST のまま mm を出す）
+    if (ceilStale()) return ['ng', '天井 値なし'];
     if (S.ceilOut) return ['', '天井 範囲外'];
     if (lifting && ceilingVerdict() === 'CEILING_NEAR') return ['warn', `天井 ${ceilGap()} mm`];
     return ['', `天井 ${ceilGap()} mm`];
