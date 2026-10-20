@@ -1,347 +1,254 @@
-# 名前辞書
+# 名前辞書（v2）
 
-[DetailedDesign.md](DetailedDesign.md) の詳細。**この文書に無い名前を実装で作ってはいけない。**
+[DetailedDesign.md](DetailedDesign.md) の詳細。**この文書に無い名前を実装で作ってはいけない**（`DD-1`）。
+必要な名前が無いと分かったら、**実装する前にこのファイルへ行を足す。**
 
-> **`DD-1`**: 名前を発明する余地をゼロにする。必要な名前が無いと分かったら、
-> **実装する前にこのファイルへ行を足す。**
+**旧版の名前辞書（[archive/v1/detailed/DetailedDesign-names.md](../archive/v1/detailed/DetailedDesign-names.md)）にあって、ここで変えていない名前はそのまま使ってよい**
+（例: `elapsed_ms`・`height_is_fresh`・`hal_core` の定数・`crop_rect`・`pitch_step`・`yaw_step_rate`・`clamp_speed`・`validate_settings`）。
+**旧版の名前を別の意味で使い直さない。**廃止した名前は §6。
 
 ---
 
 ## 0. 命名規則
 
-| 対象 | 規則 | 例 |
-| --- | --- | --- |
-| Python | モジュール・関数は小文字スネーク | `ceiling_permission` |
-| C++ | 型は `UpperCamel`、関数は `lower_snake`、定数は `UPPER_SNAKE` | `LiftController` / `lift_decide` / `LIFT_CMD_TIMEOUT_MS` |
-| パラメータ | 小文字スネーク＋単位の接尾辞（`_ms` / `_mm` / `_deg` / `_dps` / `_pct`） | `ceiling_margin_mm` |
-| 停止理由 | 大文字スネーク | `CEILING` |
-| メッセージのフィールド | 小文字スネーク | `ceil_ok` |
+旧版と同じ（Python は小文字スネーク、C++ は型 `UpperCamel`・関数 `lower_snake`・定数 `UPPER_SNAKE`、パラメータは単位の接尾辞、停止理由は大文字スネーク）。
+単位の接尾辞に `_ddeg`（0.1°）・`_hsps`（1 秒あたりの半ステップ）・`_us` を足す。
 
-## 1. ファイル構成
+## 1. ファイル構成（v2 で足す・変えるもの）
 
 | パス | 中身 |
 | --- | --- |
-| `firmware/lift/platformio.ini` | `env:esp32dev`（実機）・`env:native`（ホスト試験） |
-| `firmware/lift/lib/lift_core/` | `hal.h`・`lift_decide.{h,cpp}`・`lift_controller.{h,cpp}`・`cmd_codec.{h,cpp}`。**`Arduino.h` を include しない** |
-| `firmware/lift/lib/hal_core/` | `hal_core.{h,cpp}`。`hal_esp32` のうち**ハードウェアに触らない計算だけ**（定数は §5・関数は §1）。**`Arduino.h` を include しない**ので `env:native` で試験できる |
-| `firmware/lift/src/` | `main.cpp`・`config.h`・`hal_esp32.{h,cpp}` |
-| `firmware/lift/include/secrets.h.example` | SSID・パスワードの雛形（`secrets.h` は gitignore 済み） |
-| `firmware/lift/test/test_lift_core/`・`test_lift_decide/`・`test_lift_controller/`・`test_cmd_codec/`・`test_hal_core/` | Unity の試験（`env:native`。1 ディレクトリ 1 試験で、それぞれ `test_main.cpp` を持つ） |
-| `camera/hve_camera/` | `__main__.py`・`app.py`・`control.py`・`lift_link.py`・`ceiling.py`・`settings.py`・`axes.py`・`params.py`・`hw/{base,rpi_hw,fake_hw,fake_lift}.py` |
-| `camera/hve_video/` | `__main__.py`・`crop.py`・`pipeline.py`・`server.py`・`sources.py`（実物の V4L2 と、試験用の偽の画像列） |
-| `camera/web/` | `index.html`・`app.js`・`settings.js`・`style.css`。**設定画面は `index.html` のオーバーレイ**（別ページではない。モックアップと同じ） |
-| `camera/config/params.toml` | パラメータ（§5 のカメラ部の行） |
-| `camera/requirements.txt` ／ `camera/requirements-dev.txt` | ラズパイで pip で入れるもの（`aiohttp`・`smbus2`） ／ ホストの試験用（[DetailedDesign.md](DetailedDesign.md) §4.5） |
-| `camera/tests/` | pytest |
-| `camera/systemd/` | `hve-camera.service`・`hve-video.service` |
-| `tools/` | 実機の確認用スクリプト（`lift_probe.py` 等） |
-| `tools/tests/` | pytest（`tools/lift_probe.py` のキーの解釈と `cmd` の組み立ての試験。`camera/tests/` と同じ `.venv` で回す） |
+| `firmware/lift/lib/lift_core/` | 旧版の `hal.h`・`lift_decide`・`lift_controller`・`cmd_codec` に加え、**`ceiling_check.{h,cpp}`・`lift_arbiter.{h,cpp}`・`lift_settings.{h,cpp}`**。`Arduino.h` を include しない |
+| `firmware/lift/web/` | 昇降部の画面: `index.html`・`app.js`・`style.css`・`tests/`（node の試験・スクロールの検査） |
+| `firmware/lift/scripts/embed_web.py` | PlatformIO の `extra_scripts`（`pre:`）。`web/` を gzip して `src/web_assets.h` を作る |
+| `firmware/lift/src/web_assets.h` | **生成物**（`.gitignore` に入れる） |
+| `firmware/lift/test/test_ceiling_check/`・`test_lift_arbiter/`・`test_lift_settings/` | Unity の試験（`env:native`） |
+| **`firmware/cam_io/`** | **Arduino UNO のファーム**（`hve_cam_io`）。`platformio.ini` に `env:uno`（実機）・`env:native`（ホスト試験） |
+| `firmware/cam_io/lib/io_core/` | `io_hal.h`・`io_codec.{h,cpp}`・`io_controller.{h,cpp}`・`step_rate.{h,cpp}`。`Arduino.h` を include しない |
+| `firmware/cam_io/src/` | `main.cpp`・`config.h`・`hal_uno.{h,cpp}` |
+| `firmware/cam_io/test/test_io_codec/`・`test_io_controller/`・`test_step_rate/` | Unity の試験 |
+| `camera/hve_camera/uno_link.py` | `encode_io_cmd`・`parse_io_line`・`UnoClock`（[-protocol.md](DetailedDesign-protocol.md) §5） |
+| `camera/hve_camera/hw/uno_hw.py` | 実物の Arduino との UART（`pyserial`）。**旧版の `hw/rpi_hw.py` を置き換える**（`rpi_hw.py` と `test_rpi_hw.py` は消す。v1 の中身は git の履歴に残る） |
+| `camera/hve_camera/hw/fake_lift.py` | 偽の昇降部（v2 の取り決めを話す。プロセス内） |
+| `camera/hve_camera/lift_resolve.py` | 昇降部の名前を引く（`lift_host` が空なら `avahi-resolve-host-name -4` で `hve-lift.local`） |
+| `camera/requirements.txt` ／ `requirements-dev.txt` | UnitV2 の OS に入っている版（`aiohttp==3.6.2`・`pyserial==3.4`・numpy 1.16.4・OpenCV 3.4 系）に揃えて固定 ／ ホストの試験用（`pytest-aiohttp` も aiohttp 3.6 で動く版）。**UnitV2 へは入れない**（OS のものを使う） |
+| `tools/requirements-dev.txt` | ホストの `.venv`（Python 3.10）で `tools/tests` を回すための依存。`camera/requirements-dev.txt` が 3.8 の版になるので、旧版の中身をここへ移す（`WP-BASE-02`） |
+| `camera/vendor/` | UnitV2 へ持ち込む純 Python の依存（wheel を展開したもの。いまは `tomli` だけ）。アプリは `PYTHONPATH` に足して読む |
+| `camera/deploy/` | UnitV2 の配備: `S86hve`（init スクリプト。root で `hve_camera` と `hve_video` を起動）・avahi の設定の差分（`P-12`）・組み込みのサービスを外す手順 |
+| `tools/fake_lift_server.py` | 偽の昇降部（単体のプロセス）。昇降部の画面・`/ws/ui`・`/ws/module`・設定 API を出す（[DetailedDesign.md](DetailedDesign.md) §4.2） |
+| `tools/lift_probe.py` | 旧版の道具を v2 の取り決め（`/ws/module`・`hello`・`hold`/`release`）に直す |
+| `.venv38/` | Python 3.8 の試験環境（gitignore。[DetailedDesign.md](DetailedDesign.md) §4.7） |
 
-関数・型（`WP-BASE-01`・`WP-CAM-01` で足したもの。§0 の命名規則に従う。型は UpperCamel）:
-
-| 名前 | 置き場 | 何か |
-| --- | --- | --- |
-| `lift_core_version` | `firmware/lift/lib/lift_core/lift_core_version.h` | 文字列を返すだけの土台。`Arduino.h` を include しない。後のパケットでここに判定を書く |
-| `load_params` | `camera/hve_camera/params.py` | `camera/config/params.toml` を読んで dict で返す。`tomllib` が無ければ `tomli` を使う |
-| `CeilingReading` | `camera/hve_camera/ceiling.py` | 天井の読み値。状態・距離 mm・時刻 ms を持つ。**状態は `MEASURED`（測れた）・`NO_ECHO`（反射なし）・`READ_ERROR`（I2C の読み取り失敗）の 3 つで、別々の値として受け取る**（`READ_ERROR` と `NO_ECHO` を取り違えると天井へ突っ込む） |
-| `ceiling_permission` | `camera/hve_camera/ceiling.py` | 読み値・現在時刻・パラメータから、天井の許可 `(ok, 理由)` を返す純関数 |
-| `validate_settings` | `camera/hve_camera/settings.py` | 設定の検証（[-protocol.md](DetailedDesign-protocol.md) §3）。通らなかった理由の一覧を返す |
-| `load_settings` | `camera/hve_camera/settings.py` | 設定の読み込み。`(設定, 既定値で動いているか)` を返す |
-| `save_settings` | `camera/hve_camera/settings.py` | 検証を通る設定だけを原子的に保存する |
-| `pitch_step` | `camera/hve_camera/axes.py` | ピッチの目標角を deg/s で積分し可動範囲に収める。`(角度, 理由)` を返す |
-| `yaw_step_rate` | `camera/hve_camera/axes.py` | ヨーの deg/s と向きから `(1 秒あたりの半ステップ数, 向き)` を返す |
-| `clamp_speed` | `camera/hve_camera/axes.py` | 速度を設定の `min`〜`max` に丸める |
-
-`WP-VIDEO-01` で足した関数・クラス（§0 の命名規則に従う）。**パラメータは `load_params` と同じ `params.toml` を読む**（`hve_video` 側で読み込み直さない）:
+関数・型（v2 で足すもの）:
 
 | 名前 | 置き場 | 何か |
 | --- | --- | --- |
-| `crop_rect` | `camera/hve_video/crop.py` | `crop_rect(取り込みの幅, 高さ, 倍率, zoom_max, zoom_step)` → 切り出す矩形 `(x, y, w, h)`。倍率を 1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる。中央・取り込みと同じ縦横比 |
-| `FakeSource` | `camera/hve_video/sources.py` | 偽の画像列（numpy で作る。中央に目印があり、フレームごとに変わる） |
-| `V4L2Source` | `camera/hve_video/sources.py` | 実物の V4L2 カメラ。OpenCV の `VideoCapture`。MJPEG を要求し `video_capture_width`／`video_capture_height` を求める |
-| `open_source` | `camera/hve_video/sources.py` | `open_source(fake, 取り込みの幅, 取り込みの高さ)`。`fake` なら `FakeSource`、でなければ `V4L2Source` を作る |
-| `VideoPipeline` | `camera/hve_video/pipeline.py` | 取り込み → 切り出し → 出力の大きさへ縮小 → JPEG。倍率を持つ。**出力の大きさは倍率によらず一定** |
-| `create_app` | `camera/hve_video/server.py` | `create_app(pipeline, video_fps)` → aiohttp のアプリ（`GET /stream`・`POST /zoom`） |
-| `is_local_peer` | `camera/hve_video/server.py` | 接続元が `127.0.0.1` かどうか。`/zoom` の 403 の判定に使う |
-| `main` | `camera/hve_video/__main__.py` | `python3 -m hve_video [--fake] [--port N]` の入口 |
+| `CeilingStatus` | `lift_core/ceiling_check.h` | `MEASURED` / `TOO_NEAR` / `NO_ECHO` / `READ_ERROR` / `MISSING`（欠けている・読めない） |
+| `CeilingReport` | 同 | `hold` に載る天井の値（状態・mm・`age_ms`）と、受け取った時刻 |
+| `ceiling_check` | 同 | `ceiling_check(report, now_ms, connection_has_sensor)` → `CeilingVerdict{ok, reason}`。**距離計を持たない接続なら常に `ok`**。古さは `age_ms ＋ elapsed_ms(now, received_at)` |
+| `ConnId` | `lift_core/lift_arbiter.h` | 接続の識別子（整数）と種類（`UI` / `MODULE`） |
+| `LiftArbiter` | 同 | 持ち主の規則（[DetailedDesign.md](DetailedDesign.md) §3.3）。`on_hold`・`on_release`・`on_close`・`tick(now)`・`owner()` |
+| `LiftSettings` ／ `validate_lift_settings` ／ `lift_settings_from_json` ／ `lift_settings_to_json` | `lift_core/lift_settings.h` | 昇降の速度の設定（[-protocol.md](DetailedDesign-protocol.md) §3） |
+| `IoCmd` ／ `parse_m_line` ／ `format_c_line` ／ `format_b_line` | `cam_io/lib/io_core/io_codec.h` | UART の行（[-protocol.md](DetailedDesign-protocol.md) §5） |
+| `IoController` | `cam_io/lib/io_core/io_controller.h` | 指令の受付・ウォッチドッグ・丸め。`io_hal.h` の抽象へ出す |
+| `StepRate` | `cam_io/lib/io_core/step_rate.h` | 割り込み 1 回ごとに「刻むか・どちら向きか」を返す位相の足し算 |
+| `classify_srf02` | `camera/hve_camera/ceiling.py` | SRF02 の生の値 → 汎用の 4 状態（[-protocol.md](DetailedDesign-protocol.md) §5） |
+| `encode_io_cmd` ／ `parse_io_line` | `camera/hve_camera/uno_link.py` | `M` 行を作る ／ `C`・`B` 行を読む（読めなければ `None`） |
+| `UnoClock` | 同 | Arduino の時計を UnitV2 の時計へ直す（[-protocol.md](DetailedDesign-protocol.md) §5） |
+| `resolve_lift_host` | `camera/hve_camera/lift_resolve.py` | 昇降部の IP を返す（引けなければ `None`） |
+| **`MjpegPipeSource`** | `camera/hve_video/sources.py` | 実物のカメラ。`v4l2-ctl … --stream-mmap=4 --stream-to=-` を子プロセスで動かし、区切った最新の 1 枚を持つ（[DetailedDesign.md](DetailedDesign.md) §4.4）。**旧版の `V4L2Source`（OpenCV）を置き換える** |
+| **`split_mjpeg`** | 同 | `split_mjpeg(buf)` → `(区切れた JPEG のリスト, 残りのバイト列)`。`FFD8` より前のバイト（`v4l2-ctl` の文字など）は捨てる。純関数（ホストで試験） |
+| **`latest_jpeg`** | 同（`MjpegPipeSource`・`FakeSource` のメソッド） | 最後の 1 枚をカメラの JPEG のまま返す（無ければ `None`）。`FakeSource` は絵をその場で JPEG にする |
+| **`/snapshot`** | `camera/hve_video/server.py` | `GET`。`latest_jpeg()` をそのまま返す（`image/jpeg`・`Cache-Control: no-store`）。無ければ 503（[-protocol.md](DetailedDesign-protocol.md) §1） |
 
-`WP-LIFT-01` で足した関数・型（§0 の命名規則に従う）:
+### 1.1 `lift_core` の型と関数（`WP-LIFT-03` で足した。2026-10-07 に管理担当が登録）
 
-| 名前 | 置き場 | 何か |
+| 名前 | 置き場 | 中身 |
 | --- | --- | --- |
-| `lift_decide` | `firmware/lift/lib/lift_core/lift_decide.{h,cpp}` | 純関数。[DetailedDesign.md](DetailedDesign.md) §4.1 の表の順に、方向・デューティ・停止理由を決める |
-| `StopReason` | `firmware/lift/lib/lift_core/lift_decide.h` | 停止理由の列挙。名前は §3 の名前そのもの |
-| `LiftDir` | `firmware/lift/lib/lift_core/lift_decide.h` | 方向の列挙。値は [-protocol.md](DetailedDesign-protocol.md) §2.2 の `up` / `down` / `stop` |
-| `LiftCmd` | `firmware/lift/lib/lift_core/lift_decide.h` | 指令の構造体（`dir` / `duty` / `ceil_ok`）。`seq` は判定に使わないので持たない |
-| `LiftState` | `firmware/lift/lib/lift_core/lift_decide.h` | 状態の構造体（[-protocol.md](DetailedDesign-protocol.md) §2.3 のフィールド） |
-| `LiftDecideInput` / `LiftDecideResult` | `firmware/lift/lib/lift_core/lift_decide.h` | `lift_decide()` の入力と出力 |
-| `has_cmd` | `firmware/lift/lib/lift_core/lift_decide.h` | `LiftDecideInput` の要素。**指令を一度も受けていない**ことを表す（起動直後は `CMD_TIMEOUT` 扱い） |
-| `run_ms` | `firmware/lift/lib/lift_core/lift_decide.h` | `LiftDecideInput` の要素。現在の指令方向について**実際にモータを回した**時間 |
-| `height_at_ms` | `firmware/lift/lib/lift_core/lift_decide.h` | 高さの読み値を得た時刻。`height_ok`（有効か）と組で鮮度を測る |
-| `LiftHal` | `firmware/lift/lib/lift_core/hal.h` | ハードウェアの抽象。モータ・下端スイッチ・高さ（値・有効性・時刻） |
-| `LiftController` | `firmware/lift/lib/lift_core/lift_controller.{h,cpp}` | 指令の受付・ウォッチドッグ・`lift_decide()` の結果をモータへ出す |
-| `cmd_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 指令の JSON → `LiftCmd`。壊れた入力は「上昇させない」側にして `false` |
-| `state_encode` / `state_decode` | `firmware/lift/lib/lift_core/cmd_codec.{h,cpp}` | 状態の JSON ⇔ `LiftState`。`fw` は `lift_core_version()` から入れる |
-| `elapsed_ms` | `firmware/lift/lib/lift_core/lift_decide.{h,cpp}` | **経過時間（ms）を数える唯一の関数**。`static_cast<int32_t>(now_ms - then_ms)` の形だけ。`uint32` のまま引いてから `int32` にするので、`millis()` が一周（約 49.7 日）しても正しい。割り込みや WS のタスクが `now` より少し新しい時刻を書いた場合は小さな負の値になり、誤って停止しない。`lift_decide` と `lift_controller` の両方から使う |
-| `height_is_fresh` | `firmware/lift/lib/lift_core/lift_decide.{h,cpp}` | 純関数。高さの読み値が `HEIGHT_STALE_MS` 以内か。`elapsed_ms` を使う。**`lift_decide` の表 4 と `LiftController` の `state.height_ok` はこの 1 か所来判断する**（同じ規則を 2 か所に書かない） |
+| `ConnKind`（`UI`・`MODULE`）／ `ConnId` | `lift_arbiter.h` | 命令の出どころの接続の種類（`/ws/ui`・`/ws/module`）と接続の識別 |
+| `StopReason`・`CeilingStatus`・`CeilingReport`（`received_at_ms` を含む）・`CeilingVerdict` | `ceiling_check.h` | 停止理由（§3）・天井の値の状態と判定の結果。`StopReason` は循環 include を避けてここに置く |
+| `HelloMsg`・`HoldMsg`・`ReleaseMsg` ／ `decode_hello`・`decode_hold`・`decode_release`・`state_encode`・`state_decode` | `cmd_codec.h` | [-protocol.md](DetailedDesign-protocol.md) §2・§3 のメッセージ |
+| `LiftAxisSettings`・`LiftSettings` ／ `validate_lift_settings`・`lift_settings_from_json`・`lift_settings_to_json` | `lift_settings.h` | 昇降の設定 |
+| `LiftController::on_hello`・`on_hold`・`on_release`・`on_close`・`set_ui_clients`・`step` | `lift_controller.h` | 接続ごとの受け口と、判定をモータに効かせる 1 周期 |
+| `PendingEvent`・`PendingType`・`ConnSlot`・`kSettingsNvsKey`（`"settings"`） | `firmware/lift/src/main.cpp`（`WP-LIFT-04`） | WS のタスクから `loop()` へ渡すイベントの列・WS の接続と `LiftController` の接続番号の対応・設定を置く NVS の鍵 |
 
-`WP-LIFT-02` で足した関数・型（§0 の命名規則に従う。**`lift_core` は変えていない**）:
+### 1.3 カメラモジュールのアプリの名前（`WP-CAM-04` で足した。2026-10-07 に管理担当が登録）
 
-| 名前 | 置き場 | 何か |
+| 名前 | 置き場 | 中身 |
 | --- | --- | --- |
-| `sonar_echo_to_mm` | `firmware/lift/lib/hal_core/hal_core.{h,cpp}` | 純関数。HC-SR04 の ECHO のパルス幅（µs）を mm にして有効性を返す。**測定範囲の外は `false` を返し `*out_mm` には書かない**（呼び出し側に無効な値を渡さない） |
-| `bottom_pressed_from_level` | `firmware/lift/lib/hal_core/hal_core.{h,cpp}` | 純関数。ピンのレベル（`HIGH` = 1 / `LOW` = 0）から下端スイッチが押されているかを返す。`BOTTOM_PRESSED_LEVEL` のときだけ `true` |
-| `motor_duty_to_pwm` | `firmware/lift/lib/hal_core/hal_core.{h,cpp}` | 純関数。デューティ [%] を LEDC に書く値（0〜`(1 << resolution) - 1`）にする。停止（0%）は必ず 0 になる |
-| `LiftEsp32Hal` | `firmware/lift/src/hal_esp32.{h,cpp}` | `LiftHal` の実物。MD10C（LEDC）・下端スイッチ・HC-SR04（ECHO は割り込みで測る）。`begin()` でピンを整え、**モータを停止から始める**。`poll(now_ms)` は `loop()` から測定を出すために呼ぶ |
-| `key_action` | `tools/lift_probe.py` | 純関数。キーを `KEY_ACTIONS` の操作名に変える。知らないキーは `None` |
-| `clamp_duty` | `tools/lift_probe.py` | 純関数。デューティを 0〜100 に丸める（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
-| `apply_action` | `tools/lift_probe.py` | 純関数。操作名を `state` へ適用した新しい `state` を返す（元は変えない） |
-| `build_cmd` | `tools/lift_probe.py` | 純関数。`state` から送る `cmd` の JSON オブジェクトを作る。**`dir` が `up` / `down` でなくても `ceil_ok` を必ず載せる**（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
-| `format_state` | `tools/lift_probe.py` | 純関数。受け取った `state` を 1 行の文字列にする（試験と画面出力で使う） |
-| `main` | `tools/lift_probe.py` | `python3 tools/lift_probe.py ws://<ESP32>/ws` の入口 |
+| `OWN_AXES`・`LIFT_AXES` ／ `validate_settings`・`load_settings`・`save_settings` の `axes=` 引数 | `camera/hve_camera/settings.py` | 自分で保存する軸（ヨー・ピッチ）と、昇降部へ中継する軸の区別 |
+| `LiftLink.current_host` | `camera/hve_camera/lift_link.py` | いま繋いでいる昇降部のホスト（画面に昇降部の IP とリンクを出すため） |
+| `FakeHardware.set_io_lost` | `camera/hve_camera/hw/` の偽物 | 偽物のモードで Arduino から行が来ない状態を作る |
 
-`WP-CAM-02` で足した関数・クラス（§0 の命名規則に従う）:
+### 1.4 カメラモジュールの画面の名前（`WP-UI-02` で足した。2026-10-07 に管理担当が登録）
 
-| 名前 | 置き場 | 何か |
+| 名前 | 置き場 | 中身 |
 | --- | --- | --- |
-| `HardwareBase` | `camera/hve_camera/hw/base.py` | ハードウェアの抽象。ピッチのサーボ・ヨーのステッピング・天井の距離計。**判定は持たない**（天井の許可は `ceiling.py`、上下端は昇降部側。`DD-4`） |
-| `read_ceiling` | `camera/hve_camera/hw/base.py` | 天井の距離を 1 回測って `CeilingReading` で返す。**測れなかったことと、新しい測定が無いことをどちらも `None` で表す**（最後の読み値は呼び出し側が保持する） |
-| `set_pitch` | `camera/hve_camera/hw/base.py` | ピッチのサーボへ角度を出す |
-| `drive_yaw` | `camera/hve_camera/hw/base.py` | ヨーを 1 秒あたりの半ステップ数と向きで回す |
-| `stop_yaw` | `camera/hve_camera/hw/base.py` | ヨーを止める |
-| `close` | `camera/hve_camera/hw/base.py` | ハードウェアを片付ける |
-| `FakeHardware` | `camera/hve_camera/hw/fake_hw.py` | `HardwareBase` の偽物。出した値を記録し、天井の読み値は外から差し替える |
-| `set_ceiling` | `camera/hve_camera/hw/fake_hw.py` | 天井の「次の測定値」（状態と距離 mm）を差し込む |
-| `freeze_ceiling` | `camera/hve_camera/hw/fake_hw.py` | 以降新しい天井の測定値を返さない（読み値が止まった・古い状態を再現する） |
-| `fake_lift_decide` | `camera/hve_camera/hw/fake_lift.py` | 偽の昇降部の判定（純関数）。[DetailedDesign.md](DetailedDesign.md) §4.1 の表を Python で写す。**本物の判定は ESP32 側**（`firmware/lift`）で、ここは画面を動かすための真似 |
-| `FakeLift` | `camera/hve_camera/hw/fake_lift.py` | プロセス内の偽の昇降部。**`LiftPort` と同じ使い方ができる**（偽物のモード用） |
-| `set_height_mm` / `set_bottom` | `camera/hve_camera/hw/fake_lift.py` | 偽の昇降の高さと下端スイッチ |
-| `LiftPort` | `camera/hve_camera/lift_link.py` | 昇降部への出口の抽象。`LiftLink` と `FakeLift` が実装する（「同じ使い方ができる」の根拠） |
-| `start` / `close` | `camera/hve_camera/lift_link.py` | 昇降部と繋がり始める（`LiftLink` は切れたら再接続し続ける）／片付ける |
-| `send_cmd` | `camera/hve_camera/lift_link.py` | 昇降部へ `cmd` を送る。**`seq` はここが数える**（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
-| `link_ok` | `camera/hve_camera/lift_link.py` | 昇降部から `state` が `lift_state_timeout_ms` 以内に届いていれば `True`。**`False` の間が `LINK_LOST`** |
-| `latest_state` / `state_received_at_ms` | `camera/hve_camera/lift_link.py` | 最後に受けた `state` とその受信時刻 |
-| `LiftLink` | `camera/hve_camera/lift_link.py` | 昇降部への WS クライアント。切れても再接続し続ける（その間は `LINK_LOST`） |
-| `ControlLoop` | `camera/hve_camera/control.py` | 制御ループ。操作の鮮度・動かす軸・速度を組み立て、昇降部への指令・ピッチ・ヨーを効かせ、状態を集める |
-| `hold` / `release` | `camera/hve_camera/control.py` | 画面から受け取った操作を覚える／押していない状態に戻す |
-| `set_zoom` | `camera/hve_camera/control.py` | 倍率を 1〜`zoom_max`・`zoom_step` の倍数に丸めて持ち、**変わったときだけ** `VideoZoom` へ渡す |
-| `step` | `camera/hve_camera/control.py` | 制御ループ 1 回。**昇降部への指令を先に送り、そのあと天井を測る**（100 ms の指令を I2C の待ち時間で延ばさない） |
-| `build_state` | `camera/hve_camera/control.py` | 画面へ配る `state`（[-protocol.md](DetailedDesign-protocol.md) §2.4）を組み立てる |
-| `CameraApp` | `camera/hve_camera/app.py` | 画面・設定 API・ブラウザとの WS を持つアプリ |
-| `create_app` | `camera/hve_camera/app.py` | `CameraApp` を作って aiohttp の `Application` を返す（**起動と試験が同じ物を使う**） |
-| `control_step` / `broadcast_state` | `camera/hve_camera/app.py` | 制御ループ 1 回／`state` を全画面へ配る。**立ち上げたタスクも試験も同じ関数を使う** |
-| `VideoZoom` | `camera/hve_camera/app.py` | 倍率を `hve_video` へ送る。偽物に差し替えられる。**`hve_video` が居なくてもアプリは止まらない**（逢わなかった倍率は次に送る）。`close` でセッションを閉じる |
-| `send_zoom` | `camera/hve_camera/app.py` | `VideoZoom` の送り口。倍率を受け取って `POST http://127.0.0.1:<video_port>/zoom`。**失敗しても例外を投げない**（次の `send_zoom` で送り直す。送れたかどうかを返す） |
-| `main` | `camera/hve_camera/__main__.py` | `python3 -m hve_camera [--fake] [--port N]` の入口 |
+| `topDetectText`・`ownerText`・`liftUiText`・`liftLink`・`snapshotUrl`・`openSnapshot`・`closeSnapshot`・`TOP_DETECT_OFF_TEXT` | `camera/web/app.js` | 上端の検知・持ち主・昇降部の画面の数・昇降部へのリンク・静止画の URL と重ね表示 |
+| `probeOutcome`・`video_probe_failures` | `camera/web/app.js` | 映像の確かめの結果から、続けて失敗した回数と「映像がありません」を出すかを決める（`WP-UI-03`。[DetailedDesign.md](DetailedDesign.md) §4.4.1） |
+| `bOwner`・`bLiftUi`・`bLiftLink`・`snapBtn`・`snapshot`・`snapImage`・`snapMsg`・`snapClose` ／ `.snapbtn`・`.snapshot`・`.snapmsg`・`.snapclose`・`.badge.link` | `camera/web/index.html`・`style.css` | 上の表示の DOM の id と CSS のクラス |
 
-`WP-CAM-03` で足した関数・型（§0 の命名規則に従う）:
+### 1.2 `cam_io` の実物の名前（`WP-IO-02` で足した。2026-10-07 に管理担当が登録）
 
-| 名前 | 置き場 | 何か |
+| 名前 | 置き場 | 中身 |
 | --- | --- | --- |
-| `pitch_to_pulse_ns` | `camera/hve_camera/hw/rpi_hw.py` | 純関数。ピッチの角度を SG90 のパルス幅 [ns] にする。0° を `SG90_PULSE_CENTER_NS` として 1 度につき `SG90_NS_PER_DEG` を足し、`SG90_PULSE_MIN_NS`〜`SG90_PULSE_MAX_NS` の間に留める（**データシートの範囲外へ出さない**） |
-| `srf02_reading` | `camera/hve_camera/hw/rpi_hw.py` | 純関数。SRF02 の返り値（cm）または I2C の例外を `CeilingReading` にする。**例外は `READ_ERROR`**・`0`（反射なし）と `SRF02_BUSY_RAW`（測定中）は別の扱い・`srf02_max_range_mm` を超える値は `NO_ECHO`・それ以外は `MEASURED`（mm） |
-| `RpiHardware` | `camera/hve_camera/hw/rpi_hw.py` | `HardwareBase` の実物。SG90（カーネル PWM）・28BYJ-48（`lgpio`・専用スレッド）・SRF02（`smbus2`・専用スレッド）。**`lgpio`・`smbus2`・PWM の sysfs はコンストラクタで差し替えられる**（ホストの試験は偽物を差す。**ホストでは `lgpio` を import しない**） |
-| `PwmChannel` | `camera/hve_camera/hw/rpi_hw.py` | カーネルの PWM 1 チャネル（`/sys/class/pwm/pwmchipN/pwm0`）。`export` → `period` → `duty_cycle` → `enable` の順に書く。**`period` は動かさない**（書き換えるとサーボが飛ぶ） |
-| `find_pwm_chip` | `camera/hve_camera/hw/rpi_hw.py` | `PWM_BASE` の中から使う PWM チップのディレクトリを 1 つ選ぶ |
-| `LgpioPort` | `camera/hve_camera/hw/rpi_hw.py` | `lgpio` のチップハンドル。4 つの `YAW_IN*_PIN` を出力として確保し、書き換える。**`lgpio` はこの中でだけ import する**（ホストには入っていない） |
-| `open_srf02_bus` | `camera/hve_camera/hw/rpi_hw.py` | **実装しない**。I2C バスは `RpiHardware` の引数 `smbus` で差し替えるので、開くのは `RpiHardware._open_smbus` の中だけ。**`smbus2` はその中でしか import しない** |
-| `is_raspberry_pi` | `camera/hve_camera/hw/rpi_hw.py` | `RPI_MODEL_PATH` に `Raspberry Pi` と書いてあるか。ラズパイ以外で `--fake` 無しの起動を止めるのに使う |
-
-`WP-UI-01` で足した関数（§0 の命名規則に従う。**画面は素の HTML・CSS・JavaScript。ビルドも外部の読み込みもしない**ので、
-ブラウザでは上位スコープの宣言がそのまま共有される。Node の試験からは `module.exports` 越しに使う）:
-
-| 名前 | 置き場 | 何か |
-| --- | --- | --- |
-| `holdMessage` | `camera/web/app.js` | 送る `hold` の JSON を組み立てる純関数（protocol §2.1） |
-| `releaseMessage` / `zoomMessage` | `camera/web/app.js` | 送る `release` / `zoom` の JSON |
-| `zoomTarget` | `camera/web/app.js` | 「＋」「−」で次に送る倍率。1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる |
-| `speedFor` | `camera/web/app.js` | 軸 → 送る速度。`pitch_*` は `pitch`・`yaw_*` は `yaw` を見る（`pitch_up` と `pitch_down` は同じ枠） |
-| `sliderSpec` | `camera/web/app.js` | スライダーの範囲（設定の下限〜上限）と初期位置（設定の初期値）。**画面を開くたびに初期値**（spec [Spec-ui.md](../spec/Spec-ui.md) §1） |
-| `formatSpeed` | `camera/web/app.js` | 速度の数値の書式（`%` は整数・`deg/s` は小数 1 桁） |
-| `streamUrl` | `camera/web/app.js` | 映像（`hve_video` の `/stream`）の URL。**宿主は画面と同じにする**（protocol §2.4 の `video_port`） |
-| `reasonText` | `camera/web/app.js` | 停止理由（[-names.md](DetailedDesign-names.md) §3）→ `{色, 文言}`。`NONE` は `null`（帯を出さない） |
-| `ceilingText` | `camera/web/app.js` | 天井のバッジの `{色, 文言}`（距離・値なし・範囲外。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b） |
-| `heightText` | `camera/web/app.js` | 高さの OSD の文言（読めない値・値なしを含む） |
-| `holdBlocked` | `camera/web/app.js` | その軸のボタンを薄くするか。昇降部と切れている・天井の `ok` が `false` なら上昇、下端なら下降 |
-| `stateStale` | `camera/web/app.js` | `state` が `ui_state_timeout_ms` 届かないか（「接続切れ」を出す） |
-| `SETTING_AXES` | `camera/web/settings.js` | 設定画面の項目（名前・単位・絶対範囲）。4 項目（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
-| `validateSettingsDraft` | `camera/web/settings.js` | 設定の検証。`min ≦ init ≦ max` と絶対範囲を見て、理由の一覧を返す（保存前に画面側でも確かめる） |
-| `settingsErrorText` | `camera/web/settings.js` | 検証の理由の一覧を 1 行の文言にする（行を増やしても画面からはみ出さない） |
-
-`WP-UI-01` で足した、画面（DOM）と結びつくもの。**上の表の関数だけを試験する経路では、
-「離したときだけ `release` を送る」「押しているあいだ続けて送る」ことを縛れない**ので、
-ブラウザでの試験（`camera/web/tests/browser_paths.js`）で確かめる（brief §2 試験）:
-
-| 名前 | 置き場 | 何か |
-| --- | --- | --- |
-| `REASON_TEXT` | `camera/web/app.js` | 停止理由 → `{色, 文言}` の表（`reasonText` が使う。**文言は仮**） |
-| `AXIS_SETTING` | `camera/web/app.js` | 軸 → 速度の設定の項目。`pitch_up`・`pitch_down` は `pitch`、`yaw_left`・`yaw_right` は `yaw` |
-| `initApp` | `camera/web/app.js` | 画面を組み立てる（スライダー・ボタン・ズーム・ガイド線・設定・映像・離脱）。**DOM が無いときは呼ばない**（Node の試験で `require` できるように） |
-| `connect` | `camera/web/app.js` | カメラ部の WS をつなぎ、`state` を受ける。切れても次の見直しのときに繋ぎ直す |
-| `send` | `camera/web/app.js` | カメラ部へ JSON を送る。**開いていないときは何もしない**（接続前の操作で例外にしない） |
-| `loadSettings` | `camera/web/app.js` | `GET /api/settings` を読んでスライダーを作り直す。読めなかったときは HTML の既定のまま |
-| `applySettings` | `camera/web/app.js` | スライダーの範囲と初期位置を設定どおりに作り直す（`sliderSpec` を使う） |
-| `bindHoldButtons` | `camera/web/app.js` | 「押している間だけ動く」ボタンに `pointerdown`・`pointerup`・`pointercancel`・`lostpointercapture` を結ぶ |
-| `startHold` / `sendHold` / `endHold` | `camera/web/app.js` | 押した軸を覚えて `hold` を送り続ける（`ui_hold_period_ms` ごと）／離したときだけ `release` を送る。**別の軸を押したら前の操作を先に離す**（最後の操作が勝つ。spec [Spec-ui.md](../spec/Spec-ui.md) §1.6） |
-| `render` | `camera/web/app.js` | 受け取った `state` を画面に描く（映像の URL・バッジ・停止理由の帯・高さ・ピッチ・ゲージ・倍率） |
-| `attachStream` | `camera/web/app.js` | 映像を `<img>` に取り付ける。**フレームが来るまで `<img>` を見せない**（壊れた画像のアイコンと `alt` の文字が OSD に重なるので）。`video_probe_ms` まで `load` も `error` も来なければ「映像がありません」を出し続けて取り直す |
-| `FAKE_CEILING_MM` | `camera/hve_camera/__main__.py` | **偽物のモードで起動したときの天井の読み値** [mm]（`MEASURED`）。読み値が無いと画面が「天井 値なし」で上昇ボタンが薄いままになる。実測の代わりに「十分遠い」を渡す |
-| `tick` | `camera/web/app.js` | `ui_tick_ms` ごとに「接続切れ」・再接続・設定の読み直しを見る |
-| `nowMs` | `camera/web/app.js` | 画面が使う時計（`performance.now()`） |
-| `settings_draft` | `camera/web/settings.js` | 設定画面に出している下書き。**閉じる操作では元に戻さない**（保存しない） |
-| `openSettingsOverlay` / `closeSettingsOverlay` | `camera/web/settings.js` | 設定画面のオーバーレイを現在の設定で出す／閉じる |
-| `saveSettingsOverlay` | `camera/web/settings.js` | 検証に通らなければ **`PUT` を送らない**。通れば `PUT /api/settings` して、400 のときはサーバーの理由をそのまま出して保存しない |
-| `validateSettingsInputs` | `camera/web/settings.js` | 入力欄・理由・保存ボタンに検証の結果を反映する |
-| `provisionalText` | `camera/web/settings.js` | 仮値で動作中のパラメータ（`state.provisional`）の説明文。**読み取り専用**（spec [Spec-ui.md](../spec/Spec-ui.md) §2） |
-| `hve_settings_saved` | `camera/web/settings.js` | 保存できたときに `document` に流す CustomEvent の名前。`app.js` がスライダーを作り直す（この画面は `app.js` の内部 state を知らない） |
+| `HalUno`（`begin`・`srf02_poll`・`isr_step`） | `src/hal_uno.h` | `io_hal.h` の実物。`begin` は Timer2・サーボの PWM（Timer1）・`Wire` の準備、`srf02_poll` は待たずに 1 回の測定を進める、`isr_step` は Timer2 の割り込みから呼ぶ刻み |
+| `SERVO_PWM_TOP`・`SERVO_PWM_TICKS_PER_US`・`servo_pulse_us_from_ddeg`・`servo_ocr1a_from_us`・`servo_ocr1a_from_ddeg` | `src/servo_pwm.h` | MG996R の Timer1 のハードウェア PWM（TOP 39999＝20 ms・1 カウント 0.5 µs）と、0.1° → パルス幅 → `OCR1A` の換算（範囲の外へ出さない） |
+| `kFwName` | `src/main.cpp` | `B` 行の `fw` の頭（`hve_cam_io-` ＋ `io_core_version()`） |
 
 ## 2. 機器・ホスト名
 
 | 名前 | 何か |
 | --- | --- |
-| `hve-lift` | 昇降部 ESP32 の mDNS 名（`hve-lift.local`） |
-| `hve-cam` | カメラ部ラズパイのホスト名・mDNS 名（`hve-cam.local`） |
+| `hve-lift` | 昇降部 ESP32 の mDNS 名（旧版と同じ） |
+| `hve-cam` | カメラモジュール（UnitV2）の名前。`hello` の `name` に使う（UnitV2 の mDNS 名は `unitv2` のまま。変えるかは決めていない） |
+| `hve_cam_io` | Arduino のファームの名前（`B` 行の `fw` と一緒に出す） |
 
-アドレスの決め方は未確定（[-open.md](DetailedDesign-open.md) `D-1`）。**AP の SSID はコードに直書きせず** `secrets.h` ／ OS の無線設定に置く。
+**AP の SSID はコードに直書きしない**（ESP32 は `secrets.h`、UnitV2 は OS の無線設定）。
 
 ## 3. 停止理由
 
 | 名前 | 出す所 | 意味 |
 | --- | --- | --- |
-| `NONE` | 両方 | 止めていない |
-| `CMD_STOP` | 昇降部 | 指令が `stop` |
-| `CMD_TIMEOUT` | 昇降部 | 指令が途絶えた |
-| `CEILING` | 昇降部 | `ceil_ok` が `true` でない |
-| `HEIGHT_UNKNOWN` | 昇降部 | 高さが読めない・古い |
-| `TOP` | 昇降部 | 上端に達した |
+| `NONE` | 全部 | 止めていない |
+| `CMD_STOP` | 昇降部 | 持ち主が離した・`stop` |
+| `CMD_TIMEOUT` | 昇降部 | 持ち主の `hold` が途絶えた |
+| **`OWNER_GONE`** | 昇降部 | 持ち主の接続が閉じた |
+| **`CEILING_NEAR`** | 昇降部 | 天井が近い（`MEASURED` で閾値以下・`TOO_NEAR`）。**v1 ではカメラ部の理由だった** |
+| **`CEILING_STALE`** | 昇降部 | 天井の値が無い・読めない・古い。**v1 ではカメラ部の理由だった** |
+| `HEIGHT_UNKNOWN` | 昇降部 | 高さが読めない（**原点を取る前**・下端スイッチの故障・`loop` が回らず古い）。**`W-1` の間は出ない** |
+| `TOP` | 昇降部 | 上端に達した。**`W-1` の間は出ない** |
 | `BOTTOM` | 昇降部 | 下端スイッチが押されている |
-| `MAX_RUN` | 昇降部 | 連続駆動の上限（spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4b） |
-| `CEILING_NEAR` | カメラ部 | 天井が近い |
-| `CEILING_STALE` | カメラ部 | 天井の値が読めない・古い |
-| `HOLD_TIMEOUT` | カメラ部 | 画面からの操作が途絶えた |
-| `LINK_LOST` | カメラ部 | 昇降部と繋がっていない |
-| `AXIS_LIMIT` | カメラ部 | ピッチが可動範囲の端（ヨーには範囲が無い） |
-| `OUT_OF_RANGE` | カメラ部（天井の理由のみ。**停止理由ではない**） | 天井の距離計に反射が返らない。上昇は許す |
+| `MAX_RUN` | 昇降部 | 連続駆動の上限 |
+| **`ENCODER_STALL`** | 昇降部 | モータへ出力しているのにエンコーダが回らない・逆に回る（spec #4d） |
+| `OUT_OF_RANGE` | 昇降部（天井の理由のみ。**停止理由ではない**） | 天井の距離計に反射が返らない。上昇は許す |
+| `HOLD_TIMEOUT` | カメラモジュール | 画面からの操作が途絶えた |
+| `LINK_LOST` | カメラモジュール | 昇降部と繋がっていない |
+| **`IO_LOST`** | カメラモジュール | Arduino から行が来ない（ヨー・ピッチが動かない・天井が読めない） |
+| `AXIS_LIMIT` | カメラモジュール | ピッチが可動範囲の端 |
 
 ## 4. メッセージ
 
-種類 `t` は `hold` / `release` / `cmd` / `state`。フィールドは [-protocol.md](DetailedDesign-protocol.md) §2 が正。
+種類 `t` は昇降部の WS で `hello` / `hold` / `release` / `state`、カメラモジュールの WS で旧版と同じ `hold` / `release` / `zoom` / `state`。
+UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesign-protocol.md) が正。
 
-`POST /api/fake`（[-protocol.md](DetailedDesign-protocol.md) §3。**偽物のモードのときだけ存在する**）のフィールド:
-
-| フィールド | 値 |
-| --- | --- |
-| `ceiling` | 偽の天井。`{"status": "MEASURED" / "NO_ECHO" / "READ_ERROR", "mm": 1450}`（`status`・`mm` は省略可。`NO_ECHO` / `READ_ERROR` では `mm` を要らない）。**`{"stale": true}` なら「以降新しい測定値を返さない」**（`freeze_ceiling`） |
-| `height_mm` | 偽の昇降の高さ [mm] |
-| `bottom` | 偽の下端スイッチ |
-
-**指定しなかったものは動かない。**`ceiling` の `status`・`mm` は画面へ配る `state` の `ceiling`（[-protocol.md](DetailedDesign-protocol.md) §2.4）と、
-`height_mm`・`bottom` は昇降部の `state`（同 §2.3）と同じ名前・同じ意味。
-
-`GET` / `PUT /api/settings`（同 §3）の返り値。**検証に通らなければ 400 と理由の一覧**を返し、**保存しない**:
-
-| フィールド | 値 |
-| --- | --- |
-| `settings` | 現在の設定（4 軸の `min` / `max` / `init`） |
-| `using_defaults` | 設定ファイルが無い・壊れている・検証を通らないので**既定値で動いている**か（`true` の間だけ画面に出す） |
-| `errors` | **`400` のときだけ**入る。通らなかった理由の一覧（`validate_settings` の戻り値そのまま） |
+`POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
+偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
 
 ## 5. パラメータと仮値
 
-**`仮` は根拠の無い仮置き。**実測（`WP-MEAS-*`）で置き換えたら `仮` を外し、出どころを書く。
+**`仮` は根拠の無い仮置き。**実測で置き換えたら `仮` を外し、出どころを書く。
 
-**昇降部の判定に使う定数は `config.h` ではなく `firmware/lift/lib/lift_core/lift_decide.h` に置く**
-（`Arduino.h` を include しない `lift_core` のなかでホスト試験するため。2026-09-28 `WP-LIFT-01` で直した）。
-
-| 名前 | 置き場 | 値 | 出どころ |
-| --- | --- | --- | --- |
-| `LIFT_CMD_TIMEOUT_MS` | `lift_core/lift_decide.h` | 600 | 先行試作・th-system のウォッチドッグの実績 |
-| `HEIGHT_STALE_MS` | `lift_core/lift_decide.h` | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
-| `LIFT_TOP_MM` | `lift_core/lift_decide.h`（既定値。設定値は `LiftController` の引数） | 未設定（`-1`）。**未設定の間は上端で止めない** | `WP-MEAS-01` で決める（spec [Spec-safety.md](../spec/Spec-safety.md) §2 #2a） |
-| `LIFT_MAX_RUN_MS` | `lift_core/lift_decide.h` | 10000 | **仮**・先行試作の値。全行程の実測の約 1.5 倍に置き換える（spec #4b） |
-| `LIFT_DUTY_ABS_MAX_PCT` | `lift_core/lift_decide.h` | 100 | MD10C の上限 |
-| `LIFT_STATE_PERIOD_MS` | 昇降部 `config.h` | 100 | **仮** |
-| `SONAR_PERIOD_MS` | 両方 | 100 | **仮** |
-| `PWM_FREQ_HZ` / `PWM_RESOLUTION` | 昇降部 `config.h` | 5000 / 8 | 先行試作 |
-| `PWM_CH` | 昇降部 `config.h` | 0 | 先行試作（LEDC チャネル 0） |
-| `SONAR_ECHO_TIMEOUT_US` | `hal_core/hal_core.h` | 30000 | **仮**（**割り込み**で ECHO の時間切れを判定する時間。4 m 往復の約 23.5 ms より長く、HC-SR04 の 1 回 60 ms の周期より短い。実機で確認する） |
-| `SONAR_MIN_RANGE_MM` | `hal_core/hal_core.h` | 20 | HC-SR04 のデータシート（約 2 cm。**これより近い値は「高さが読めない」**） |
-| `SONAR_MAX_RANGE_MM` | `hal_core/hal_core.h` | 4000 | HC-SR04 のデータシート（約 4 m。**これより遠い値・時間切れも「高さが読めない」**） |
-| `BOTTOM_PRESSED_LEVEL` | `hal_core/hal_core.h` | 1（`HIGH`） | [-hardware.md](DetailedDesign-hardware.md) §1（**常時閉（NC）配線**。押すと開いて HIGH。断線も HIGH なので「押されている」側に倒れる）。`0` にすると押されたら LOW の配線になる |
-| `MOTOR_DIR_PIN` / `MOTOR_PWM_PIN` | 昇降部 `config.h` | 14 / 32 | [-hardware.md](DetailedDesign-hardware.md) §1（先行試作と同じ） |
-| `MOTOR_DIR_UP_LEVEL` | 昇降部 `config.h` | `true` | **仮**（DIR=HIGH で上昇かは**実機未確認**。`false` にすると逆向きになる） |
-| `BOTTOM_PIN` | 昇降部 `config.h` | 27 | **仮**（[-hardware.md](DetailedDesign-hardware.md) §1。`INPUT_PULLUP`） |
-| `SONAR_TRIG_PIN` / `SONAR_ECHO_PIN` | 昇降部 `config.h` | 25 / 26 | **仮**（同上。**ECHO は分圧して 3.3 V にしてから入れる**） |
-| `LIFT_MDNS_NAME` | 昇降部 `config.h` | `hve-lift` | §2 |
-| `LIFT_HTTP_PORT` / `LIFT_WS_PATH` | 昇降部 `config.h` | 80 / `/ws` | [-protocol.md](DetailedDesign-protocol.md) §1 |
-| `LIFT_STATE_TEXT_MAX` | 昇降部 `config.h` | 256 | **仮**（`state` の JSON は 200 バイト未満。`state_encode` のバッファ） |
-| `LIFT_WIFI_POLL_MS` | 昇降部 `config.h` | 5000 | **仮**（無線が落ちていたら張り直すだけなので短くなくてよい） |
-| `ceiling_margin_mm` | カメラ部 `params.toml` | 500 | **仮**（`H-V8`） |
-| `ceiling_stale_ms` | カメラ部 | 600 | **仮**（spec [Spec-safety.md](../spec/Spec-safety.md) §2） |
-| `hold_timeout_ms` | カメラ部 | 400 | **仮** |
-| `lift_probe_period_ms` | `tools/lift_probe.py` | 100 | **仮**（下の `lift_cmd_period_ms` と同じ。停止中も `stop` を送り続ける） |
-| `lift_probe_duty_pct` | `tools/lift_probe.py` | 40 | **仮**（[-protocol.md](DetailedDesign-protocol.md) §2.2 の例の値） |
-| `lift_probe_duty_step_pct` | `tools/lift_probe.py` | 5 | **仮**（`+` / `-` での増減） |
-| `lift_probe_keys` | `tools/lift_probe.py`（`KEY_ACTIONS`） | `u`=上昇 / `d`=下降 / `s`=停止 / `c`=`ceil_ok` の反転 / `+` と `=`=デューティを 5 増やす / `-`=5 減らす / `x`=送信を止める・再開する / `q`=終了 | 昇降部の操作は将来画面が担うので、ここは**開発用の**最小限の集合 |
-| `lift_cmd_period_ms` | カメラ部 | 100 | **仮** |
-| `lift_state_timeout_ms` | カメラ部 | 600 | **仮** |
-| `state_period_ms` | カメラ部 | 100 | **仮** |
-| `ui_hold_period_ms` / `ui_state_timeout_ms` | 画面 | 100 / 1000 | **仮** |
-| `lift_gauge_full_mm` | 画面 | 1800 | **仮**（操作画面の高さのゲージの満量。`lift.top_mm` が設定されたらその値を使う。`WP-MEAS-01` で決まる `LIFT_TOP_MM` が確定したら置き換え） |
-| `ui_tick_ms` | 画面 | 500 | **仮**（画面が見直す周期。`state` が古ければ「接続切れ」を出し、WS が閉じていれば繋ぎ直す） |
-| `video_probe_ms` | 画面 | 1500 | **仮**（映像の `<img>` を差してから、`load` も `error` も来ない場合に「映像があります」と見なすまでの待ち時間） |
-| `axis_speed_abs_max_dps` | カメラ部 | 60 | 28BYJ-48 の実用の上限（約 60〜90 deg/s）の下側。**実測で確定** |
-| `yaw_steps_per_rev` | カメラ部 | 4096 | 28BYJ-48 の半ステップ（資料により 4076 とも。**実測で確定**） |
-| `srf02_i2c_addr` | カメラ部 | 0x70（7 bit） | SRF02 の工場出荷値 |
-| `srf02_min_range_mm` / `srf02_max_range_mm` | カメラ部 | 150 / 6000 | SRF02 のデータシート。扱いは spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3a・#3b |
-| `srf02_ranging_wait_ms` | カメラ部 | 70 | SRF02 のデータシート（測定に約 66 ms） |
-| `pitch_min_deg` / `pitch_max_deg` | カメラ部 | -45 / 45 | **仮**（`H-V5`・`H-X5`。SG90 自体は約 ±90°） |
-| `zoom_max` / `zoom_step` | カメラ部（画面も「＋」「−」の 1 段に使う） | 4 / 0.5 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5（2026-09-25 決定） |
-| `settings_path` | カメラ部 | `~/hve_data/settings.json` | — |
-| `lift_ws_url` | カメラ部 | `ws://hve-lift.local/ws` | §2 の `hve-lift`（アドレスの決め方は未確定。[-open.md](DetailedDesign-open.md) `D-1`） |
-| `video_port` | カメラ部 | 8080 | [-protocol.md](DetailedDesign-protocol.md) §1・[DetailedDesign.md](DetailedDesign.md) §4.3 |
-| `provisional` | カメラ部 `params.toml` | 下の 13 個の配列 | `DD-3`。**この表の「カメラ部」と「`hve_video`」の行のうち `仮` と書いてあるもの全部**を並べたもの。画面に出す（[-protocol.md](DetailedDesign-protocol.md) §2.4）。実測（`WP-MEAS-*`）で置き換えたらここから外す |
-| 設定の既定値 | カメラ部 | [-protocol.md](DetailedDesign-protocol.md) §3 の例の値 | **仮** |
-| `video_capture_width` / `video_capture_height` | `hve_video` | 1920 / 1080 | **仮**（カメラの型番未定。[-hardware.md](DetailedDesign-hardware.md) §2） |
-| `video_out_height` | `hve_video` | 480（幅は取り込みの縦横比に合わせる） | **仮**（`H-A8`） |
-| `video_fps` / `video_jpeg_quality` | `hve_video` | 10 / 60 | **仮**（`H-A8`） |
-
-**カメラ部の実物の定数（`WP-CAM-03`）は `camera/hve_camera/hw/rpi_hw.py` に置く。**
-`params.toml` に入れなかったのは、部品のデータシートの値、または配線で決まる値だから。
-**データシートの出典は Devantech「SRF02 Ultrasonic Range Finder Technical Specification — I2C Mode」**
-（`http://www.robot-electronics.co.uk/htm/srf02techI2C.htm`）。
+### 5.1 昇降部（`lift_core/lift_decide.h` ほか）
 
 | 名前 | 置き場 | 値 | 出どころ |
 | --- | --- | --- | --- |
-| `SG90_PERIOD_NS` | `hw/rpi_hw.py` | 20000000 | SG90 のデータシート（50 Hz） |
-| `SG90_PULSE_CENTER_NS` | `hw/rpi_hw.py` | 1500000 | 同（0° ＝ 正面・水平。[-hardware.md](DetailedDesign-hardware.md) §2.3「動いても害の無い向きを初期角」）。`control.py` の初期角 0° と揃える |
-| `SG90_NS_PER_DEG` | `hw/rpi_hw.py` | 10000 | 同（1 度あたり 10 µs。0.5〜2.4 ms が約 -100°〜+90° に対応する） |
-| `SG90_PULSE_MIN_NS` / `SG90_PULSE_MAX_NS` | `hw/rpi_hw.py` | 500000 / 2400000 | 同。**この外側へパルス幅を出さない**（角度は `pitch_min_deg`〜`pitch_max_deg` で止める。`axes.py` の `pitch_step`） |
-| `SG90_INITIAL_PITCH_DEG` | `hw/rpi_hw.py` | 0 | [-hardware.md](DetailedDesign-hardware.md) §2.3「動いても害の無い向きを初期角とする」＝正面・水平。`control.py` のピッチの初期角と揃える。**起動時に最初のパルスでここへ動く** |
-| `YAW_IN1_PIN` / `YAW_IN2_PIN` / `YAW_IN3_PIN` / `YAW_IN4_PIN` | `hw/rpi_hw.py` | 23 / 24 / 25 / 16 | 同（**仮**） |
-| `YAW_PINS` | `hw/rpi_hw.py` | 上記 4 本の組 | `YAW_HALF_STEP_SEQUENCE` の下位ビットと順番を揃える |
-| `YAW_HALF_STEP_SEQUENCE` | `hw/rpi_hw.py` | `(0b0001, 0b0011, 0b0010, 0b0110, 0b0100, 0b1100, 0b1000, 0b1001)` | ULN2003 の半ステップ。**下位ビットから IN1〜IN4**。**隣り合うコイルを順に励磁する**（IN1 → IN1+IN2 → IN2 → …）。**中性点（`0b0000`）は使わない**。隣り合わないコイル（IN1+IN3 など）を混ぜた並びは、唸るだけでほとんど回らなかった（2026-09-29 実機で確認） |
-| `YAW_STEP_SIGN` | `hw/rpi_hw.py` | `left` = +1 / `right` = -1 | **仮**（どちらが左かは配線と、ギアの減速比の向きで決まる。実機で確認する。昇降部の `MOTOR_DIR_UP_LEVEL` と同じ扱い） |
-| `YAW_MIN_STEP_INTERVAL_S` | `hw/rpi_hw.py` | 0.0002 | **仮**（設定の上限 `axis_speed_abs_max_dps` 60 deg/s なら 1.46 ms 止まり。**それより短い間隔は刻まない**） |
-| `YAW_STOP_TIMEOUT_S` | `hw/rpi_hw.py` | 1.0 | **仮**（スレッドを止めてピンを LOW にするまで待つ時間。越えたら諦めてログを出す） |
-| `SRF02_COMMAND_REGISTER` / `SRF02_RESULT_REGISTER` | `hw/rpi_hw.py` | 0x00 / 0x02 | Devantech SRF02 I2C 仕様。**書けるのはロケーション 0 だけ**。結果はロケーション 2・3 の 16 bit（上位バイト先頭） |
-| `SRF02_RANGING_CMD_CM` | `hw/rpi_hw.py` | 0x51 | 同（ranging を始めて cm で返すコマンド。**mm を返すコマンドは無い**。結果が cm なので `MM_PER_CM` で mm にする） |
-| `SRF02_NO_ECHO_RAW` | `hw/rpi_hw.py` | 0 | 同（`0` = 反射が無い。**上昇を許す**。仕様の `#3b`） |
-| `SRF02_BUSY_RAW` | `hw/rpi_hw.py` | 0xFFFF | 同（**ranging 中は応答が無く 255 が返る**ので「測定中」は `0xFFFF` で分かる。`0`（反射なし）とは別の `READ_ERROR` にする。仕様の `#3b` と `#4` を取り違えないため） |
-| `SRF02_MIN_PERIOD_S` | `hw/rpi_hw.py` | 0.065 | 同（**65 ms より早く ranging を始めてはいけない**。`srf02_ranging_wait_ms`（70 ms）が既定なので実際には 70 ms 間隔になる） |
-| `SRF02_STOP_TIMEOUT_S` | `hw/rpi_hw.py` | 1.0 | **仮**（スレッドを止めるまで待つ時間） |
-| `SRF02_I2C_BUS` | `hw/rpi_hw.py` | 1 | [DetailedDesign.md](DetailedDesign.md) §4.2（`dtparam=i2c_arm=on` の 1 番） |
-| `LGPIO_CHIP` | `hw/rpi_hw.py` | 0 | 標準の GPIO チップ |
-| `MM_PER_CM` | `hw/rpi_hw.py` | 10 | SRF02 は inches・cm・µs の 3 種類しか返さない（データシート）。天井の判定は mm なので cm を受ける |
-| `PWM_BASE` | `hw/rpi_hw.py` | `/sys/class/pwm` | Linux のカーネル PWM。**書けないときは udev の規則が要る**（[DetailedDesign.md](DetailedDesign.md) §4.4） |
-| `RPI_MODEL_PATH` | `hw/rpi_hw.py` | `/proc/device-tree/model` | ラズパイかどうかの判定（ラズパイ以外で `--fake` 無しの起動を止める） |
-| `Clock` / `WriteText` | `hw/rpi_hw.py` | `Callable[[], float]` / `Callable[[Path, str], None]` | 型。`Clock` は単調増加の ms 時計（`__main__.monotonic_ms` と同じもの。**天井の `at_ms` はこれ**）。`WriteText` は PWM の sysfs への 1 回の書き込み |
+| `LIFT_CMD_TIMEOUT_MS` | `lift_decide.h` | 600 | 旧版（先行試作・th-system の実績） |
+| `HEIGHT_STALE_MS` | `lift_decide.h` | 600 | **仮**（旧版） |
+| `LIFT_TOP_MM` | `lift_decide.h` | -1（未設定） | 旧版 |
+| **`LIFT_TOP_DETECT_ENABLED`** | `lift_decide.h` | `false` | **`W-1`**（spec [Spec-safety.md](../spec/Spec-safety.md) §1.1）。`true` に戻すのは台帳を閉じるとき |
+| `LIFT_MAX_RUN_MS` | `lift_decide.h` | 10000 | **仮**（旧版。spec #4b） |
+| `LIFT_DUTY_ABS_MAX_PCT` | `lift_decide.h` | 100 | MD10C（**% ⇔ PWM の換算の基準**。モータ保護の上限ではない） |
+| **`LIFT_MOTOR_MAX_PCT_DEFAULT`** / **`LIFT_MOTOR_MAX_PCT_MIN`** | `lift_decide.h` | 50 / 10 | spec [Spec-ui.md](../spec/Spec-ui.md) §2.1（定格 12 V ÷ 電源 24 V）。設定の `motor_max_pct` の既定値と下限（2026-10-16） |
+| **`LiftSettings::motor_max_pct`** / JSON の **`motor_max_pct`** | `lift_settings.h` | モータへの出力の上限 [%]（設定。NVS に保存） | 同上 |
+| **`LiftController::set_motor_max_pct`** | `lift_controller.h` | 上限を `SpeedLoop` へ渡すために持たせる | [DetailedDesign.md](DetailedDesign.md) §4.1.2 |
+| **`CEILING_MARGIN_MM`** | `ceiling_check.h` | 500 | **仮**（`H-V8`。v1 の `ceiling_margin_mm` を昇降部へ移した。spec `H-M4`） |
+| **`CEILING_STALE_MS`** | `ceiling_check.h` | 600 | **仮**（`H-V8`。v1 の `ceiling_stale_ms` を昇降部へ移した） |
+| 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}`（**mm/s**。spec 2026-10-15 で % から替えた） | **仮**（数だけ旧版の例の値。`H-V3`） |
+| **`LIFT_SPEED_ABS_MAX_MM_S`** | `lift_decide.h` | 100 | **仮**（設定の検証の上限・命令の丸め。`H-V3`） |
+| **`LIFT_SPEED_CTRL_MS`** / **`LIFT_SPEED_WINDOW_MS`** | `speed_loop.h` | 20 / 100 | **仮** |
+| **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.5 / 2.0（%/(mm/s)・%/mm） | **仮**（`WP-MEAS-01` で合わせる） |
+| **`LIFT_FF_UP_PCT_PER_MM_S`** / **`LIFT_FF_DOWN_PCT_PER_MM_S`** | `speed_loop.h` | 0.5 / 0.3 | **仮**（同上） |
+| **`LIFT_STALL_MS`** / **`LIFT_STALL_MIN_COUNTS`** | `lift_decide.h` | 500 / 8 | **仮**（spec #4d。動き出しの遅れより長く） |
+| `LIFT_STATE_PERIOD_MS` | `config.h` | 100 | **仮** |
+| **`LIFT_WS_UI_PATH`** / **`LIFT_WS_MODULE_PATH`** | `config.h` | `/ws/ui` / `/ws/module` | [-protocol.md](DetailedDesign-protocol.md) §1（v1 の `LIFT_WS_PATH` は廃止） |
+| **`LIFT_NVS_NAMESPACE`** | `config.h` | `hve_lift_mm`（`WP-LIFT-06` で `hve_lift` から替える。% で保存した値を mm/s と読まないため） | [-protocol.md](DetailedDesign-protocol.md) §3 |
+| **`LIFT_UI_CLIENTS_MAX`** | `config.h` | 4 | **仮**（ESP32 のメモリ。超えた接続は閉じる） |
+| `LIFT_STATE_TEXT_MAX` | `config.h` | 640 | **仮**（v2 の `state` は 500 バイト前後） |
+| `LIFT_MDNS_NAME` / `LIFT_HTTP_PORT` | `config.h` | `hve-lift` / 80 | 旧版 |
+| ピン・PWM の定数 | `config.h` | 旧版のまま | 旧版 §5 |
+| **`ENC_A_PIN`** / **`ENC_B_PIN`** | `config.h` | 25 / 26 | **仮**（[-hardware.md](DetailedDesign-hardware.md) §1.1） |
+| **`ENC_PPR`** | `config.h` | **要確認**（手元の型番の末尾） | E6A2-CW3C |
+| **`ENC_GLITCH_FILTER_NS`** | `config.h` | 1000 | **仮**（PCNT のノイズ除去） |
+| **`ENC_UP_SIGN`** | `hal_core.h` | +1 | **仮**（上昇で数が増える向き。実機で確かめる） |
+| **`LIFT_UM_PER_COUNT`** | `hal_core.h` | **仮**（巻き取りの周長 ÷ (4 × `ENC_PPR`)。µm にして整数で持つ） | spec `H-V12`。`WP-MEAS-01` で全行程を測って直す |
+| **`HOME_SLACK_MM`** | `hal_core.h` | 20 | **仮**（`P-14`） |
+| **`EncoderHeight`** | `hal_core.h` | 原点・故障（`P-14`）・高さの式を持つ小さな状態（`WP-LIFT-05`） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
+| **`PcntQuadConfig`** / **`kPcntQuadEncoder`** / **`pcnt_quad_step`** | `hal_core.h` | A/B 4 逓倍のチャンネル設定・その値・(A,B) 1 段の遷移の増減（`WP-LIFT-05` 差し戻し 1） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
+| **`encoder_total`** | `hal_core.h` | 溢れの累積 ＋ 今のカウンタの純関数（`WP-LIFT-05` 差し戻し 1） | 同 |
+| **`encoder_total_guarded`** | `hal_core.h` | 割り込みが追いつく前の読み飛びを前回の合計で抑える純関数（`WP-LIFT-05` 差し戻し 2） | 同 |
+| **`ENC_PCNT_LIMIT`** | `config.h` | 30000 | **仮**（PCNT の上限・下限。`WP-LIFT-05` 差し戻し 2） |
+| **`encoder_count`** | `lift_core/hal.h`（`LiftHal`） | エンコーダの生の数（原点に依らない。`WP-LIFT-06` の速さの制御が使う） | 同 |
 
-## 6. th-system 側の名前（参照のみ）
+### 5.2 昇降部の画面（`firmware/lift/web/app.js`）
 
-**th-system とは通信しない**ので、実装でこれらを使うことは無い。th-system の文書を読むときの手がかりとしてだけ残す。
-
-| 名前 | 何か | 出典 |
+| 名前 | 値 | 出どころ |
 | --- | --- | --- |
-| `AT_PANEL` | th-system の盤前のモード。状態は `IDLE_P` ／ `WORKING`（作業中ボタン ON）／ `PAUSE`（ジョグ中） | th-system `docs/plan/detailed/DetailedDesign-names.md` §2・§3 |
-| `th-rpi-ap` | th-system のラズパイが出す AP（192.168.5.1）。PC は 192.168.5.50 固定 | th-system `docs/network.md` |
+| `ui_hold_period_ms` / `ui_state_timeout_ms` / `ui_tick_ms` | 100 / 1000 / 500 | **仮**（旧版と同じ） |
+
+### 5.3 カメラモジュール（`camera/config/params.toml`）
+
+旧版の行のうち、**`ceiling_margin_mm`・`ceiling_stale_ms`・`srf02_i2c_addr`・`srf02_ranging_wait_ms`・`lift_ws_url` は廃止**（§6）。ほかは旧版の値のまま。
+
+| 名前 | 値 | 出どころ |
+| --- | --- | --- |
+| **`lift_host`** | `""`（空なら mDNS で `lift_mdns_name` を引く） | [DetailedDesign.md](DetailedDesign.md) §4.6 |
+| **`lift_mdns_name`** / **`lift_port`** | `hve-lift` / 80 | 同・[-protocol.md](DetailedDesign-protocol.md) §1 |
+| **`LIFT_WS_MODULE_PATH`** | `camera/hve_camera/lift_link.py` の定数 | `/ws/module`。**`params.toml` に置かない**（[DetailedDesign.md](DetailedDesign.md) §3.1。書き間違えて `/ws/ui` に繋ぐと天井の守りが外れる） |
+| **`module_name`** / **`module_ceiling_sensor`** | `hve-cam` / `true` | [DetailedDesign.md](DetailedDesign.md) §3.1（**常に `true`。センサの調子から計算しない**） |
+| **`io_device`** / **`io_baud`** | `/dev/ttyS1` / 115200 | M5 文書（[-hardware.md](DetailedDesign-hardware.md) §2.1）。`io_baud` は Arduino の `IO_BAUD` と揃える |
+| **`io_cmd_period_ms`** | 50 | **仮** |
+| **`io_lost_ms`** | 600 | **仮**（Arduino から行が来ないと `IO_LOST` にするまで） |
+| **`ceiling_read_stale_ms`** | 600 | **仮**（これより古い天井の読み値は `READ_ERROR` として送る。昇降部の `CEILING_STALE_MS` と揃える） |
+| **`uno_clock_window`** | 20 | **仮**（`C` 行が約 70 ms ごとなので約 1.4 秒分） |
+| `srf02_min_range_mm` / `srf02_max_range_mm` | 150 / 6000 | 旧版（SRF02 のデータシート） |
+| `pitch_min_deg` / `pitch_max_deg` | -45 / 45 | **仮**（`H-V5`・`H-X5`。MG996R で見直す） |
+| `axis_speed_abs_max_dps` | 60 | 旧版（28BYJ-48 の実用の上限の下側） |
+| `yaw_steps_per_rev` | 4096 | 旧版（半ステップ） |
+| `video_capture_width` / `video_capture_height` | 1280 / 720 | spec `H-V10`（カメラの MJPEG の最大。[-hardware.md](DetailedDesign-hardware.md) §2.1.1） |
+| **`video_capture_fps`** | 10 | **仮**（カメラの MJPEG 720p で選べるのは 30・15・10・8・6・2。30 で受けると区切るだけで CPU を食う） |
+| **`video_device`** | `/dev/video0` | 実機調査 |
+| `video_out_height` | 480 | spec `H-V9` |
+| `video_fps` / `video_jpeg_quality` | 10 / **80** | **仮**（spec `H-V10`「帯域の数割に収まる範囲で画質を上げる」。1 コアで約 10 fps。上限は `WP-MEAS-03`） |
+| **`video_send_timeout_ms`** | 5000 | **仮**（1 枚の書き込みがこれを超えた接続を捨てる。[DetailedDesign.md](DetailedDesign.md) §4.4。無線の一時的な途切れで切らない長さ） |
+| `settings_path` | `/home/m5stack/hve_data/settings.json` | 実機調査（root で動かすので `~` を使わない。ルートに 117 MB 空き）。**ピッチ・ヨーの 2 軸だけを保存する** |
+
+### 5.3.1 カメラモジュールの画面（`camera/web/app.js`）
+
+| 名前 | 値 | 出どころ |
+| --- | --- | --- |
+| `video_probe_ms` | 1500 | **仮**（旧版と同じ。映像の確かめの周期と、1 回の確かめの待ちの上限） |
+| **`video_probe_fail_count`** | 2 | **仮**（この回数続けて確かめが失敗したら「映像がありません」。[DetailedDesign.md](DetailedDesign.md) §4.4.1） |
+
+### 5.4 Arduino（`firmware/cam_io/`）
+
+| 名前 | 置き場 | 値 | 出どころ |
+| --- | --- | --- | --- |
+| `IO_BAUD` | `io_core/io_codec.h` | 115200 | M5 文書の例。**16 MHz の UNO では誤差 約 2 %。化けるなら 57600 に下げ、`io_baud` と揃える**（`WP-MEAS-06`） |
+| `IO_LINE_MAX` | `io_codec.h` | 32 | `M 65535 -1800 -680` が 20 文字 |
+| `IO_CMD_TIMEOUT_MS` | `io_controller.h` | 300 | **仮**（`io_cmd_period_ms` の 6 倍） |
+| `YAW_HSPS_ABS_MAX` | `io_controller.h` | 680 | 60 deg/s × 4096 ÷ 360 ≒ 683（`axis_speed_abs_max_dps` と揃える） |
+| `PITCH_MIN_DEG` / `PITCH_MAX_DEG` | `io_controller.h` | -60 / 60 | **仮**。**UnitV2 側（±45）より広い 2 つ目の守り**。機構に当たらない範囲を実機で決める（`H-X5`） |
+| `PITCH_INITIAL_DEG` | `io_controller.h` | 0 | 旧版の考え方（正面・水平。起動時・再起動時に跳ぶ先） |
+| `SERVO_PULSE_CENTER_US` / `SERVO_US_PER_DEG` | `config.h` | 1500 / 10 | **仮**（MG996R のデータシートで確かめる） |
+| `SERVO_PULSE_MIN_US` / `SERVO_PULSE_MAX_US` | `config.h` | 900 / 2100 | **仮**（±60° に当たる範囲。この外側へパルスを出さない） |
+| `IO_STEP_TICK_US` | `config.h` | 100 | **仮**（680 半ステップ毎秒なら約 1.47 ms ごとに刻む。その 1/14 の細かさ） |
+| `YAW_PINS` / `YAW_HALF_STEP_SEQUENCE` | `config.h` | D4〜D7 ／ 旧版と同じ並び | [-hardware.md](DetailedDesign-hardware.md) §2.2・旧版の実機確認 |
+| `SERVO_PIN` | `config.h` | 9 | **仮** |
+| `SRF02_ADDR` | `config.h` | 0x72 | **この個体の値**（工場出荷は 0x70。2026-10-07 実機。旧版の実機でも 0x72）。個体を替えたら確かめる |
+| `SRF02_PERIOD_MS` | `config.h` | 70 | SRF02（1 回 約 66 ms。65 ms より早く始めない） |
+| `SRF02_WIRE_TIMEOUT_US` | `config.h` | 25000 | **仮** |
+| `IO_WDT_TIMEOUT` | `config.h` | `WDTO_500MS` | **仮** |
+
+## 6. 廃止した名前（使い直さない）
+
+| 名前 | 旧版の意味 | v2 での扱い |
+| --- | --- | --- |
+| `ceil_ok` | カメラ部が計算した天井の許可（指令のフィールド） | 廃止。天井の値そのものを `ceiling` で送る |
+| `CEILING`（停止理由） | `ceil_ok` が偽 | `CEILING_NEAR` / `CEILING_STALE` に分けた |
+| `LIFT_WS_PATH` | `/ws` | `LIFT_WS_UI_PATH` / `LIFT_WS_MODULE_PATH` |
+| `ceiling_permission` | カメラ部の天井の許可の計算 | 廃止（昇降部の `ceiling_check`） |
+| `ceiling_margin_mm` / `ceiling_stale_ms` | カメラ部のパラメータ | `CEILING_MARGIN_MM` / `CEILING_STALE_MS`（昇降部） |
+| `lift_ws_url` | 昇降部の WS の URL | `lift_host` / `lift_mdns_name` / `lift_port`（パラメータ）と `LIFT_WS_MODULE_PATH`（定数） |
+| `rpi_hw.py` の定数（`SG90_*`・`YAW_*`・`SRF02_*`・`LGPIO_CHIP`・`PWM_BASE` 等） | ラズパイの実物 | 廃止（ヨー・ピッチ・天井は Arduino） |
+| `srf02_i2c_addr` / `srf02_ranging_wait_ms` | カメラ部のパラメータ | Arduino の `SRF02_ADDR` / `SRF02_PERIOD_MS` |

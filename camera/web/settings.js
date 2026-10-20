@@ -1,7 +1,8 @@
 /* ============================================================
    設定画面（index.html の中に出る別画面。names §1）
    spec Spec-ui.md §2。上昇・下降・ピッチ・ヨーの 4 項目について
-   下限・上限・初期値を PUT /api/settings で機器（カメラ部）に保存する。
+   下限・上限・初期値と、モータへの出力の上限（昇降部へ中継。自分では保存しない）を
+   PUT /api/settings で機器（カメラ部）に保存する。
 
    DOM に触れない部分は validateSettingsDraft() と settingsErrorText() に分ける
    （camera/web/tests/web.test.js から Node の組み込みの試験で確かめる）。
@@ -11,18 +12,28 @@
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
 const SETTING_AXES = [
-  {key: 'lift_up',   name: '上昇',   unit: '%',     abs_low: 0,   abs_high: 100, step: 1},
-  {key: 'lift_down', name: '下降',   unit: '%',     abs_low: 0,   abs_high: 100, step: 1},
+  {key: 'lift_up',   name: '上昇',   unit: 'mm/s',  abs_low: 0,   abs_high: 100, step: 1},
+  {key: 'lift_down', name: '下降',   unit: 'mm/s',  abs_low: 0,   abs_high: 100, step: 1},
   {key: 'pitch',     name: 'ピッチ', unit: 'deg/s', abs_low: 0.1, abs_high: 60,  step: 0.5},
   {key: 'yaw',       name: 'ヨー',   unit: 'deg/s', abs_low: 0.1, abs_high: 60,  step: 0.5},
 ];
+
+/* モータへの出力の上限 [%]（spec Spec-ui.md §2.1）。速度の 3 値ではなく 1 値 */
+const SETTING_MOTOR = {
+  key: 'motor_max_pct', name: 'モータへの出力の上限', unit: '%',
+  abs_low: 10, abs_high: 100, step: 1,
+};
+/* 設定画面の添え書き（spec §2.1 の「モータの定格電圧 ÷ 電源電圧」） */
+const MOTOR_NOTE = 'モータの定格電圧 ÷ 電源電圧（12 V のモータを 24 V で回すなら 50）';
 
 /* 画面に出している下書き。閉じる操作では元に戻さない（保存しない） */
 let settings_draft = null;
 
 /**
  * 設定の検証。`min ≦ init ≦ max` と絶対的な範囲を見る（protocol §3）。
- * @param {object} draft 4 項目の {min, max, init}
+ * 昇降の 2 軸は整数 [mm/s]（刻み 1）でないと落とす。
+ * モータへの出力の上限は 10〜100 の整数で、欠けても通さない（protocol §3）。
+ * @param {object} draft 4 項目の {min, max, init} とモータへの出力の上限の 1 値
  * @returns {{ok: boolean, errors: Array<{key: string, text: string}>}}
  */
 function validateSettingsDraft(draft) {
@@ -51,6 +62,12 @@ function validateSettingsDraft(draft) {
       errors.push({key: axis.key, text: `${axis.name}: 下限 ≦ 初期値 ≦ 上限 にしてください`});
       continue;
     }
+    // 昇降の 2 軸は整数 [mm/s]（刻み 1）。ピッチ・ヨーは小数も許す
+    if ((axis.key === 'lift_up' || axis.key === 'lift_down')
+        && fields.some((field) => !Number.isInteger(numbers[field]))) {
+      errors.push({key: axis.key, text: `${axis.name}: 整数を入れてください`});
+      continue;
+    }
     const outside = fields.some(
       (field) => numbers[field] < axis.abs_low || numbers[field] > axis.abs_high
     );
@@ -60,6 +77,20 @@ function validateSettingsDraft(draft) {
         text: `${axis.name}: ${axis.abs_low}〜${axis.abs_high} ${axis.unit} の範囲にしてください`,
       });
     }
+  }
+
+  // モータへの出力の上限（1 値。protocol §3: 10〜100 の整数。欠けても通さない）
+  const motorRaw = draft[SETTING_MOTOR.key];
+  const motorValue = Number(motorRaw);
+  if (motorRaw === '' || motorRaw === null || motorRaw === undefined || !isFinite(motorValue)) {
+    errors.push({key: SETTING_MOTOR.key, text: `${SETTING_MOTOR.name}: 数値を入れてください`});
+  } else if (!Number.isInteger(motorValue)) {
+    errors.push({key: SETTING_MOTOR.key, text: `${SETTING_MOTOR.name}: 整数にしてください`});
+  } else if (motorValue < SETTING_MOTOR.abs_low || motorValue > SETTING_MOTOR.abs_high) {
+    errors.push({
+      key: SETTING_MOTOR.key,
+      text: `${SETTING_MOTOR.name}: ${SETTING_MOTOR.abs_low}〜${SETTING_MOTOR.abs_high} ${SETTING_MOTOR.unit} の整数にしてください`,
+    });
   }
   return {ok: errors.length === 0, errors};
 }
@@ -113,6 +144,8 @@ function openSettingsOverlay(settings, provisional) {
       init: current.init === undefined ? '' : current.init,
     };
   }
+  const motorCurrent = (settings || {})[SETTING_MOTOR.key];
+  settings_draft[SETTING_MOTOR.key] = motorCurrent === undefined ? '' : motorCurrent;
 
   const body = document.getElementById('stBody');
   body.innerHTML = SETTING_AXES.map((axis) => {
@@ -124,11 +157,18 @@ function openSettingsOverlay(settings, provisional) {
       )
       .join('');
     return `<tr data-key="${axis.key}"><td>${axis.name}</td>${cells}<td>${axis.unit}</td></tr>`;
-  }).join('');
+  }).join('') +
+    `<tr data-key="${SETTING_MOTOR.key}"><td class="wrapcell">${SETTING_MOTOR.name}</td>` +
+    `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_MOTOR.key}"` +
+    ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>`;
 
   body.querySelectorAll('input').forEach((input) => {
     input.addEventListener('input', () => {
-      settings_draft[input.dataset.axis][input.dataset.f] = input.value;
+      if (input.dataset.axis === SETTING_MOTOR.key) {
+        settings_draft[SETTING_MOTOR.key] = input.value;
+      } else {
+        settings_draft[input.dataset.axis][input.dataset.f] = input.value;
+      }
       validateSettingsInputs();
     });
   });
@@ -157,6 +197,7 @@ async function saveSettingsOverlay() {
       init: Number(values.init),
     };
   }
+  payload[SETTING_MOTOR.key] = Number(settings_draft[SETTING_MOTOR.key]);
 
   const save = document.getElementById('stSave');
   save.disabled = true;
@@ -173,6 +214,11 @@ async function saveSettingsOverlay() {
       document.getElementById('stErr').textContent = reasons.length
         ? reasons.join(' / ')
         : '保存できません（理由が分かりませんでした）';
+      return;
+    }
+    if (response.status === 503) {
+      // 昇降の設定は昇降部へ中継する。繋がらないときはカメラ部も保存しない（protocol §4）
+      document.getElementById('stErr').textContent = '昇降部に繋がらないため保存できません（何も保存していません）';
       return;
     }
     if (!response.ok) {
@@ -197,5 +243,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module === 'object' && module !== null) {
-  module.exports = {SETTING_AXES, validateSettingsDraft, settingsErrorText};
+  module.exports = {SETTING_AXES, SETTING_MOTOR, MOTOR_NOTE, validateSettingsDraft, settingsErrorText};
 }

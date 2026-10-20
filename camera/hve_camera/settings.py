@@ -1,13 +1,17 @@
 """設定の検証・読み込み・保存。
 
-[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §3。
-画面（`WP-UI-01`）の設定画面と設定 API（`WP-CAM-02`）が使う。
-検証の規則:
+[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §4。
+画面の設定画面と設定 API が使う。検証の規則:
 
 - 4 項目（`lift_up`・`lift_down`・`pitch`・`yaw`）すべてが揃う
 - `min ≦ init ≦ max`
-- `lift_*` は 0〜100（PWM デューティ比 [%]）・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
+- `lift_*` は 0〜`LIFT_SPEED_ABS_MAX_MM_S`（100）[mm/s] の整数・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
+- `motor_max_pct`（`PUT` では必須。10〜100 の整数。真偽値は不可。spec
+  [Spec-ui.md](../../docs/plan/spec/Spec-ui.md) §2.1）
 
+**ピッチ・ヨーはここで保存、昇降は昇降部へ中継する**（v2）。
+そのため読み書きは軸を絞れる（`axes`）。`PUT` の検証は 4 軸＋`motor_max_pct` のまま。
+`motor_max_pct` の持ち主は昇降部なので、自分の保存（`axes=OWN_AXES`）には含めない。
 保存は**一時ファイルに書いてから置き換える。**書き込み途中の電源断で壊れたファイルを
 読ませないため（[DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §3）。
 """
@@ -29,11 +33,11 @@ _SPEED_AXES = ("lift_up", "lift_down", "pitch", "yaw")
 #: 1 つの軸が持つ値。
 _SPEED_FIELDS = ("min", "max", "init")
 
-#: `lift_*` の絶対範囲の上限。protocol §3「`lift_*` は 0〜100」。
-_LIFT_DUTY_MAX_PCT = 100
+#: 昇降の速さの絶対範囲の上限 [mm/s]。protocol §3。names §5 `LIFT_SPEED_ABS_MAX_MM_S`。
+_LIFT_SPEED_ABS_MAX_MM_S = 100
 
-#: 0 未満はだめ（下限が 0 を含める）軸。
-_DUTY_AXES = ("lift_up", "lift_down")
+#: 0 を含める（0 以上でよい）軸。昇降の 2 軸（目標の速さ [mm/s] の整数）。
+_LIFT_SPEED_AXES = ("lift_up", "lift_down")
 
 #: 0 以下の速度はだめ（protocol §3「`pitch` / `yaw` は 0 超」）軸。
 _POSITIVE_ONLY_AXES = ("pitch", "yaw")
@@ -47,18 +51,41 @@ _DEFAULT_SETTINGS: dict[str, dict[str, float]] = {
 }
 
 
+#: 自分で保存する軸（ピッチ・ヨー）。昇降の 2 軸は昇降部へ中継する（protocol §4）。
+OWN_AXES = ("pitch", "yaw")
+
+#: 昇降部へ中継する軸（昇降の 2 軸）。
+LIFT_AXES = ("lift_up", "lift_down")
+
+#: モータへの出力の上限 [%] の項目名（protocol §3・spec Spec-ui §2.1）。
+MOTOR_MAX_PCT_KEY = "motor_max_pct"
+
+#: モータへの出力の上限の既定値 [%]（spec §2.1）。
+MOTOR_MAX_PCT_DEFAULT = 50
+
+#: モータへの出力の上限の下限 [%]・上限 [%]（spec §2.1。上限は昇降部の `LIFT_DUTY_ABS_MAX_PCT`）。
+MOTOR_MAX_PCT_MIN = 10
+MOTOR_MAX_PCT_MAX = 100
+
+
 def validate_settings(
     data: Any,
     params: Mapping[str, Any] | None = None,
+    *,
+    axes: tuple = _SPEED_AXES,
 ) -> list[str]:
-    """設定の検証。**通らなかった理由の一覧**を返す（空のリスト = 問題なし）。"""
+    """設定の検証。**通らなかった理由の一覧**を返す（空のリスト = 問題なし）。
+
+    `axes` を絞るとその軸だけを見る（自分の 2 軸の保存用）。`PUT` の検証は 4 軸＋`motor_max_pct` のまま。
+    `motor_max_pct` は自分の保存（`axes=OWN_AXES`）のときだけ見ない（持ち主は昇降部）。
+    """
     if params is None:
         params = load_params()
     if not isinstance(data, dict):
         return [f"設定はオブジェクトでない（{type(data).__name__}）"]
 
     errors: list[str] = []
-    for axis in _SPEED_AXES:
+    for axis in axes:
         entry = data.get(axis)
         if not isinstance(entry, dict):
             errors.append(f"{axis}: min/max/init のオブジェクトが無い")
@@ -78,16 +105,22 @@ def validate_settings(
         _check_order(axis, values, errors)
         _check_range(axis, values, params, errors)
 
+    if set(axes) != set(OWN_AXES):
+        _check_motor_max_pct(data, errors)
+
     return errors
 
 
 def load_settings(
     path: str | os.PathLike[str] | None = None,
     params: Mapping[str, Any] | None = None,
+    *,
+    axes: tuple = _SPEED_AXES,
 ) -> tuple[dict[str, dict[str, float]], bool]:
     """設定を読み込んで `(設定, 既定値で動いているか)` を返す。
 
     ファイルが無い・壊れている・検証を通らないときは、既定値と「既定値で動いている」印。
+    `axes` を絞るとその軸だけを返す（旧版の 4 軸ファイルが残っていても絞った分だけ）。
     """
     if params is None:
         params = load_params()
@@ -97,32 +130,35 @@ def load_settings(
         with target.open(encoding="utf-8") as fp:
             data = json.load(fp)
     except (OSError, ValueError):  # ValueError に JSON の読み違い（json.JSONDecodeError）も入る
-        return _default_settings(), True
+        return _default_settings(axes), True
 
-    if validate_settings(data, params):
-        return _default_settings(), True
-    return data, False
+    if validate_settings(data, params, axes=axes):
+        return _default_settings(axes), True
+    return {axis: data[axis] for axis in axes}, False
 
 
 def save_settings(
     data: Any,
     path: str | os.PathLike[str] | None = None,
     params: Mapping[str, Any] | None = None,
+    *,
+    axes: tuple = _SPEED_AXES,
 ) -> None:
     """検証を通る設定だけを原子的に保存する。通らないものは**保存しない**。
 
     一時ファイルに書いてから `os.replace` で置き換える。途中で失敗しても元のファイルは残る。
     通らない設定は `ValueError`（メッセージに理由の一覧）。
+    `axes` を絞るとその軸だけを検証・保存する（自分の 2 軸用）。
     """
     if params is None:
         params = load_params()
-    errors = validate_settings(data, params)
+    errors = validate_settings(data, params, axes=axes)
     if errors:
         raise ValueError("; ".join(errors))
 
     target = _target_path(path, params)
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    payload = json.dumps({axis: data[axis] for axis in axes}, ensure_ascii=False, indent=2) + "\n"
 
     fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
@@ -136,9 +172,9 @@ def save_settings(
         raise
 
 
-def _default_settings() -> dict[str, dict[str, float]]:
+def _default_settings(axes: tuple = _SPEED_AXES) -> dict[str, dict[str, float]]:
     """既定値のコピーを返す（戻った辞書を書き換えても `_DEFAULT_SETTINGS` を壊さない）。"""
-    return copy.deepcopy(_DEFAULT_SETTINGS)
+    return {axis: copy.deepcopy(_DEFAULT_SETTINGS[axis]) for axis in axes}
 
 
 def _target_path(
@@ -167,8 +203,8 @@ def _check_range(
     params: Mapping[str, Any],
     errors: list[str],
 ) -> None:
-    if axis in _DUTY_AXES:
-        high = float(_LIFT_DUTY_MAX_PCT)
+    if axis in _LIFT_SPEED_AXES:
+        high = float(_LIFT_SPEED_ABS_MAX_MM_S)
         low_inclusive = True
     elif axis in _POSITIVE_ONLY_AXES:
         high = float(params["axis_speed_abs_max_dps"])
@@ -182,6 +218,23 @@ def _check_range(
             errors.append(f"{axis}.{field}: 下限を満たさない（{value:g}）")
         if value > high:
             errors.append(f"{axis}.{field}: {high:g} より大きい（{value:g}）")
+        if axis in _LIFT_SPEED_AXES and value != int(value):
+            errors.append(f"{axis}.{field}: 整数でない（{value:g}）")
+
+
+def _check_motor_max_pct(data: Mapping[str, Any], errors: list[str]) -> None:
+    """`motor_max_pct`（10〜100 の整数。真偽値は不可。`PUT` では必須）を見る。"""
+    value = data.get(MOTOR_MAX_PCT_KEY)
+    if value is None:
+        errors.append(f"{MOTOR_MAX_PCT_KEY}: 無い")
+        return
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"{MOTOR_MAX_PCT_KEY}: 整数でない")
+        return
+    if not MOTOR_MAX_PCT_MIN <= value <= MOTOR_MAX_PCT_MAX:
+        errors.append(
+            f"{MOTOR_MAX_PCT_KEY}: {MOTOR_MAX_PCT_MIN}〜{MOTOR_MAX_PCT_MAX} の整数にしてください"
+        )
 
 
 def _unlink_quietly(name: str | os.PathLike[str]) -> None:

@@ -1,0 +1,11 @@
+# ホスト（Python 3.10）の `.venv` で `tools/tests` を回すためのもの。版は固定する。
+# numpy は Python 3.10 に入る最新版（2.5 以降は 3.12 以上が要る）。
+pytest==9.1.1
+# aiohttp の試験クライアントで非同期の試験関数を走らせる（WP-VIDEO-01 で必要）
+pytest-aiohttp==1.1.1
+aiohttp==3.14.3
+opencv-python-headless==5.0.0.93
+numpy==2.2.6
+smbus2==0.6.1
+# ホストの 3.10 には tomllib が無い（params.py は tomli に切り替える）
+tomli==2.4.1

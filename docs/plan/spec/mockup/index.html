@@ -8,6 +8,8 @@
 /* ============================================================
    hve-system 操作画面モックアップ
    docs/plan/spec/Spec-ui.md に対応する見た目と操作感の確認用。実装ではない。
+   カメラモジュールの画面（camera/web）にあたる。CSS は camera/web/style.css と同じものに
+   モックアップ専用の分を足しただけ。片方を直したらもう片方も直す。
    外部リソースを一切読み込まない（th-rpi-ap 配下にインターネットが無いため）。
 
    【スクロール禁止】どの画面サイズでもページ・パネルともスクロールさせない
@@ -39,6 +41,7 @@ header{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:
 .badge.warn{border-color:var(--warn);color:var(--warn-tx)} .badge.warn .dot{background:var(--warn)}
 .badge.ng{border-color:var(--ng);color:var(--ng-tx)} .badge.ng .dot{background:var(--ng)}
 .badge.fake{border-color:var(--mock);color:#d7c2f3}
+.badge.link{color:var(--brand);text-decoration:none}
 .spacer{flex:1}
 .hbtn{padding:6px 12px;border-radius:var(--r);border:1px solid var(--bd-hi);background:var(--ctrl);cursor:pointer;white-space:nowrap}
 .hbtn:hover{background:var(--ctrl-hi)}
@@ -50,20 +53,28 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
   main{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,4fr) minmax(0,5fr)}
 }
 
-/* 映像: 枠いっぱいに広げる（実装では <img> を object-fit:contain で置く） */
+/* 映像: 枠いっぱいに広げる。**拡大はカメラ部がする**のでブラウザ側ではtransformを掛けない */
 .video{position:relative;min-height:0;background:#000;border-radius:var(--r);overflow:clip;border:1px solid var(--bd)}
-.video svg.scene{position:absolute;inset:0;width:100%;height:100%;transform-origin:50% 50%}
+/* フレームが来るまで隠す（隠さないと壊れた画像のアイコンと alt の文字が OSD に重なる） */
+.video img.frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;visibility:hidden}
+.video img.frame.ready{visibility:visible}
 .guide{position:absolute;inset:0;pointer-events:none}
 .guide .h,.guide .v{position:absolute;background:rgba(127,180,238,.55)}
 .guide .h{left:0;right:0;top:50%;height:1px}
 .guide .v{top:0;bottom:0;left:50%;width:1px}
 .guide .box{position:absolute;left:25%;top:25%;width:50%;height:50%;border:1px dashed rgba(127,180,238,.45)}
-.osd{position:absolute;left:6px;top:6px;right:80px;display:flex;gap:4px;flex-wrap:wrap}
+.osd{position:absolute;left:6px;top:6px;right:150px;display:flex;gap:4px;flex-wrap:wrap}
 .osd span{background:rgba(0,0,0,.6);padding:1px 7px;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums}
 .stopbar{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.75);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px}
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
 .stopbar.show{display:block}
 .guidebtn{position:absolute;right:6px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
+.snapbtn{position:absolute;right:80px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
+.snapshot{position:absolute;inset:0;display:none;background:#000;z-index:3;align-items:center;justify-content:center}
+.snapshot.show{display:flex}
+.snapshot img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;visibility:hidden}
+.snapmsg{position:relative;color:var(--mut)}
+.snapclose{position:absolute;right:6px;top:6px;padding:2px 8px;font-size:12px}
 .zoom{position:absolute;right:6px;top:36px;display:flex;flex-direction:column;gap:4px;z-index:1}
 .zoombtn{width:40px;height:36px;padding:0;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:16px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums}
 .zoombtn.lvl{font-size:12px}
@@ -121,6 +132,7 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}
 th,td{padding:4px;text-align:left;border-bottom:1px solid var(--bd);font-size:13px}
 th{color:var(--mut);font-weight:600;font-size:12px}
 th:first-child,td:first-child{width:4.2em;white-space:nowrap} th:last-child,td:last-child{width:3.8em}
+td.wrapcell{white-space:normal}
 td input{width:100%;padding:6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
 td input.bad{border-color:var(--ng)}
 .err{color:var(--ng-tx);font-size:12px;min-height:1.4em}
@@ -128,10 +140,25 @@ td input.bad{border-color:var(--ng)}
 .primary{background:var(--brand);border-color:var(--brand);color:#fff}
 .primary:disabled{opacity:.4;cursor:not-allowed}
 .prov{padding:6px 10px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:12px}
-@media (max-height:420px){
-  .sheet{padding:8px 12px;gap:4px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
+.prov b{color:var(--warn-tx)}
+/* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう。
+   4 項目＋上限で昇降部の画面より行が多いので、境目は 700px） */
+@media (max-height:700px){
+  .sheet{padding:8px 12px;gap:4px} .sheet h1{font-size:15px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
+  .prov{font-size:11px;padding:4px 8px} .err{min-height:0}
+}
+/* さらに低い画面では表とボタンも詰める（横長・低丈の端末用） */
+@media (max-height:480px){
+  .sheet{padding:4px 12px;gap:2px} .sheet h1{font-size:14px}
+  th,td{font-size:12px} td input{padding:2px 6px;font-size:12px}
+  .row-actions .hbtn{padding:2px 8px;font-size:12px}
+  .prov{font-size:10px;padding:2px 6px} .err{font-size:11px}
 }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
+.toast.show{display:block}
+/* モックアップの絵（実装では <img>）。ズームはブラウザで絵を拡大しているだけ（実装はカメラ部が切り出す） */
+.video svg.scene{position:absolute;inset:0;width:100%;height:100%;transform-origin:50% 50%}
+.snapshot svg{position:absolute;inset:0;width:100%;height:100%;visibility:hidden}
 
 /* ---------- モックアップ専用（実装には無い）: ヘッダの「モック」ボタン ---------- */
 .mockfab{padding:5px 10px;border-radius:999px;border:1px dashed var(--mock);background:#2a1f3d;color:#d7c2f3;font-size:12px;cursor:pointer}
@@ -148,11 +175,15 @@ td input.bad{border-color:var(--ng)}
 <header>
   <span class="title">hve 昇降・カメラ</span>
   <span class="badge" id="bLink"><span class="dot"></span><span>昇降部</span></span>
-  <span class="badge" id="bCeil"><span class="dot"></span><span>天井</span></span>
+  <span class="badge" id="bCeil"><span class="dot"></span><span>天井 —</span></span>
   <span class="badge" id="bClients"><span>端末 1</span></span>
   <span class="badge warn" id="bProv" title="仮値のまま動いているパラメータがあります"><span class="dot"></span><span>仮値</span></span>
-  <span class="badge warn" id="bTop" style="display:none" title="上端の閾値が未設定のため上端で止まりません"><span class="dot"></span><span>上端 未設定（開発中）</span></span>
+  <span class="badge warn" id="bTop" title="上端を検知しないため、上端で止まりません。目で見て操作してください"><span class="dot"></span><span>上端の検知: 一時無効</span></span>
+  <span class="badge" id="bOwner" title="いま昇降を操作している画面"><span>持ち主 なし</span></span>
+  <span class="badge" id="bLiftUi" title="昇降部の画面を開いている台数"><span>昇降部の画面 0</span></span>
+  <a class="badge link" id="bLiftLink" href="#" title="昇降部の画面を開く（モックアップでは開かない）">昇降部 192.168.4.20</a>
   <span class="badge fake" id="bFake" style="display:none"><span>偽物のモード</span></span>
+  <span class="badge ng" id="bWs" style="display:none" title="カメラ部から状態が届きません。再接続を試みています"><span class="dot"></span><span>接続切れ</span></span>
   <span class="spacer"></span>
   <button class="mockfab" id="mockFab" title="モックアップ専用（実装の画面には無い）">モック</button>
   <button class="hbtn" id="openSettings">設定</button>
@@ -160,7 +191,7 @@ td input.bad{border-color:var(--ng)}
 
 <main>
   <div class="video" id="video">
-    <svg class="scene" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-label="カメラ映像（モックアップでは絵）">
+    <svg class="scene" id="scene" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-label="カメラ映像（モックアップでは絵）">
       <g id="world">
         <rect x="-2000" y="-4000" width="4640" height="8000" fill="#2b2f36"/>
         <rect x="-2000" y="-4000" width="4640" height="2600" fill="#3a3e46"/>
@@ -183,7 +214,8 @@ td input.bad{border-color:var(--ng)}
       </g>
     </svg>
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
-    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0°</span></div>
+    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0.0°</span></div>
+    <button class="snapbtn" id="snapBtn" title="静止画を取り寄せて重ねて表示する">静止画</button>
     <button class="guidebtn" id="toggleGuide" title="ガイド線の表示を切り替える">ガイド線</button>
     <div class="zoom" aria-label="デジタルズーム">
       <button class="zoombtn" id="zIn" title="拡大">＋</button>
@@ -192,6 +224,12 @@ td input.bad{border-color:var(--ng)}
     </div>
     <div class="nosig" id="nosig">映像がありません</div>
     <div class="stopbar" id="stopbar"></div>
+    <!-- 静止画（押した端末だけ。映像の上に重ねる。操作ボタンは映像の外なので表示中も効く。Spec-ui.md §1.5.1） -->
+    <div class="snapshot" id="snapshot">
+      <svg id="snapImage" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid meet" aria-label="静止画（モックアップでは絵）"></svg>
+      <div class="snapmsg" id="snapMsg">取得中…</div>
+      <button class="hbtn snapclose" id="snapClose">閉じる</button>
+    </div>
   </div>
 
   <div class="panel">
@@ -204,7 +242,7 @@ td input.bad{border-color:var(--ng)}
         </div>
         <div class="gauge" title="高さ（赤い破線が上端）">
           <div class="fill" id="gFill"></div>
-          <div class="top" id="gTop"></div>
+          <div class="top" id="gTop" style="display:none"></div>
         </div>
       </div>
       <div class="sub">速度</div>
@@ -238,13 +276,13 @@ td input.bad{border-color:var(--ng)}
       <thead><tr><th>速度</th><th>下限</th><th>上限</th><th>初期値</th><th>単位</th></tr></thead>
       <tbody id="stBody"></tbody>
     </table>
+    <p class="note">モータへの出力の上限 [%] は、モータの定格電圧 ÷ 電源電圧（12 V のモータを 24 V で回すなら 50）。電源・モータを替えたら合わせる。</p>
     <div class="err" id="stErr"></div>
     <div class="row-actions">
       <button class="hbtn" id="stCancel">閉じる（保存しない）</button>
       <button class="hbtn primary" id="stSave">保存</button>
     </div>
-    <div class="prov"><b>仮値で動作中</b>（実測で確定するまで。ここでは変えられない）:
-      天井までの余裕 500 mm ／ 天井の値の古さ 600 ms ／ 高さの値の古さ 600 ms ／ 連続駆動の上限 10 s</div>
+    <div class="prov" id="stProv"></div>
   </div>
 </div>
 <div class="toast" id="toast">保存しました</div>
@@ -257,10 +295,13 @@ td input.bad{border-color:var(--ng)}
     <button data-mock="ceilNear">天井が近い</button>
     <button data-mock="ceilStale">天井の値が届かない</button>
     <button data-mock="ceilOut">天井 範囲外</button>
-    <button data-mock="link">昇降部と切断</button>
-    <button data-mock="topUnset">上端が未設定</button>
+    <button data-mock="noOrigin">電源投入直後（原点前）</button>
+    <button data-mock="stall">エンコーダが回らない</button>
     <button data-mock="maxrun">連続駆動の上限</button>
-    <button data-mock="height">高さセンサ故障</button>
+    <button data-mock="link">昇降部と切断</button>
+    <button data-mock="io">Arduino 応答なし</button>
+    <button data-mock="liftUi">昇降部の画面から操作</button>
+    <button data-mock="ws">カメラ部と接続切れ</button>
     <button data-mock="novideo">映像なし</button>
     <button data-mock="fake">偽物のモード表示</button>
     <button data-mock="clients">端末 2 台</button>
@@ -270,46 +311,61 @@ td input.bad{border-color:var(--ng)}
 
 <script>
 (() => {
-  // ---- 設定（機器に保存されている想定） ----
+  // ---- 設定（機器に保存されている想定。既定値は camera/hve_camera/settings.py と同じ） ----
+  // 昇降の速さは実際の速さ [mm/s]（Spec-ui.md §1。昇降部がエンコーダで測って保つ）
   const AXES = [
-    {key:'lift_up',   name:'上昇',   unit:'%',     abs:[0,100]},
-    {key:'lift_down', name:'下降',   unit:'%',     abs:[0,100]},
-    {key:'pitch',     name:'ピッチ', unit:'deg/s', abs:[0.1,60]},
-    {key:'yaw',       name:'ヨー',   unit:'deg/s', abs:[0.1,60]},
+    {key:'lift_up',   name:'上昇',   unit:'mm/s',  abs:[0,100],  step:1},
+    {key:'lift_down', name:'下降',   unit:'mm/s',  abs:[0,100],  step:1},
+    {key:'pitch',     name:'ピッチ', unit:'deg/s', abs:[0.1,60], step:0.5},
+    {key:'yaw',       name:'ヨー',   unit:'deg/s', abs:[0.1,60], step:0.5},
   ];
+  const MOTOR = {key:'motor_max_pct', name:'モータへの出力の上限', unit:'%', abs:[10,100]};  // Spec-ui.md §2.1
   let settings = {
     lift_up:{min:10,max:60,init:30}, lift_down:{min:10,max:60,init:30},
     pitch:{min:1,max:30,init:10},    yaw:{min:1,max:30,init:10},
+    motor_max_pct:50,
   };
+  // 仮値で動作中のパラメータ（実装は state.provisional。camera/config/params.toml の provisional）
+  const PROVISIONAL = ['hold_timeout_ms','lift_cmd_period_ms','lift_state_timeout_ms','state_period_ms',
+    'pitch_min_deg','pitch_max_deg','video_capture_fps','video_out_height','video_fps','video_jpeg_quality',
+    'video_send_timeout_ms','io_cmd_period_ms','io_lost_ms','ceiling_read_stale_ms','uno_clock_window'];
 
   // ---- 機体の状態（シミュレーション） ----
-  const S = {height:120, top:1500, ceilingAt:2200, pitch:0, yaw:0,
-             link:true, ceilStale:false, ceilOut:false, topUnset:false, heightBad:false, video:true,
-             active:null, reason:'CMD_STOP', runAxis:null, runT:0};
-  const CEIL_MARGIN = 500, PITCH_LIM = 45, BOTTOM = 100, MAX_RUN_S = 10;
-  const LIFT_MM_PER_PCT_S = 9.6; // 絵を動かすための適当な値（仕様ではない）
+  // 高さは下端を 0 とする（下端のリミットスイッチで原点を取る。Spec-safety.md §1.2）。
+  // origin が偽の間（電源投入から下端に着くまで）は、画面に高さを出せない
+  const S = {height:0, origin:true, ceilingAt:2000, pitch:0, yaw:0,
+             link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true,
+             active:null, reason:'NONE', runAxis:null, runT:0, meas:0};
+  // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_MS・pitch_min/max_deg）
+  const CEIL_MARGIN = 500, PITCH_LIM = 45, MAX_RUN_S = 10, GAUGE_FULL = 1800;
 
+  // 停止理由の文言（camera/web/app.js の REASON_TEXT と同じ。文言は仮）
   const REASON = {
     CEILING_NEAR:['ng','天井が近いため上昇できません'],
+    CEILING:['ng','天井の許可が得られないため上昇できません'],
     CEILING_STALE:['ng','天井センサの値が届かないため上昇できません'],
-    HEIGHT_UNKNOWN:['ng','高さセンサが読めないため上昇できません'],
+    HEIGHT_UNKNOWN:['ng','高さが分からないため上昇できません。一度下端まで下げてください'],
+    ENCODER_STALL:['warn','エンコーダが回らないため停止しました。反対方向へは動かせます'],
+    LINK_LOST:['ng','昇降部と繋がっていません。昇降できません'],
     MAX_RUN:['warn','同じ方向へ動き続けた時間が上限（10 秒）を超えたため停止しました。反対方向へは動かせます'],
     TOP:['warn','上端に達しました'],
     BOTTOM:['warn','下端です'],
-    LINK_LOST:['ng','昇降部と繋がっていません。昇降できません'],
     HOLD_TIMEOUT:['warn','操作が途絶えたため停止しました'],
+    CMD_TIMEOUT:['warn','昇降部への操作が途絶えたため停止しました'],
     AXIS_LIMIT:['warn','可動範囲の端です'],
+    OWNER_GONE:['warn','操作していた画面が閉じたため停止しました'],
+    IO_LOST:['ng','Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません'],
   };
 
   const $ = id => document.getElementById(id);
   const sliders = {lift_up:$('sUp'), lift_down:$('sDown'), pitch:$('sPitch'), yaw:$('sYaw')};
   const outs    = {lift_up:$('oUp'), lift_down:$('oDown'), pitch:$('oPitch'), yaw:$('oYaw')};
-  const fmt = (v,u) => (u==='%' ? Math.round(v) : (+v).toFixed(1)) + ' ' + u;
+  const fmt = (v,u) => (u==='mm/s' ? Math.round(v) : (+v).toFixed(1)) + ' ' + u;
 
   function applySliders(){ // 画面を開いたとき: 範囲＝下限〜上限、位置＝初期値
     for (const a of AXES){
       const s = sliders[a.key], c = settings[a.key];
-      s.min = c.min; s.max = c.max; s.step = a.unit==='%' ? 1 : 0.5; s.value = c.init;
+      s.min = c.min; s.max = c.max; s.step = a.step; s.value = c.init;
       outs[a.key].textContent = fmt(c.init, a.unit);
     }
   }
@@ -325,91 +381,117 @@ td input.bad{border-color:var(--ng)}
     b.addEventListener('contextmenu', e => e.preventDefault());
   });
 
-  // ---- 判定（DetailedDesign.md §4.1 の順） ----
-  function decide(axis){
-    if (axis === 'lift_up'){
-      if (!S.link) return 'LINK_LOST';
-      if (S.ceilStale) return 'CEILING_STALE';
-      if (!S.ceilOut && S.ceilingAt - S.height <= CEIL_MARGIN) return 'CEILING_NEAR';
-      if (S.heightBad) return 'HEIGHT_UNKNOWN';
-      if (!S.topUnset && S.height >= S.top) return 'TOP';   // 未設定なら上端では止めない（開発中の動作確認）
-      if (S.runAxis === 'lift_up' && S.runT > MAX_RUN_S) return 'MAX_RUN';
-      return 'NONE';
-    }
-    if (axis === 'lift_down'){
-      if (!S.link) return 'LINK_LOST';
-      if (S.height <= BOTTOM) return 'BOTTOM';
-      if (S.runAxis === 'lift_down' && S.runT > MAX_RUN_S) return 'MAX_RUN';
-      return 'NONE';
-    }
-    if (axis === 'pitch_up'   && S.pitch >=  PITCH_LIM) return 'AXIS_LIMIT';
-    if (axis === 'pitch_down' && S.pitch <= -PITCH_LIM) return 'AXIS_LIMIT';
+  // ---- 天井（カメラ部が SRF02 で測って昇降部へ送り、昇降部が判定する） ----
+  const ceilStale = () => S.ceilStale || !S.io;               // Arduino が応答しなければ天井も測れない
+  const ceilGap = () => Math.round(S.ceilingAt - S.height);
+  function ceilingVerdict(){ // 昇降部の ceiling_check（距離計を持つ上部モジュールからの上昇のときだけ）
+    if (ceilStale()) return 'CEILING_STALE';
+    if (S.ceilOut) return 'OUT_OF_RANGE';                     // 反射が返らない＝天井は遠い（許す。#3b）
+    if (ceilGap() <= CEIL_MARGIN) return 'CEILING_NEAR';      // ちょうど閾値でも止める（#3）
+    return 'NONE';
+  }
+
+  // ---- 昇降部の判定（firmware/lift/lib/lift_core/lift_decide.cpp の順） ----
+  // 上端の検知は一時無効（W-1）。上端で止めず、高さが読めない（原点前）ことでも上昇を止めない
+  function liftDecide(axis){
+    if (axis === 'lift_up'){ const c = ceilingVerdict(); if (c !== 'NONE' && c !== 'OUT_OF_RANGE') return c; }
+    if (axis === 'lift_down' && S.height <= 0) return 'BOTTOM';
+    if (S.runAxis === axis && S.runT > MAX_RUN_S) return 'MAX_RUN';
+    if (S.stall && S.runAxis === axis && S.runT > 0.5) return 'ENCODER_STALL';  // 出力しているのに進まない（#4d）
+    return 'NONE';
+  }
+  // ---- カメラ部が画面に出す理由（camera/hve_camera/control.py の _screen_reason の順） ----
+  function screenReason(){
+    if (!S.link) return 'LINK_LOST';
+    if (!S.io) return 'IO_LOST';
+    const a = S.active;
+    if (a === 'pitch_up'   && S.pitch >=  PITCH_LIM) return 'AXIS_LIMIT';
+    if (a === 'pitch_down' && S.pitch <= -PITCH_LIM) return 'AXIS_LIMIT';
+    if (a && a.startsWith('lift')) return liftDecide(a);
     return 'NONE';
   }
 
   let last = performance.now();
   function tick(now){
     const dt = Math.min(0.2, (now - last) / 1000); last = now;
-    let reason = 'CMD_STOP';
-    if (S.active && S.active.startsWith('lift')){
-      if (S.runAxis !== S.active){ S.runAxis = S.active; S.runT = 0; }
-      if (decide(S.active) === 'NONE') S.runT += dt;
-    } else { S.runAxis = null; S.runT = 0; }
-    if (S.active){
-      reason = decide(S.active);
-      if (reason === 'NONE'){
-        const v = speedOf(S.active);
-        switch (S.active){
-          case 'lift_up':    S.height += LIFT_MM_PER_PCT_S * v * dt; break;
-          case 'lift_down':  S.height = Math.max(BOTTOM, S.height - LIFT_MM_PER_PCT_S * v * dt); break;
-          case 'pitch_up':   S.pitch = Math.min( PITCH_LIM, S.pitch + v*dt); break;
-          case 'pitch_down': S.pitch = Math.max(-PITCH_LIM, S.pitch - v*dt); break;
-          case 'yaw_right':  S.yaw = ((S.yaw + v*dt + 540) % 360) - 180; break;  // 360° 回し続けられる
-          case 'yaw_left':   S.yaw = ((S.yaw - v*dt + 540) % 360) - 180; break;
-        }
+    const a = S.active;
+    if (a && a.startsWith('lift') && S.link){
+      if (S.runAxis !== a){ S.runAxis = a; S.runT = 0; }
+      S.runT += dt;   // 止められても同じ方向の命令が続く限り数え続ける（lift_decide.cpp 表 8）
+    } else if (!a || !a.startsWith('lift')) { S.runAxis = null; S.runT = 0; }
+    S.reason = screenReason();
+    S.meas = 0;
+    if (a && S.reason === 'NONE'){
+      const v = speedOf(a);
+      // 測った速さ（エンコーダ）。モックアップでは目標に少し揺らぎを足しただけ
+      if (a.startsWith('lift')) S.meas = S.stall ? 0 : v * (0.96 + 0.06 * Math.random());
+      switch (a){
+        case 'lift_up':    S.height += S.meas * dt; break;
+        case 'lift_down':
+          S.height -= S.meas * dt;
+          if (S.height <= 0){ S.height = 0; S.origin = true; }  // 下端のリミットスイッチが押されたら原点を取る
+          break;
+        case 'pitch_up':   S.pitch = Math.min( PITCH_LIM, S.pitch + v*dt); break;
+        case 'pitch_down': S.pitch = Math.max(-PITCH_LIM, S.pitch - v*dt); break;
+        case 'yaw_right':  S.yaw = ((S.yaw + v*dt + 540) % 360) - 180; break;  // 360° 回し続けられる
+        case 'yaw_left':   S.yaw = ((S.yaw - v*dt + 540) % 360) - 180; break;
       }
     }
-    S.reason = reason;
     render();
     requestAnimationFrame(tick);
   }
 
   function setBadge(el, cls, text){ el.className = 'badge' + (cls ? ' ' + cls : ''); el.lastElementChild.textContent = text; }
 
+  function ceilingBadge(){ // camera/web/app.js の ceilingText と同じ出し分け
+    const lifting = S.active === 'lift_up' && S.link;  // 昇降部の判定が載るのはカメラモジュールが持ち主のときだけ
+    if (!S.link || ceilStale()) return ['ng', '天井 値なし'];
+    if (S.ceilOut) return ['', '天井 範囲外'];
+    if (lifting && ceilingVerdict() === 'CEILING_NEAR') return ['warn', `天井 ${ceilGap()} mm`];
+    return ['', `天井 ${ceilGap()} mm`];
+  }
+
   function render(){
-    const up = S.active === 'lift_up', dn = S.active === 'lift_down';
-    const gap = Math.round(S.ceilingAt - S.height);
+    const a = S.active, moving = !!a && a.startsWith('lift') && S.reason === 'NONE';
+    const owner = S.liftUi ? 'ui' : (a && a.startsWith('lift') && S.link ? 'module' : null);
     setBadge($('bLink'), S.link ? '' : 'ng', S.link ? '昇降部' : '昇降部 切断');
-    setBadge($('bCeil'), S.ceilStale ? 'ng' : (!S.ceilOut && gap <= CEIL_MARGIN ? 'warn' : ''), S.ceilStale ? '天井 値なし' : (S.ceilOut ? '天井 範囲外' : `天井 ${gap} mm`));
+    setBadge($('bCeil'), ...ceilingBadge());
+    $('bOwner').lastElementChild.textContent = owner === 'module' ? '持ち主 カメラモジュール' : owner === 'ui' ? '持ち主 昇降部の画面' : '持ち主 なし';
+    $('bLiftUi').lastElementChild.textContent = `昇降部の画面 ${S.liftUi ? 1 : 0}`;
+    $('bLiftLink').style.display = S.link ? '' : 'none';
+    $('bWs').style.display = S.ws ? 'none' : '';
     // 映像: 画面中央に来る世界の y。下端では盤面、上がるほど盤上部へ。ピッチ上向きでさらに上
-    const cy = -50 - (S.height - BOTTOM) * 0.62 - S.pitch * 9, tx = -S.yaw * 6;
+    const cy = -50 - S.height * 0.62 - S.pitch * 9, tx = -S.yaw * 6;
     $('world').setAttribute('transform', `translate(${tx},${240 - cy})`);
-    $('osdH').textContent = S.heightBad ? '高さ 読めない' : `高さ ${Math.round(S.height)} mm`;
+    $('osdH').textContent = S.origin ? `高さ ${Math.round(S.height)} mm` : '高さ 読めない';
     $('osdP').textContent = `ピッチ ${S.pitch.toFixed(1)}°`;  $('cP').textContent = `↕ ${Math.round(S.pitch)}°`;
     const r = REASON[S.reason], bar = $('stopbar');
     if (r){ bar.className = 'stopbar show' + (r[0]==='ng' ? ' ng' : ''); bar.textContent = r[1]; }
     else bar.className = 'stopbar';
-    const moving = (up||dn) && S.reason === 'NONE';
-    $('liftState').textContent = moving ? (up ? `上昇中 ${sliders.lift_up.value}%` : `下降中 ${sliders.lift_down.value}%`)
-                                        : (S.height <= BOTTOM ? '停止中・下端' : '停止中');
-    document.querySelector('[data-axis=lift_up]').classList.toggle('blocked', decide('lift_up') !== 'NONE');
-    document.querySelector('[data-axis=lift_down]').classList.toggle('blocked', decide('lift_down') !== 'NONE');
-    const maxH = 1800;
-    $('gFill').style.height = (S.heightBad ? 0 : Math.min(100, S.height / maxH * 100)) + '%';
-    $('gTop').style.display = S.topUnset ? 'none' : '';
-    $('bTop').style.display = S.topUnset ? '' : 'none';
-    $('gTop').style.bottom = (S.top / maxH * 100) + '%';
+    const up = a === 'lift_up';
+    $('liftState').textContent = moving
+      ? `${up ? '上昇中' : '下降中'} ${Math.round(speedOf(a))} mm/s（測定 ${Math.round(S.meas)} mm/s）`
+      : (S.height <= 0 ? '停止中・下端' : '停止中');
+    // ボタンを薄くする（app.js の holdBlocked）: 上昇は切断・天井の判定が NG、下降は下端
+    const ceilNg = up && S.link && !['NONE','OUT_OF_RANGE'].includes(ceilingVerdict());
+    document.querySelector('[data-axis=lift_up]').classList.toggle('blocked', !S.link || ceilNg);
+    document.querySelector('[data-axis=lift_down]').classList.toggle('blocked', S.height <= 0);
+    // 高さのゲージ。v2 の昇降部は上端の高さを返さない（W-1）ので上端の線は出さない
+    $('gFill').style.height = (S.origin ? Math.min(100, S.height / GAUGE_FULL * 100) : 0) + '%';
     $('nosig').classList.toggle('show', !S.video);
   }
 
-  // ---- 設定画面 ----
+  // ---- 設定画面（camera/web/settings.js と同じ検証） ----
   let draft;
   function openSettings(){
     draft = JSON.parse(JSON.stringify(settings));
     $('stBody').innerHTML = AXES.map(a => `<tr data-key="${a.key}"><td>${a.name}</td>` +
       ['min','max','init'].map(f => `<td><input type="number" inputmode="decimal" data-f="${f}" value="${draft[a.key][f]}"></td>`).join('') +
-      `<td>${a.unit}</td></tr>`).join('');
+      `<td>${a.unit}</td></tr>`).join('') +
+      `<tr data-key="${MOTOR.key}"><td class="wrapcell">${MOTOR.name}</td>` +
+      `<td colspan="3"><input type="number" inputmode="decimal" data-f="motor" value="${draft[MOTOR.key]}"></td><td>${MOTOR.unit}</td></tr>`;
     $('stBody').querySelectorAll('input').forEach(i => i.addEventListener('input', validate));
+    $('stProv').textContent = `仮値で動作中（実測で確定するまで。ここでは変えられない）: ${PROVISIONAL.join(' / ')}`;
     validate();
     $('settings').classList.add('show');
   }
@@ -421,11 +503,19 @@ td input.bad{border-color:var(--ng)}
       row.querySelectorAll('input').forEach(i => vals[i.dataset.f] = i.value === '' ? NaN : +i.value);
       let err = '';
       if (Object.values(vals).some(Number.isNaN)) err = '数値を入れてください';
-      else if (vals.min < a.abs[0] || vals.max > a.abs[1]) err = `${a.abs[0]}〜${a.abs[1]} ${a.unit} の範囲にしてください`;
       else if (!(vals.min <= vals.init && vals.init <= vals.max)) err = '下限 ≦ 初期値 ≦ 上限 にしてください';
+      else if (a.unit === 'mm/s' && !Object.values(vals).every(Number.isInteger)) err = '整数を入れてください';
+      else if (vals.min < a.abs[0] || vals.max > a.abs[1]) err = `${a.abs[0]}〜${a.abs[1]} ${a.unit} の範囲にしてください`;
       row.querySelectorAll('input').forEach(i => i.classList.toggle('bad', !!err));
       if (err) msgs.push(`${a.name}: ${err}`); else draft[a.key] = vals;
     }
+    const mi = $('stBody').querySelector('input[data-f=motor]'), mv = mi.value === '' ? NaN : +mi.value;
+    let merr = '';
+    if (Number.isNaN(mv)) merr = '数値を入れてください';
+    else if (!Number.isInteger(mv)) merr = '整数にしてください';
+    else if (mv < MOTOR.abs[0] || mv > MOTOR.abs[1]) merr = `${MOTOR.abs[0]}〜${MOTOR.abs[1]} ${MOTOR.unit} の整数にしてください`;
+    mi.classList.toggle('bad', !!merr);
+    if (merr) msgs.push(`${MOTOR.name}: ${merr}`); else draft[MOTOR.key] = mv;
     // エラーは 1 行にまとめる（行を増やして画面からはみ出さないように）
     $('stErr').textContent = msgs.length ? msgs[0] + (msgs.length > 1 ? `（ほか ${msgs.length - 1} 件）` : '') : '';
     $('stSave').disabled = msgs.length > 0;
@@ -435,18 +525,21 @@ td input.bad{border-color:var(--ng)}
   $('stCancel').onclick = () => $('settings').classList.remove('show');
   $('stSave').onclick = () => {
     if (!validate()) return;
+    // 昇降の設定は昇降部へ中継して保存する。繋がらないときはカメラ部も保存しない（実装は 503）
+    if (!S.link){ $('stErr').textContent = '昇降部に繋がらないため保存できません（何も保存していません）'; return; }
     settings = draft; applySliders();
     $('settings').classList.remove('show');
-    const t = $('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500);
+    const t = $('toast'); t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1500);
   };
 
   // ---- デジタルズーム（判定には影響しない。Spec-ui.md §1.5） ----
-  // 実装ではカメラ部が高解像度の映像から中央を切り出して送る。モックアップは見え方だけ再現するため絵を拡大している
+  // 実装ではカメラ部が 720p の映像から中央を切り出して送り、倍率は全端末で共通（state.zoom）。
+  // モックアップは見え方だけ再現するため絵を拡大している
   const ZOOM_MAX = 4, ZOOM_STEP = 0.5;
   let zoom = 1;
   function setZoom(z){
     zoom = Math.min(ZOOM_MAX, Math.max(1, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
-    document.querySelector('.video svg.scene').style.transform = `scale(${zoom})`;
+    $('scene').style.transform = `scale(${zoom})`;
     $('zLvl').textContent = zoom.toFixed(1) + '×';
     $('zIn').disabled = zoom >= ZOOM_MAX; $('zOut').disabled = zoom <= 1;
   }
@@ -455,8 +548,26 @@ td input.bad{border-color:var(--ng)}
   $('zLvl').onclick = () => setZoom(1);
   setZoom(1); // 画面を開いたときは 1 倍から
 
+  // ---- 静止画（Spec-ui.md §1.5.1）: 押した端末だけ・ズームに関係なく映像の全体 ----
+  let snapTimer = null;
+  function openSnapshot(){
+    const img = $('snapImage');
+    img.innerHTML = ''; img.style.visibility = 'hidden';
+    $('snapMsg').textContent = '取得中…'; $('snapMsg').style.display = '';
+    $('snapshot').classList.add('show');
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(() => {
+      if (!S.video){ $('snapMsg').textContent = '静止画を取得できません'; return; }
+      img.appendChild($('world').cloneNode(true)).removeAttribute('id');
+      img.style.visibility = 'visible'; $('snapMsg').style.display = 'none';
+    }, 400);
+  }
+  $('snapBtn').onclick = openSnapshot;
+  $('snapClose').onclick = () => { clearTimeout(snapTimer); $('snapshot').classList.remove('show'); };
+
   // ---- ガイド線 ----
   $('toggleGuide').onclick = () => { const g = $('guide'); g.style.display = g.style.display === 'none' ? '' : 'none'; };
+  $('bLiftLink').onclick = e => e.preventDefault();
 
   // ---- モックアップ専用: 状況の再現 ----
   const placeMock = () => $('mockPop').style.top = (document.querySelector('header').getBoundingClientRect().bottom + 4) + 'px';
@@ -465,27 +576,35 @@ td input.bad{border-color:var(--ng)}
   $('mockRow').addEventListener('click', e => {
     const m = e.target.dataset.mock; if (!m) return;
     if (m === 'normal'){
-      Object.assign(S, {link:true, ceilStale:false, ceilOut:false, topUnset:false, heightBad:false, video:true, ceilingAt:2200});
+      Object.assign(S, {link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true, ceilingAt:2000});
+      S.origin = true;
       $('bFake').style.display = 'none'; $('bClients').lastElementChild.textContent = '端末 1';
       document.querySelectorAll('#mockRow button').forEach(b => b.classList.toggle('on', b.dataset.mock === 'normal'));
       return;
     }
-    if (m === 'reload'){ applySliders(); return; }
+    if (m === 'reload'){ applySliders(); setZoom(1); return; }
     if (m === 'maxrun'){ S.runAxis = 'lift_up'; S.runT = MAX_RUN_S + 1; S.active = 'lift_up'; setTimeout(() => { S.active = null; }, 1500); return; }
+    if (m === 'noOrigin'){ // 途中の高さで再起動した: 一度下端に着くまで高さは読めない（Spec-safety.md §1.2）
+      S.height = Math.max(S.height, 600); S.origin = false;
+      document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');
+      return;
+    }
     document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');
     e.target.classList.toggle('on');
     const on = e.target.classList.contains('on');
-    const toggles = {ceilStale:'ceilStale', ceilOut:'ceilOut', topUnset:'topUnset', height:'heightBad'};
+    const toggles = {ceilStale:'ceilStale', ceilOut:'ceilOut', stall:'stall', liftUi:'liftUi'};
     if (toggles[m]) S[toggles[m]] = on;
     if (m === 'link') S.link = !on;
+    if (m === 'io') S.io = !on;
+    if (m === 'ws') S.ws = !on;
     if (m === 'novideo') S.video = !on;
-    if (m === 'ceilNear') S.ceilingAt = on ? S.height + 450 : 2200;
+    if (m === 'ceilNear') S.ceilingAt = on ? S.height + 450 : 2000;
     if (m === 'fake') $('bFake').style.display = on ? '' : 'none';
     if (m === 'clients') $('bClients').lastElementChild.textContent = on ? '端末 2' : '端末 1';
   });
 
   applySliders();
-  // 確認用: ?h=<高さ>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&mock=1 で状態を作って開ける
+  // 確認用: ?h=<高さ>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&mock=1 で状態を作って開ける
   const q = new URLSearchParams(location.search);
   if (q.has('h')) S.height = +q.get('h');
   if (q.get('ceil') === 'near') S.ceilingAt = S.height + 450;
@@ -493,6 +612,7 @@ td input.bad{border-color:var(--ng)}
   if (q.has('hold')) S.active = q.get('hold');
   if (q.has('settings')) openSettings();
   if (q.has('zoom')) setZoom(+q.get('zoom'));
+  if (q.has('snap')) openSnapshot();
   if (q.has('mock')) { placeMock(); $('mockPop').classList.add('show'); }
   requestAnimationFrame(tick);
 })();

@@ -1,39 +1,70 @@
 #include "hal_esp32.h"
 
+#include <driver/pcnt.h>
+
 #include "config.h"
 
 namespace {
 
-// HC-SR04 の TRIG を HIGH にする時間。データシートどおり 10 us
-constexpr uint32_t kTrigHighUs = 10;
+// PCNT の 1 単位。A/B の 4 逓倍で数える定番の構成
+//（ch0: パルス=A・制御=B、ch1: パルス=B・制御=A。
+// ch1 は ch0 と逆の符号。ESP-IDF の rotary_encoder の例と同じ）。
+constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
 
-// --- ECHO の割り込みが書き、loop() が読む値 ---
-// ESP32 では 32 bit 整数の書き込みは途切れないので、volatile を付けるだけで足りる。
-// 割り込みから this を通せないので、ハードウェアごとにファイル直下の変数に置く
-// （HAL は 1 個しか作らない前提。main.cpp もその 1 個だけを作る）。
-volatile uint32_t g_echo_rise_us = 0;   // 立ち上がりを捉えた micros()
-volatile bool g_echo_rise_seen = false;  // 立ち上がりの後から、まだ落ちていない
-volatile uint32_t g_echo_width_us = 0;   // 落ちた micros() - 立ち上がり。0 は「未測定」
-volatile bool g_echo_done = false;       // 1 回測り終えた（loop() 側で読む）
+// hal_core の設定値と driver/pcnt.h が食い違っていないことをビルドで確かめる。
+static_assert(kPcntInc == PCNT_COUNT_INC, "kPcntInc differs from PCNT_COUNT_INC");
+static_assert(kPcntDec == PCNT_COUNT_DEC, "kPcntDec differs from PCNT_COUNT_DEC");
+static_assert(kPcntKeep == PCNT_MODE_KEEP, "kPcntKeep differs from PCNT_MODE_KEEP");
+static_assert(kPcntReverse == PCNT_MODE_REVERSE, "kPcntReverse differs from PCNT_MODE_REVERSE");
 
-// ECHO の両エッジ（CHANGE）で、割り込みの横幅だけ測る。loop() を止めないため
-// （ECHO は 5 V なので分圧して 3.3 V にしてある。分圧なしだと壊す）。
-// IRAM に置く。呼ぶのは micros() と digitalRead() だけで、両方とも
-// ARDUINO_ISR_ATTR（IRAM から呼べる）。Serial も delay も使わない。
-void IRAM_ATTR echo_edge_isr() {
-  if (digitalRead(SONAR_ECHO_PIN) == HIGH) {
-    g_echo_rise_us = micros();
-    g_echo_rise_seen = true;
-    return;
+// 上限・下限に達するたびに割り込みが足す溢れの累積。loop() が読むときは
+// クリティカル区間でカウンタと一緒に読む（合計 = 溢れの累積 + 今のカウンタ）。
+volatile int32_t g_overflow = 0;
+portMUX_TYPE g_pcnt_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// ENC_PCNT_LIMIT に達した溢れを累積する。カウンタはハードウェアが 0 に戻す
+//（TRM）ので clear しない（割り込みに入るまでに数えた分を捨ててしまう）。
+// IRAM に置く。呼ぶのはレジスタ読み書きだけで、Serial も delay も使わない。
+// 32 bit の読み書きは途切れないのでクリティカル区間は要らない。
+void IRAM_ATTR pcnt_limit_isr(void* /*arg*/) {
+  uint32_t status = 0;
+  pcnt_get_event_status(kPcntUnit, &status);
+  if ((status & PCNT_EVT_H_LIM) != 0) {
+    g_overflow += ENC_PCNT_LIMIT;
   }
-  // 立ち上がりを見ないで落ちた（ノイズ）。何もしない。g_echo_rise_seen を
-  // 落とさないので、次は「まだ立ち上がっていない」状態として扱われる
-  if (!g_echo_rise_seen) {
-    return;
+  if ((status & PCNT_EVT_L_LIM) != 0) {
+    g_overflow -= ENC_PCNT_LIMIT;
   }
-  g_echo_width_us = micros() - g_echo_rise_us;
-  g_echo_rise_seen = false;
-  g_echo_done = true;
+}
+
+// ENC_GLITCH_FILTER_NS [ns] を APB 80 MHz のクロック数に直す。上限 1023 に丸める。
+uint16_t glitch_filter_ticks() {
+  const int64_t ticks = (static_cast<int64_t>(ENC_GLITCH_FILTER_NS) * 80) / 1000;
+  if (ticks < 0) {
+    return 0;
+  }
+  if (ticks > 1023) {
+    return 1023;
+  }
+  return static_cast<uint16_t>(ticks);
+}
+
+// 数え方は hal_core の kPcntQuadEncoder から取る（符号の判断を native で縛るため）。
+// ここで別の値を書かないこと。
+void config_pcnt_channel(pcnt_channel_t channel, int pulse_pin, int ctrl_pin, int pos_mode,
+                         int neg_mode, int lctrl_mode, int hctrl_mode) {
+  pcnt_config_t cfg = {};
+  cfg.pulse_gpio_num = pulse_pin;
+  cfg.ctrl_gpio_num = ctrl_pin;
+  cfg.channel = channel;
+  cfg.unit = kPcntUnit;
+  cfg.pos_mode = static_cast<pcnt_count_mode_t>(pos_mode);
+  cfg.neg_mode = static_cast<pcnt_count_mode_t>(neg_mode);
+  cfg.lctrl_mode = static_cast<pcnt_ctrl_mode_t>(lctrl_mode);
+  cfg.hctrl_mode = static_cast<pcnt_ctrl_mode_t>(hctrl_mode);
+  cfg.counter_h_lim = static_cast<int16_t>(ENC_PCNT_LIMIT);
+  cfg.counter_l_lim = static_cast<int16_t>(-ENC_PCNT_LIMIT);
+  pcnt_unit_config(&cfg);
 }
 
 }  // namespace
@@ -53,65 +84,46 @@ void LiftEsp32Hal::begin() {
   // --- 下端リミットスイッチ（NC 配線。押すと開いて HIGH。断線も HIGH）---
   pinMode(BOTTOM_PIN, INPUT_PULLUP);
 
-  // --- HC-SR04 ---
-  pinMode(SONAR_TRIG_PIN, OUTPUT);
-  digitalWrite(SONAR_TRIG_PIN, LOW);
-  // ECHO は分圧済み 3.3 V。内部プルアップは不要
-  pinMode(SONAR_ECHO_PIN, INPUT);
-  attachInterrupt(SONAR_ECHO_PIN, echo_edge_isr, CHANGE);
-
-  // 起動後すぐ 1 回目の測定を出す
-  next_sonar_ms_ = millis();
+  // --- 高さのエンコーダ（オープンコレクタ。外付けで 3.3 V へプルアップが前提）---
+  pinMode(ENC_A_PIN, INPUT_PULLUP);
+  pinMode(ENC_B_PIN, INPUT_PULLUP);
+  config_pcnt_channel(PCNT_CHANNEL_0, ENC_A_PIN, ENC_B_PIN, kPcntQuadEncoder.ch0_pos,
+                      kPcntQuadEncoder.ch0_neg, kPcntQuadEncoder.ch0_lctrl,
+                      kPcntQuadEncoder.ch0_hctrl);
+  config_pcnt_channel(PCNT_CHANNEL_1, ENC_B_PIN, ENC_A_PIN, kPcntQuadEncoder.ch1_pos,
+                      kPcntQuadEncoder.ch1_neg, kPcntQuadEncoder.ch1_lctrl,
+                      kPcntQuadEncoder.ch1_hctrl);
+  pcnt_set_filter_value(kPcntUnit, glitch_filter_ticks());
+  pcnt_filter_enable(kPcntUnit);
+  // 上限・下限の割り込みで溢れの累積へ移す（unit_config が切るのでここで有効にする）
+  pcnt_event_enable(kPcntUnit, PCNT_EVT_H_LIM);
+  pcnt_event_enable(kPcntUnit, PCNT_EVT_L_LIM);
+  pcnt_isr_service_install(0);
+  pcnt_isr_handler_add(kPcntUnit, &pcnt_limit_isr, nullptr);
+  pcnt_counter_pause(kPcntUnit);
+  g_overflow = 0;
+  pcnt_counter_clear(kPcntUnit);
+  pcnt_counter_resume(kPcntUnit);
+  pcnt_ready_ = true;
 }
 
 void LiftEsp32Hal::poll(uint32_t now_ms) {
-  // 1 回測り終えたものを拾う
-  if (g_echo_done) {
-    g_echo_done = false;
-    apply_echo_width(now_ms);
-  }
-  // 立ち上がりを捉えたまま落ちない = 反射が返らない。時間切れとして「読めない」にする
-  if (g_echo_rise_seen && (micros() - g_echo_rise_us) > SONAR_ECHO_TIMEOUT_US) {
-    g_echo_rise_seen = false;
-    g_echo_width_us = 0;
-    filter_.on_invalid();
-    invalidate_height();
-  }
-  // 次の測定を出す。1 回 60 ms 以上空ける（DetailedDesign-hardware.md §0）
-  if (now_ms >= next_sonar_ms_) {
-    trigger_sonar(now_ms);
-  }
-}
-
-void LiftEsp32Hal::trigger_sonar(uint32_t now_ms) {
-  // 前回の幅を消してから叩く。鳴っているあいだの立ち上がりで上書きされる
-  g_echo_width_us = 0;
-  g_echo_rise_seen = false;
-  digitalWrite(SONAR_TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(SONAR_TRIG_PIN, HIGH);
-  delayMicroseconds(kTrigHighUs);
-  digitalWrite(SONAR_TRIG_PIN, LOW);
-  next_sonar_ms_ = now_ms + SONAR_PERIOD_MS;
-}
-
-void LiftEsp32Hal::apply_echo_width(uint32_t now_ms) {
-  int mm = 0;
-  // 範囲外なら filter_ が窓を空にする。5 回そろうまでは false
-  if (filter_.on_echo(g_echo_width_us, &mm)) {
-    // **有効な値を得た時刻だけを進める**。鮮度は「有効な値がいつ取れたか」で測る
-    height_mm_ = mm;
-    height_ok_ = true;
-    height_at_ms_ = now_ms;
+  if (!pcnt_ready_) {
     return;
   }
-  // 範囲外（2 cm 未満・4 m 超）なら「高さが読めない」。height_mm_ は直前の有効値を
-  // 残し、height_at_ms_ も進めないので、判定の HEIGHT_STALE_MS にもひっかかる
-  invalidate_height();
-}
-
-void LiftEsp32Hal::invalidate_height() {
-  height_ok_ = false;
+  // 溢れの累積と今のカウンタを一緒に読み、合計にする
+  int32_t overflow = 0;
+  int16_t raw = 0;
+  portENTER_CRITICAL(&g_pcnt_mux);
+  overflow = g_overflow;
+  pcnt_get_counter_value(kPcntUnit, &raw);
+  portEXIT_CRITICAL(&g_pcnt_mux);
+  total_count_ = encoder_total_guarded(total_count_, overflow, raw, ENC_PCNT_LIMIT);
+  // 下端スイッチの状態と一緒に渡す。判断は EncoderHeight 側
+  encoder_.update(total_count_, bottom_pressed(), ENC_UP_SIGN);
+  height_mm_ = encoder_.height_mm();
+  height_ok_ = encoder_.ok();
+  height_at_ms_ = now_ms;
 }
 
 void LiftEsp32Hal::motor_set(LiftDir dir, int duty_pct) {
@@ -129,6 +141,8 @@ void LiftEsp32Hal::motor_set(LiftDir dir, int duty_pct) {
 bool LiftEsp32Hal::bottom_pressed() {
   return bottom_pressed_from_level(digitalRead(BOTTOM_PIN));
 }
+
+int32_t LiftEsp32Hal::encoder_count() const { return total_count_; }
 
 int LiftEsp32Hal::height_mm() const { return height_mm_; }
 

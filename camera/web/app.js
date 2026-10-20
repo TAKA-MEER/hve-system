@@ -21,6 +21,7 @@ const ui_hold_period_ms = 100;    // `hold` を送り続ける周期
 const ui_state_timeout_ms = 1000; // `state` がこの時間届かないと「接続切れ」
 const ui_tick_ms = 500;           // 画面が見直す周期
 const video_probe_ms = 1500;      // 映像：配信が居るかを見直す周期（映像が来るまで・途絶えたあいだ「映像がありません」を出し続ける）
+const video_probe_fail_count = 2; // 映像：確かめがこの回数続けて失敗したら「映像がありません」を出す（1 回では出さない）
 const zoom_max = 4;               // デジタルズームの上限
 const zoom_step = 0.5;            // 「＋」「−」の 1 段
 const lift_gauge_full_mm = 1800;  // 高さのゲージの満量（上端が未設定のあいだ）
@@ -37,7 +38,8 @@ const REASON_TEXT = {
   CEILING_NEAR: ['ng', '天井が近いため上昇できません'],
   CEILING: ['ng', '天井の許可が得られないため上昇できません'],
   CEILING_STALE: ['ng', '天井センサの値が届かないため上昇できません'],
-  HEIGHT_UNKNOWN: ['ng', '高さセンサが読めないため上昇できません'],
+  HEIGHT_UNKNOWN: ['ng', '高さが分からないため上昇できません。一度下端まで下げてください'],
+  ENCODER_STALL: ['warn', 'エンコーダが回らないため停止しました。反対方向へは動かせます'],
   LINK_LOST: ['ng', '昇降部と繋がっていません。昇降できません'],
   MAX_RUN: ['warn', '同じ方向へ動き続けた時間が上限（10 秒）を超えたため停止しました。反対方向へは動かせます'],
   TOP: ['warn', '上端に達しました'],
@@ -45,7 +47,12 @@ const REASON_TEXT = {
   HOLD_TIMEOUT: ['warn', '操作が途絶えたため停止しました'],
   CMD_TIMEOUT: ['warn', '昇降部への操作が途絶えたため停止しました'],
   AXIS_LIMIT: ['warn', '可動範囲の端です'],
+  OWNER_GONE: ['warn', '操作していた画面が閉じたため停止しました'],
+  IO_LOST: ['ng', 'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません'],
 };
+
+/* 上端の検知が一時的に無効なあいだの表示（spec Spec-safety.md §1.1 `W-1`） */
+const TOP_DETECT_OFF_TEXT = '上端の検知: 一時無効';
 
 /* --- DOM に触れない部分（Node の試験で見る） --- */
 
@@ -93,10 +100,10 @@ function sliderSpec(setting, step) {
   };
 }
 
-/** 速度の数値の書式（`%` は整数・`deg/s` は小数 1 桁） */
+/** 速度の数値の書式（`%`・`mm/s` は整数・`deg/s` は小数 1 桁） */
 function formatSpeed(value, unit) {
   const number = Number(value);
-  const text = unit === '%' ? String(Math.round(number)) : number.toFixed(1);
+  const text = (unit === '%' || unit === 'mm/s') ? String(Math.round(number)) : number.toFixed(1);
   return `${text} ${unit}`;
 }
 
@@ -113,15 +120,69 @@ function reasonText(reason) {
   return {cls: 'warn', text: `止まりました（理由が分かりません: ${reason}）`};
 }
 
-/** 天井のバッジの `{色, 文言}`。距離・値なし・範囲外（spec Spec-safety.md §2 #3b） */
+/**
+ * 天井のバッジの `{色, 文言}`。昇降部の判定（`reason`）があればそれで出し、
+ * 無ければ自分で測った `status` で出す（protocol §4）
+ */
 function ceilingText(ceiling) {
   const value = ceiling || {};
-  if (value.reason === 'OUT_OF_RANGE') return {cls: '', text: '天井 範囲外'};
-  if (value.reason === 'CEILING_STALE' || value.mm === null || value.mm === undefined) {
-    return {cls: 'ng', text: '天井 値なし'};
+  const hasMm = value.mm !== null && value.mm !== undefined;
+  if (value.reason !== null && value.reason !== undefined) {
+    if (value.reason === 'OUT_OF_RANGE') return {cls: '', text: '天井 範囲外'};
+    if (value.reason === 'CEILING_STALE' || !hasMm) return {cls: 'ng', text: '天井 値なし'};
+    if (value.reason === 'CEILING_NEAR') return {cls: 'warn', text: `天井 ${value.mm} mm`};
+    return {cls: '', text: `天井 ${value.mm} mm`};
   }
-  if (value.reason === 'CEILING_NEAR') return {cls: 'warn', text: `天井 ${value.mm} mm`};
-  return {cls: '', text: `天井 ${value.mm} mm`};
+  if (value.status === 'MEASURED' && hasMm) return {cls: '', text: `天井 ${value.mm} mm`};
+  if (value.status === 'TOO_NEAR') return {cls: 'warn', text: '天井 近すぎ'};
+  if (value.status === 'NO_ECHO') return {cls: '', text: '天井 範囲外'};
+  return {cls: 'ng', text: '天井 値なし'};
+}
+
+/** 上端の検知の表示。`top_detect` が `true` でなければ「一時無効」（`W-1`）。出さないときは `null` */
+function topDetectText(lift) {
+  const value = lift || {};
+  return value.top_detect === true ? null : TOP_DETECT_OFF_TEXT;
+}
+
+/** 昇降の操作の持ち主の表示。`module`＝この画面（カメラモジュール）・`ui`＝昇降部の画面・`null`＝なし */
+function ownerText(owner) {
+  if (owner === 'module') return '持ち主 カメラモジュール';
+  if (owner === 'ui') return '持ち主 昇降部の画面';
+  return '持ち主 なし';
+}
+
+/** 昇降部の画面を開いている台数の表示 */
+function liftUiText(count) {
+  const number = Number(count);
+  return `昇降部の画面 ${isFinite(number) ? number : '—'}`;
+}
+
+/** 昇降部へのリンク。IP が分からないとき（名前が解決できない・偽物）は `null` */
+function liftLink(ip) {
+  if (typeof ip !== 'string' || ip === '' || !/^[0-9A-Za-z.:\-]+$/.test(ip)) return null;
+  return {href: `http://${ip}/`, text: `昇降部 ${ip}`};
+}
+
+/** 静止画（`hve_video` の `/snapshot`）の URL。**宿主は画面と同じ・ポートは映像と同じ**（spec §1.5.1） */
+function snapshotUrl(protocol, hostname, port) {
+  return `${protocol}//${hostname}:${port}/snapshot`;
+}
+
+/** 昇降の状態の表示。動いている間は目標と測った速さ [mm/s]（`speed_meas` が無ければ目標だけ） */
+function liftStateText(lift) {
+  const value = lift || {};
+  if (value.dir === 'up' || value.dir === 'down') {
+    const word = value.dir === 'up' ? '上昇中' : '下降中';
+    const target = Number(value.speed);
+    if (!isFinite(target)) return `${word}`;
+    // `speed_meas` が無い（`null` を含む）ときは目標だけ
+    if (value.speed_meas === null || value.speed_meas === undefined) return `${word} ${Math.round(target)} mm/s`;
+    const meas = Number(value.speed_meas);
+    if (!isFinite(meas)) return `${word} ${Math.round(target)} mm/s`;
+    return `${word} ${Math.round(target)} mm/s（測定 ${Math.round(meas)} mm/s）`;
+  }
+  return value.bottom ? '停止中・下端' : '停止中';
 }
 
 /** 高さの OSD の文言。読めない値と値なしを区別する */
@@ -134,13 +195,14 @@ function heightText(lift) {
 
 /**
  * その軸のボタンを薄くするか。
- * 昇降部と切れている・天井の `ok` が `false` のときは上昇、下端のときは下降
+ * 昇降部と切れている・天井の判定が `ok: false` のときは上昇（判定が無いだけでは薄くしない）、
+ * 下端のときは下降
  */
 function holdBlocked(state, axis) {
   const value = state || {};
   const lift = value.lift || {};
   const ceiling = value.ceiling || {};
-  if (axis === 'lift_up') return lift.link !== 'ok' || ceiling.ok !== true;
+  if (axis === 'lift_up') return lift.link !== 'ok' || ceiling.ok === false;
   if (axis === 'lift_down') return lift.bottom === true;
   return false;
 }
@@ -160,8 +222,9 @@ let current_settings = null;// GET /api/settings の結果
 let current_speeds = null;  // 軸ごとのスライダーの値
 let hold_timer = null;      // `hold` を送り続けるタイマー
 let hold_axis = null;       // いま押している軸
-let video_port = null;      // 映像のポート（`state` から）
+let video_port = null;      // 映像のポート（`state` から。静止画も同じポート）
 let video_probe_timer = null;
+let video_probe_failures = 0; // 確かめが続けて失敗した回数
 let sliders = null;
 let outs = null;
 
@@ -286,6 +349,24 @@ function bindHoldButtons() {
   });
 }
 
+/* --- 静止画（spec §1.5.1。押した端末だけ・映像の上に重ねる） --- */
+
+/** 静止画を取り寄せて重ねて出す。映像のポートが分からないうちは何もしない */
+function openSnapshot() {
+  if (video_port === null) return;
+  const image = $('snapImage');
+  $('snapMsg').textContent = '取得中…';
+  $('snapMsg').style.display = '';
+  image.style.visibility = 'hidden';
+  image.src = snapshotUrl(location.protocol, location.hostname, video_port);
+  $('snapshot').classList.add('show');
+}
+
+function closeSnapshot() {
+  $('snapshot').classList.remove('show');
+  $('snapImage').removeAttribute('src');
+}
+
 /* --- 描画 --- */
 
 function setBadge(element, cls, text) {
@@ -306,6 +387,16 @@ function attachStream() {
   scheduleProbe();
 }
 
+/**
+ * 確かめの結果から、続けて失敗した回数と「映像がありません」を出すかを決める（純関数）。
+ * 成功したら 0 に戻す。`video_probe_fail_count` 回続けて失敗するまでは出さない。
+ */
+function probeOutcome(failures, ok) {
+  if (ok) return {failures: 0, hide: false};
+  const next = failures + 1;
+  return {failures: next, hide: next >= video_probe_fail_count};
+}
+
 function scheduleProbe() {
   if (video_probe_timer !== null) clearTimeout(video_probe_timer);
   video_probe_timer = setTimeout(probeStream, video_probe_ms);
@@ -314,24 +405,31 @@ function scheduleProbe() {
 /**
  * 配信が居るかを `video_probe_ms` ごとに見る。**MJPEG は配信が止まっても `<img>` に
  * `error` が来ず最後のフレームが残る**ので、`<img>` とは別に接続だけ試す（応答の先頭が
- * 来たらすぐ切る）。居なければ `<img>` を隠して「映像がありません」、居るのに映像が無ければ取り直す。
+ * 来たらすぐ切る）。`video_probe_fail_count` 回続けて居なければ `<img>` を隠して「映像がありません」（それまでは何も変えない）、居るのに映像が無ければ取り直す。
  */
 async function probeStream() {
   video_probe_timer = null;
   const image = $('videoImage');
   const controller = new AbortController();
   const giveup = setTimeout(() => controller.abort(), video_probe_ms);
+  let ok = true;
   try {
     await fetch(streamUrl(location.protocol, location.hostname, video_port),
       {mode: 'no-cors', cache: 'no-store', signal: controller.signal});
     clearTimeout(giveup);
     controller.abort();
+  } catch (err) {
+    clearTimeout(giveup);
+    ok = false;
+  }
+  const outcome = probeOutcome(video_probe_failures, ok);
+  video_probe_failures = outcome.failures;
+  if (ok) {
     if (!image.classList.contains('ready')) {
       attachStream(); // 配信が居るのに映像が無い: 取り直す（次の見直しも attachStream が入れる）
       return;
     }
-  } catch (err) {
-    clearTimeout(giveup);
+  } else if (outcome.hide) {
     image.classList.remove('ready');
     $('nosig').classList.add('show');
   }
@@ -355,7 +453,17 @@ function render() {
   setBadge($('bCeil'), ceiling.cls, ceiling.text);
   $('bClients').lastElementChild.textContent = `端末 ${state.clients}`;
   $('bProv').style.display = state.provisional && state.provisional.length ? '' : 'none';
-  $('bTop').style.display = lift.top_mm === null ? '' : 'none';
+  const topText = topDetectText(lift);
+  $('bTop').style.display = topText ? '' : 'none';
+  if (topText) $('bTop').lastElementChild.textContent = topText;
+  $('bOwner').lastElementChild.textContent = ownerText(lift.owner);
+  $('bLiftUi').lastElementChild.textContent = liftUiText(lift.ui_clients);
+  const link = liftLink(lift.lift_ip);
+  $('bLiftLink').style.display = link ? '' : 'none';
+  if (link) {
+    $('bLiftLink').href = link.href;
+    $('bLiftLink').textContent = link.text;
+  }
   $('bFake').style.display = state.fake ? '' : 'none';
 
   $('osdH').textContent = heightText(lift);
@@ -371,19 +479,20 @@ function render() {
     bar.className = 'stopbar';
   }
 
-  if (lift.dir === 'up') $('liftState').textContent = `上昇中 ${lift.duty}%`;
-  else if (lift.dir === 'down') $('liftState').textContent = `下降中 ${lift.duty}%`;
+  if (lift.dir === 'up' || lift.dir === 'down') $('liftState').textContent = liftStateText(lift);
   else $('liftState').textContent = lift.bottom ? '停止中・下端' : '停止中';
 
   document.querySelector('[data-axis=lift_up]').classList.toggle('blocked', holdBlocked(state, 'lift_up'));
   document.querySelector('[data-axis=lift_down]').classList.toggle('blocked', holdBlocked(state, 'lift_down'));
 
   // 高さのゲージ。上端が設定されたら上端の線と満量に使う
-  const full = lift.top_mm === null ? lift_gauge_full_mm : lift.top_mm;
+  // v2 の昇降部は上端の高さを返さない（`W-1`）。値があるときだけ上端の線と満量に使う
+  const hasTop = isFinite(Number(lift.top_mm)) && lift.top_mm !== null && Number(lift.top_mm) > 0;
+  const full = hasTop ? Number(lift.top_mm) : lift_gauge_full_mm;
   const height = lift.height_ok === false ? 0 : Number(lift.height_mm) || 0;
   $('gFill').style.height = `${Math.min(100, Math.max(0, (height / full) * 100))}%`;
-  $('gTop').style.display = lift.top_mm === null ? 'none' : '';
-  $('gTop').style.bottom = `${Math.min(100, Math.max(0, (lift.top_mm / full) * 100))}%`;
+  $('gTop').style.display = hasTop ? '' : 'none';
+  if (hasTop) $('gTop').style.bottom = `${Math.min(100, Math.max(0, (Number(lift.top_mm) / full) * 100))}%`;
 
   // 倍率は `state.zoom` からだけ取る（画面が覚えない。spec §1.5）
   $('zLvl').textContent = `${Number(state.zoom).toFixed(1)}×`;
@@ -436,6 +545,18 @@ function initApp() {
     applySettings(event.detail);
   });
 
+  $('snapBtn').addEventListener('click', openSnapshot);
+  $('snapClose').addEventListener('click', closeSnapshot);
+  $('snapImage').addEventListener('load', () => {
+    $('snapImage').style.visibility = 'visible';
+    $('snapMsg').style.display = 'none';
+  });
+  $('snapImage').addEventListener('error', () => {
+    $('snapImage').style.visibility = 'hidden';
+    $('snapMsg').textContent = '静止画を取得できません';
+    $('snapMsg').style.display = '';
+  });
+
   const image = $('videoImage');
   // フレームが来た!: `ready` を付けて「映像がありません」を消す
   image.addEventListener('load', () => {
@@ -465,5 +586,7 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, zoomMessage, zoomTarget, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
+    topDetectText, ownerText, liftUiText, liftLink, snapshotUrl, liftStateText,
+    probeOutcome,
   };
 }

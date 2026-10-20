@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import time
+
 import cv2
 import numpy as np
 import pytest
@@ -11,45 +15,6 @@ from hve_video import sources
 # 取り込みの大きさ（DetailedDesign-names.md §5 の video_capture_width /
 # video_capture_height と同じものと、試験しやすい小さいのを混ぜる）
 CAPTURES = [(320, 240), (641, 481), (1920, 1080)]
-
-
-class _RecordingCapture:
-    """`cv2.VideoCapture` の代わり。要求されたプロパティを覚えておく。"""
-
-    def __init__(self, opened: bool = True, frame: np.ndarray | None = None):
-        self._opened = opened
-        self._frame = frame
-        self.properties: list[tuple[int, float]] = []
-        self.released = 0
-
-    def isOpened(self) -> bool:
-        return self._opened
-
-    def set(self, prop: int, value: float) -> bool:
-        self.properties.append((prop, value))
-        return True
-
-    def read(self):
-        if self._frame is None:
-            return False, None
-        return True, self._frame
-
-    def release(self) -> None:
-        self.released += 1
-
-
-@pytest.fixture
-def capture_factory(monkeypatch):
-    """`cv2.VideoCapture` を偽物に差し替え、開いた機器番号を覚えるようにする。"""
-    opened: list[tuple[int, _RecordingCapture]] = []
-
-    def factory(device: int) -> _RecordingCapture:
-        capture = _RecordingCapture(frame=np.zeros((4, 4, 3), dtype=np.uint8))
-        opened.append((device, capture))
-        return capture
-
-    monkeypatch.setattr(sources.cv2, "VideoCapture", factory)
-    return opened
 
 
 @pytest.mark.parametrize("capture", CAPTURES)
@@ -97,50 +62,17 @@ def test_fake_source_rejects_a_zero_size():
         sources.FakeSource(0, 240)
 
 
-def test_v4l2_source_requests_mjpeg_and_the_capture_size(capture_factory):
-    sources.V4L2Source(1920, 1080, device=2)
-    assert [device for device, _ in capture_factory] == [2]
-    properties = capture_factory[0][1].properties
-    # 4CC を先にして、そのあとで取り込みの大きさ（V4L2 の指定のしかたに合わせる）
-    assert properties[0][0] == cv2.CAP_PROP_FOURCC
-    assert properties[0][1] == cv2.VideoWriter_fourcc(*"MJPG")
-    assert (cv2.CAP_PROP_FRAME_WIDTH, 1920) in properties
-    assert (cv2.CAP_PROP_FRAME_HEIGHT, 1080) in properties
+def test_fake_source_latest_jpeg_is_a_jpeg_of_the_capture_size():
+    source = sources.FakeSource(320, 240)
+    source.read()
+    jpeg = source.latest_jpeg()
+    assert jpeg[:2] == b"\xff\xd8" and jpeg[-2:] == b"\xff\xd9"
+    frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert frame.shape == (240, 320, 3)
 
 
-def test_v4l2_source_read_returns_the_frame(monkeypatch):
-    frame = np.zeros((8, 8, 3), dtype=np.uint8)
-    monkeypatch.setattr(
-        sources.cv2, "VideoCapture", lambda device: _RecordingCapture(frame=frame)
-    )
-    assert sources.V4L2Source(8, 8).read() is frame
-
-
-def test_v4l2_source_read_returns_none_when_it_fails(monkeypatch):
-    monkeypatch.setattr(sources.cv2, "VideoCapture", lambda device: _RecordingCapture())
-    assert sources.V4L2Source(8, 8).read() is None
-
-
-def test_v4l2_source_raises_when_the_camera_cannot_be_opened(monkeypatch):
-    monkeypatch.setattr(
-        sources.cv2, "VideoCapture", lambda device: _RecordingCapture(opened=False)
-    )
-    with pytest.raises(RuntimeError):
-        sources.V4L2Source(8, 8)
-
-
-def test_v4l2_source_releases_the_camera_when_it_cannot_be_opened(monkeypatch):
-    captures = []
-
-    def factory(device):
-        capture = _RecordingCapture(opened=False)
-        captures.append(capture)
-        return capture
-
-    monkeypatch.setattr(sources.cv2, "VideoCapture", factory)
-    with pytest.raises(RuntimeError):
-        sources.V4L2Source(8, 8)
-    assert captures[0].released == 1
+def test_fake_source_latest_jpeg_is_available_before_the_first_read():
+    assert sources.FakeSource(320, 240).latest_jpeg() is not None
 
 
 def test_open_source_picks_the_fake_image_series():
@@ -149,45 +81,259 @@ def test_open_source_picks_the_fake_image_series():
     assert source.capture_size == (320, 240)
 
 
-def test_open_source_picks_the_real_camera(monkeypatch):
-    monkeypatch.setattr(
-        sources.cv2, "VideoCapture", lambda device: _RecordingCapture(opened=True)
-    )
-    assert isinstance(sources.open_source(False, 320, 240), sources.V4L2Source)
+# --- split_mjpeg --------------------------------------------------------------------------
 
 
-# --- カメラの選び方 -----------------------------------------------------------------------
+def jpeg_of(level: int, size=(64, 48)) -> bytes:
+    """一様な灰色の JPEG。`level` で 1 枚ずつ見分ける。"""
+    image = np.full((size[1], size[0], 3), level, dtype=np.uint8)
+    ok, buffer = cv2.imencode(".jpg", image)
+    assert ok
+    return buffer.tobytes()
 
 
-def test_find_camera_device_picks_the_usb_camera_by_name(tmp_path):
-    """**`/dev/videoN` の番号ではなく、名前（`*-video-index0`）で選ぶ**（挿し直しで番号が変わる）。"""
-    (tmp_path / "usb-Image+_UGREEN_Camera_4K_LL-0000000001-video-index1").touch()
-    wanted = tmp_path / "usb-Image+_UGREEN_Camera_4K_LL-0000000001-video-index0"
-    wanted.touch()
-    assert sources.find_camera_device(tmp_path) == str(wanted)
+V4L2_TEXT = b"VIDIOC_S_PARM: ok\nFrame rate set to 10.000 fps\n<<<<"
 
 
-def test_find_camera_device_falls_back_to_zero(tmp_path):
-    """名前で見つからなければ従来どおり 0 番（ディレクトリが無くても落ちない）。"""
-    assert sources.find_camera_device(tmp_path) == 0
-    assert sources.find_camera_device(tmp_path / "missing") == 0
+def test_split_mjpeg_splits_every_frame():
+    a, b, c = jpeg_of(10), jpeg_of(100), jpeg_of(200)
+    frames, rest = sources.split_mjpeg(a + b + c)
+    assert frames == [a, b, c]
+    assert rest == b""
 
 
-def test_open_source_opens_the_camera_found_by_name(monkeypatch):
-    """**実物を開くときは `find_camera_device` の結果を渡す**（経路を縛る）。"""
-    opened = []
+def test_split_mjpeg_drops_the_text_before_the_first_frame():
+    """**`v4l2-ctl` は標準出力の頭に文字を出す。`FFD8` より前は捨てる。**"""
+    a, b = jpeg_of(10), jpeg_of(100)
+    frames, rest = sources.split_mjpeg(V4L2_TEXT + a + b)
+    assert frames == [a, b]
+    assert frames[0][:2] == b"\xff\xd8"
+    assert rest == b""
 
-    class FakeCapture:
-        def __init__(self, device):
-            opened.append(device)
 
-        def isOpened(self):
+def test_split_mjpeg_drops_bytes_between_frames():
+    a, b = jpeg_of(10), jpeg_of(100)
+    frames, _ = sources.split_mjpeg(a + b"garbage" + b)
+    assert frames == [a, b]
+
+
+def test_split_mjpeg_returns_only_text_as_nothing_to_keep():
+    assert sources.split_mjpeg(V4L2_TEXT) == ([], b"")
+
+
+def test_split_mjpeg_keeps_an_unfinished_frame_as_the_rest():
+    a, b = jpeg_of(10), jpeg_of(100)
+    frames, rest = sources.split_mjpeg(a + b[:30])
+    assert frames == [a]
+    assert rest == b[:30]
+    frames, rest = sources.split_mjpeg(rest + b[30:])
+    assert frames == [b]
+    assert rest == b""
+
+
+def test_split_mjpeg_keeps_a_marker_split_across_reads():
+    a = jpeg_of(10)
+    frames, rest = sources.split_mjpeg(V4L2_TEXT + b"\xff")
+    assert (frames, rest) == ([], b"\xff")
+    frames, rest = sources.split_mjpeg(rest + a[1:])
+    assert frames == [a]
+
+
+def test_split_mjpeg_drops_a_truncated_frame():
+    """途中で切れた 1 枚（終わりの前に次の始まりが来る）は捨て、次の 1 枚は返す。"""
+    a, b = jpeg_of(10), jpeg_of(100)
+    frames, rest = sources.split_mjpeg(a[: len(a) // 2] + b)
+    assert frames == [b]
+    assert rest == b""
+
+
+def test_split_mjpeg_returns_decodable_frames():
+    frames, _ = sources.split_mjpeg(V4L2_TEXT + b"".join(jpeg_of(v) for v in (0, 90, 250)))
+    assert len(frames) == 3
+    for frame, level in zip(frames, (0, 90, 250)):
+        decoded = cv2.imdecode(np.frombuffer(frame, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert abs(int(decoded.mean()) - level) <= 3
+
+
+# --- MjpegPipeSource（`v4l2-ctl` の代わりにパイプを使う） ----------------------------------
+
+
+class PipeChild:
+    """`subprocess.Popen` の代わり。標準出力はパイプで、試験が書き込む。"""
+
+    def __init__(self):
+        read_fd, self.write_fd = os.pipe()
+        self.stdout = os.fdopen(read_fd, "rb")
+        self.terminated = False
+
+    def feed(self, data: bytes) -> None:
+        os.write(self.write_fd, data)
+
+    def poll(self):
+        return 0 if self.terminated else None
+
+    def terminate(self):
+        if not self.terminated:
+            self.terminated = True
+            os.close(self.write_fd)  # 標準出力が閉じ、区切りのスレッドが抜ける
+
+    def kill(self):
+        self.terminate()
+
+    def wait(self, timeout=None):
+        return 0
+
+
+class Spawner:
+    def __init__(self):
+        self.children: list[PipeChild] = []
+        self.calls: list[list[str]] = []
+
+    def __call__(self, command, **kwargs):
+        assert kwargs["stdout"] == subprocess.PIPE
+        self.calls.append(command)
+        child = PipeChild()
+        self.children.append(child)
+        return child
+
+
+def wait_until(predicate, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
             return True
+        time.sleep(0.01)
+    return False
 
-        def set(self, *_args):
-            return True
 
-    monkeypatch.setattr(sources.cv2, "VideoCapture", FakeCapture)
-    monkeypatch.setattr(sources, "find_camera_device", lambda: "/dev/v4l/by-id/cam-video-index0")
-    sources.open_source(False, 320, 240)
-    assert opened == ["/dev/v4l/by-id/cam-video-index0"]
+@pytest.fixture
+def pipe_source():
+    spawner = Spawner()
+    made: list[sources.MjpegPipeSource] = []
+
+    def make(**kwargs):
+        source = sources.MjpegPipeSource(
+            1280, 720, 10, "/dev/video0", spawn=spawner, read_timeout=0.3, **kwargs
+        )
+        made.append(source)
+        assert wait_until(lambda: spawner.children)
+        return source
+
+    make.spawner = spawner
+    yield make
+    for source in made:
+        source.release()
+
+
+def test_mjpeg_pipe_source_runs_v4l2_ctl_with_the_capture_options(pipe_source):
+    source = pipe_source()
+    command = pipe_source.spawner.calls[0]
+    assert command == source.command
+    assert command[0] == "v4l2-ctl"
+    assert command[1:3] == ["-d", "/dev/video0"]
+    assert "--set-fmt-video=width=1280,height=720,pixelformat=MJPG" in command
+    assert "--set-parm=10" in command
+    assert "--stream-mmap=4" in command
+    assert "--stream-to=-" in command
+    assert not any("ffmpeg" in part for part in command)
+
+
+def test_mjpeg_pipe_source_has_no_snapshot_before_the_first_frame(pipe_source):
+    source = pipe_source()
+    assert source.latest_jpeg() is None
+    assert source.read() is None  # 待っても来なければ None
+
+
+def test_mjpeg_pipe_source_skips_the_text_and_decodes(pipe_source):
+    source = pipe_source()
+    pipe_source.spawner.children[0].feed(V4L2_TEXT + jpeg_of(120))
+    frame = source.read()
+    assert frame is not None
+    assert frame.shape == (48, 64, 3)
+    assert abs(int(frame.mean()) - 120) <= 3
+
+
+def test_mjpeg_pipe_source_latest_jpeg_is_the_camera_jpeg_untouched(pipe_source):
+    source = pipe_source()
+    first, second = jpeg_of(50, (1280, 720)), jpeg_of(150, (1280, 720))
+    pipe_source.spawner.children[0].feed(V4L2_TEXT + first + second)
+    assert wait_until(lambda: source.latest_jpeg() == second)
+
+
+def test_mjpeg_pipe_source_read_uses_only_the_latest_frame(pipe_source):
+    """**作り直しは最新の 1 枚だけを使う。** 溜まった古い 1 枚を順に返してはいけない。"""
+    source = pipe_source()
+    levels = [10, 60, 110, 160, 210]
+    pipe_source.spawner.children[0].feed(b"".join(jpeg_of(v) for v in levels))
+    assert wait_until(lambda: source.latest_jpeg() == jpeg_of(levels[-1]))
+    frame = source.read()
+    assert abs(int(frame.mean()) - levels[-1]) <= 3, "古い 1 枚を返した"
+    assert source.read() is None, "同じ 1 枚か、溜まっていた古い 1 枚を返した"
+
+
+def test_mjpeg_pipe_source_does_not_return_the_same_frame_twice(pipe_source):
+    source = pipe_source()
+    child = pipe_source.spawner.children[0]
+    child.feed(jpeg_of(40))
+    assert source.read() is not None
+    assert source.read() is None
+    child.feed(jpeg_of(200))
+    frame = source.read()
+    assert abs(int(frame.mean()) - 200) <= 3
+
+
+def test_mjpeg_pipe_source_drops_a_frame_it_cannot_decode(pipe_source):
+    source = pipe_source()
+    child = pipe_source.spawner.children[0]
+    child.feed(b"\xff\xd8not a jpeg\xff\xd9")
+    assert source.read() is None
+    child.feed(jpeg_of(90))
+    frame = source.read()
+    assert frame is not None and abs(int(frame.mean()) - 90) <= 3
+
+
+def test_mjpeg_pipe_source_survives_a_truncated_frame(pipe_source):
+    source = pipe_source()
+    child = pipe_source.spawner.children[0]
+    child.feed(jpeg_of(30)[:40] + jpeg_of(130))
+    frame = source.read()
+    assert frame is not None and abs(int(frame.mean()) - 130) <= 3
+
+
+def test_mjpeg_pipe_source_updates_the_latest_frame_without_read(pipe_source):
+    """区切りは `read()` と別スレッド。`read()` が呼ばれなくても最新の 1 枚が更新される。"""
+    source = pipe_source()
+    child = pipe_source.spawner.children[0]
+    for level in (20, 80, 140):
+        child.feed(jpeg_of(level))
+        assert wait_until(lambda: source.latest_jpeg() == jpeg_of(level))
+
+
+def test_mjpeg_pipe_source_restarts_the_child_when_it_dies(pipe_source):
+    source = pipe_source(respawn_wait=0.05)
+    pipe_source.spawner.children[0].terminate()
+    assert wait_until(lambda: len(pipe_source.spawner.children) == 2)
+    pipe_source.spawner.children[1].feed(jpeg_of(77))
+    frame = source.read()
+    assert frame is not None and abs(int(frame.mean()) - 77) <= 3
+
+
+def test_mjpeg_pipe_source_release_stops_the_child(pipe_source):
+    source = pipe_source()
+    source.release()
+    assert pipe_source.spawner.children[0].terminated
+    assert not source._reader.is_alive()
+    assert source.read() is None
+
+
+def test_open_source_picks_the_real_camera_with_the_params(monkeypatch):
+    made = []
+
+    class Recorded:
+        def __init__(self, *args):
+            made.append(args)
+
+    monkeypatch.setattr(sources, "MjpegPipeSource", Recorded)
+    source = sources.open_source(False, 1280, 720, 10, "/dev/video0")
+    assert isinstance(source, Recorded)
+    assert made == [(1280, 720, 10, "/dev/video0")]

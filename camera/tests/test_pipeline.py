@@ -149,3 +149,11 @@ def test_release_releases_the_source():
     pipeline = make_pipeline(1.0)
     pipeline.release()
     assert pipeline.next_frame() is None
+
+
+def test_latest_jpeg_is_the_source_jpeg_not_the_rebuilt_one():
+    # 静止画は取り込みの大きさのまま（作り直した出力の大きさではない）
+    pipeline = make_pipeline(4.0)
+    pipeline.jpeg_bytes()
+    frame = cv2.imdecode(np.frombuffer(pipeline.latest_jpeg(), dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert (frame.shape[1], frame.shape[0]) == CAPTURE

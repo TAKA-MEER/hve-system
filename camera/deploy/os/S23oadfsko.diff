@@ -1,0 +1,11 @@
+--- a/S23oadfsko
++++ b/S23oadfsko
+@@ -4,7 +4,7 @@
+         start)
+                 printf "Loading kernel modules: "
+                 for kofile in /lib/modules/*.ko
+-                    do /sbin/insmod $kofile
++                    do [ "$kofile" = /lib/modules/grace.ko ] && continue; /sbin/insmod $kofile
+                 done
+                 [ $? = 0 ] && echo "OK" || echo "FAIL"
+                 ;;

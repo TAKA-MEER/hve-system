@@ -10,19 +10,33 @@
 
 // --- ピン（DetailedDesign-hardware.md §1。ストラッピングの 0・2・5・12・15 は避ける）---
 
-// MD10C（DIR + PWM の 2 線）。先行試作と同じ
-constexpr uint8_t MOTOR_DIR_PIN = 14;
-constexpr uint8_t MOTOR_PWM_PIN = 32;
+// MD10C（DIR + PWM の 2 線）。先行試作から付け替えた（2026-10-16）
+constexpr uint8_t MOTOR_DIR_PIN = 27;
+constexpr uint8_t MOTOR_PWM_PIN = 14;
 // DIR = HIGH で上昇するか。**実機配線で確認するまで仮**（false にすると逆向きになる）
 constexpr bool MOTOR_DIR_UP_LEVEL = true;
 
 // 下端リミットスイッチ。**仮**。INPUT_PULLUP + 常時閉（NC）配線
-constexpr uint8_t BOTTOM_PIN = 27;
+constexpr uint8_t BOTTOM_PIN = 32;
 
-// HC-SR04。**仮**。TRIG は 3.3 V の出力でそのまま動く。
-// ECHO は 5 V が返るので、分圧（例 1 kΩ / 2 kΩ）で 3.3 V に落としてから入れる
-constexpr uint8_t SONAR_TRIG_PIN = 25;
-constexpr uint8_t SONAR_ECHO_PIN = 26;
+// 高さのエンコーダ E6A2-CW3C（DetailedDesign-hardware.md §1.1。**仮**）。
+// A/B 2 相・オープンコレクタ。3.3 V へ 2.2 kΩ でプルアップ（5 V へプルアップしない）
+constexpr uint8_t ENC_A_PIN = 25;
+constexpr uint8_t ENC_B_PIN = 26;
+// 要確認: 手元の個体の型番の末尾（100/200/360/500）
+constexpr int ENC_PPR = 360;
+// PCNT のノイズ除去の幅 [ns]。**仮**
+constexpr int ENC_GLITCH_FILTER_NS = 1000;
+// PCNT の上限・下限 [counts]。**仮**。ここに達するとハードウェアがカウンタを 0 に
+// 戻し、割り込みで溢れの累積へ移す（合計 = 溢れの累積 + 今のカウンタ）
+constexpr int ENC_PCNT_LIMIT = 30000;
+
+// 組み立て用ファーム（env:esp32dev_manual・台帳 W-2）の <on>-off-<on> スイッチ。**仮**。
+// 共通端子を GND、両側をそれぞれのピンへ。INPUT_PULLUP で受け、入っている側が LOW
+constexpr uint8_t MANUAL_SW_UP_PIN = 33;
+constexpr uint8_t MANUAL_SW_DOWN_PIN = 13;
+// 組み立て用ファームのデューティ [%]（固定。変えるときはここを直して書き込み直す）
+constexpr int MANUAL_DUTY_PCT = 40;
 
 // --- PWM（先行試作と同じ。LEDC ch0 / 5 kHz / 8 bit）---
 
@@ -30,19 +44,19 @@ constexpr uint8_t PWM_CH = 0;
 constexpr uint32_t PWM_FREQ_HZ = 5000;
 constexpr uint8_t PWM_RESOLUTION = 8;
 
-// --- HC-SR04 の測定周期（names.md §5。**仮**。1 回の測定に 60 ms 以上空ける）---
-
-constexpr uint32_t SONAR_PERIOD_MS = 100;
-
-// --- 状態の出し方（DetailedDesign-protocol.md §1・§2.3）---
+// --- 状態の出し方（DetailedDesign-protocol.md §1・§2.2）---
 
 constexpr uint32_t LIFT_STATE_PERIOD_MS = 100;  // **仮**
 constexpr uint16_t LIFT_HTTP_PORT = 80;
-constexpr const char* LIFT_WS_PATH = "/ws";
+// 口はコードの定数。設定で変えられるようにしない（DetailedDesign.md §3.1）
+constexpr const char* LIFT_WS_UI_PATH = "/ws/ui";
+constexpr const char* LIFT_WS_MODULE_PATH = "/ws/module";
+constexpr const char* LIFT_NVS_NAMESPACE = "hve_lift_mm";
+constexpr int LIFT_UI_CLIENTS_MAX = 4;  // **仮**。超えた接続は閉じる（WP-LIFT-04）
 constexpr const char* LIFT_MDNS_NAME = "hve-lift";  // names.md §2
 
-// state_encode のバッファ。**仮**（state の JSON は 200 バイト未満）
-constexpr size_t LIFT_STATE_TEXT_MAX = 256;
+// state_encode のバッファ。**仮**（v2 の state の JSON は 500 バイト前後）
+constexpr size_t LIFT_STATE_TEXT_MAX = 640;
 
 // WiFi の状態を見る周期。**仮**（無線が落ちていたら張り直すだけなので短くなくてよい）
 constexpr uint32_t LIFT_WIFI_POLL_MS = 5000;

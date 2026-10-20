@@ -1,22 +1,22 @@
-// 判定そのもの。DetailedDesign.md §4.1 の表。
+// 判定そのもの。docs/plan/detailed/DetailedDesign.md §4.1 の表。
 #include "lift_decide.h"
 
 namespace {
 
-int clamp_duty(int duty) {
-  if (duty < 0) {
+int clamp_speed(int speed_mm_s) {
+  if (speed_mm_s < 0) {
     return 0;
   }
-  if (duty > LIFT_DUTY_ABS_MAX_PCT) {
-    return LIFT_DUTY_ABS_MAX_PCT;
+  if (speed_mm_s > LIFT_SPEED_ABS_MAX_MM_S) {
+    return LIFT_SPEED_ABS_MAX_MM_S;
   }
-  return duty;
+  return speed_mm_s;
 }
 
 LiftDecideResult stop_with(StopReason reason) {
   LiftDecideResult result;
   result.dir = LiftDir::STOP;
-  result.duty = 0;
+  result.speed_mm_s = 0;
   result.reason = reason;
   return result;
 }
@@ -34,50 +34,67 @@ bool height_is_fresh(uint32_t now_ms, uint32_t height_at_ms) {
 }
 
 LiftDecideResult lift_decide(const LiftDecideInput& in) {
-  // 表 1 最後の指令から LIFT_CMD_TIMEOUT_MS 超（指令を一度も受けていない場合も同じ扱い）
+  // 表 1 持ち主がいない（命令を受けていない・離した・途絶えた・接続が閉じた）。
+  // 止める理由（CMD_STOP / CMD_TIMEOUT / OWNER_GONE）は呼び出し側が持ち、
+  // ここではそのまま出すだけ
   if (!in.has_cmd) {
-    return stop_with(StopReason::CMD_TIMEOUT);
-  }
-  // 経過が負（指令の時刻が now より新しい）なら「まだ来ていない」のでここで止めない
-  if (elapsed_ms(in.now_ms, in.cmd_received_at_ms) > static_cast<int32_t>(LIFT_CMD_TIMEOUT_MS)) {
-    return stop_with(StopReason::CMD_TIMEOUT);
+    return stop_with(in.owner_empty_reason);
   }
 
-  // 表 2 指令が stop
-  if (in.cmd.dir == LiftDir::STOP) {
+  // 表 2 持ち主の命令が stop
+  if (in.dir == LiftDir::STOP) {
     return stop_with(StopReason::CMD_STOP);
   }
 
-  // 表 3 上昇 かつ ceil_ok が true で無い
-  if (in.cmd.dir == LiftDir::UP && !in.cmd.ceil_ok) {
-    return stop_with(StopReason::CEILING);
+  // 表 3 上昇 かつ ceiling_check() が ok でない（距離計を持つ接続のときだけ判定）
+  if (in.dir == LiftDir::UP) {
+    const CeilingVerdict ceiling = ceiling_check(in.ceiling, in.now_ms, in.connection_has_sensor);
+    if (!ceiling.ok) {
+      return stop_with(ceiling.reason);
+    }
   }
 
-  // 表 4 上昇 かつ 高さが読めない・HEIGHT_STALE_MS 超
-  const bool height_usable = in.height_ok && height_is_fresh(in.now_ms, in.height_at_ms);
-  if (in.cmd.dir == LiftDir::UP && !height_usable) {
-    return stop_with(StopReason::HEIGHT_UNKNOWN);
+  // 表 4 上昇 かつ 高さが読めない・古い
+  // WAIVER(demo): W-1 上端の検知を一時無効（LIFT_TOP_DETECT_ENABLED が偽の間は判定しない）
+  if (LIFT_TOP_DETECT_ENABLED) {
+    const bool height_usable = in.height_ok && height_is_fresh(in.now_ms, in.height_at_ms);
+    if (in.dir == LiftDir::UP && !height_usable) {
+      return stop_with(StopReason::HEIGHT_UNKNOWN);
+    }
   }
 
   // 表 6 上昇 かつ 上端の閾値が設定済み（-1 なら判定しない）かつ 高さ ≧ 閾値
-  if (in.cmd.dir == LiftDir::UP && in.top_mm >= 0 && in.height_mm >= in.top_mm) {
-    return stop_with(StopReason::TOP);
+  // WAIVER(demo): W-1 上端の検知を一時無効（LIFT_TOP_DETECT_ENABLED が偽の間は判定しない）
+  if (LIFT_TOP_DETECT_ENABLED) {
+    if (in.dir == LiftDir::UP && in.top_mm >= 0 && in.height_mm >= in.top_mm) {
+      return stop_with(StopReason::TOP);
+    }
   }
 
   // 表 7 下降 かつ 下端スイッチが押されている
-  if (in.cmd.dir == LiftDir::DOWN && in.bottom_pressed) {
+  if (in.dir == LiftDir::DOWN && in.bottom_pressed) {
     return stop_with(StopReason::BOTTOM);
   }
 
-  // 表 8 同じ方向へ LIFT_MAX_RUN_MS 超 連続
+  // 表 8 同じ方向へ LIFT_MAX_RUN_MS 超 連続。
+  // 持ち主が替わっても数え直さない（同じ方向が続く限り数え続ける。
+  // 持ち主を交互に替えて上限を逃れられないように）
   if (in.run_ms > LIFT_MAX_RUN_MS) {
     return stop_with(StopReason::MAX_RUN);
   }
 
-  // 表 9 それ以外。指令どおりに動かして、デューティは 0〜LIFT_DUTY_ABS_MAX_PCT に丸める
+  // 表 8a 同じ方向の命令が続く間に、モータへ出力しているのに LIFT_STALL_MS の間
+  // エンコーダが進行方向へ LIFT_STALL_MIN_COUNTS 未満しか進まない（逆向きも）。
+  // 数え方は #8 と同じく、命令が stop になるか向きが替わるまで続ける
+  if (in.stalled) {
+    return stop_with(StopReason::ENCODER_STALL);
+  }
+
+  // 表 9 それ以外。指令どおりの向き。速さは 0〜LIFT_SPEED_ABS_MAX_MM_S に丸め、
+  // SpeedLoop がデューティに直す
   LiftDecideResult result;
-  result.dir = in.cmd.dir;
-  result.duty = clamp_duty(in.cmd.duty);
+  result.dir = in.dir;
+  result.speed_mm_s = clamp_speed(in.speed_mm_s);
   result.reason = StopReason::NONE;
   return result;
 }

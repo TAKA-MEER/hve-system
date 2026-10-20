@@ -1,113 +1,258 @@
-# 作業パケット
+# 作業パケット（v2）
 
 [DetailedDesign.md](DetailedDesign.md) §5 の詳細。**1 パケット ＝ 1 ブリーフ ＝ 1 ブランチ**
-（[ImplementationPlan.md](../ImplementationPlan.md) §2）。状態は ImplementationPlan §4 で管理する。
+（[ImplementationPlan.md](../ImplementationPlan.md) §2）。旧版は [archive/v1/detailed/DetailedDesign-packets.md](../archive/v1/detailed/DetailedDesign-packets.md)。
+**ID は旧版の続きから振った。旧版の ID を別の意味で使わない**（`WP-MEAS-01`〜`05` だけは意味が同じなので引き継ぐ）。
 
 ---
 
 ## 0. 全パケット共通の約束
 
-- **読むのは、そのパケットの「読む節」だけ。**名前は [-names.md](DetailedDesign-names.md) にあるものだけを使う
-- **受け入れ条件はすべてコマンド。**「変異」の行は、**そのとおりに実装を壊したら試験が赤くなる**ことを求める
-  （管理担当が自分で壊して確かめる）
-- **th-system のリポジトリには触らない**
-- 一時ファイルは `.briefs/tmp/`。`/tmp` を使わない
-- 仮値は [-names.md](DetailedDesign-names.md) §5 の値をそのまま使う。変えるなら先にそちらを直す
+旧版 §0 の約束（読む節だけ読む・名前は -names.md にあるものだけ・受け入れはコマンド・変異で赤・th-system に触らない・一時ファイルは `.briefs/tmp/`・仮値は -names.md のまま）に加えて:
 
-共通のコマンド（リポジトリ直下から）:
+- **触ったファイルのコメントにある設計書への参照を v2 に直す**（`docs/plan/detailed/…` は v2 を指すようになった。旧版を指したいときは `docs/plan/archive/v1/…`）
+- **カメラモジュールのアプリ（`camera/`）は Python 3.8 で動く書き方にする**（`DD-7`）。試験は `.venv38` で回す
+- **`WAIVER(demo): W-1` のタグは台帳と 1 対 1**（[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)）。勝手に増やさない・消さない
+
+共通のコマンド（リポジトリ直下から。`WP-BASE-02` のあと）:
 
 ```bash
-pio test -d firmware/lift -e native                   # 昇降部のホスト試験
-pio run  -d firmware/lift -e esp32dev                 # 昇降部のビルド
-.venv/bin/python -m pytest camera/tests              # カメラ部の試験（.venv の作り方は DetailedDesign.md §4.5）
+pio test -d firmware/lift   -e native      # 昇降部のホスト試験
+pio run  -d firmware/lift   -e esp32dev    # 昇降部のビルド
+pio test -d firmware/cam_io -e native      # Arduino のホスト試験
+pio run  -d firmware/cam_io -e uno         # Arduino のビルド
+.venv38/bin/python -m pytest camera/tests  # カメラモジュール（Python 3.8）
+.venv/bin/python -m pytest tools/tests     # 道具
+node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 ```
 
 ## 1. 一覧
 
 | ID | 段階 | 内容 | 先に要るもの | 実機 |
 | --- | --- | --- | --- | --- |
-| `WP-BASE-01` | 0 | リポジトリの骨格・試験の土台・`CLAUDE.md` のビルドと試験の節 | — | 不要 |
-| `WP-MEAS-01` | 0 | **先行試作で**ストローク・全行程の時間・高さの超音波の読み値を測り、`LIFT_TOP_MM` の候補を出す | — | 要 |
-| `WP-LIFT-01` | 1 | `lift_core`（判定・コントローラ・コーデック）とホスト試験 | BASE-01 | 不要 |
-| `WP-LIFT-02` | 1 | ESP32 の実物（HAL・`main.cpp`・WS）。`tools/lift_probe.py` | LIFT-01 | 要 |
-| `WP-CAM-01` | 2 | カメラ部の純ロジック（天井・設定・軸） | BASE-01 | 不要 |
-| `WP-CAM-02` | 2 | 制御ループ・昇降部との接続・アプリ・**偽物のモード** | CAM-01 | 不要 |
-| `WP-VIDEO-01` | 2 | 映像の配信プロセス（取り込み・中央の切り出し・縮小・MJPEG・倍率の受け付け） | BASE-01 | 不要（偽の画像列） |
-| `WP-CAM-03` | 2 | 実物のサーボ・ステッピング・超音波・カメラ・systemd | CAM-02・VIDEO-01 | 要 |
-| `WP-UI-01` | 3 | 操作画面と設定画面 | CAM-02 | 不要（偽物のモード） |
-| `WP-MEAS-02` | 4 | 映像の遅延（`H-V6`） | CAM-03 | 要 |
-| `WP-MEAS-03` | 4 | **th-system と同時に動かして無線を圧迫しないか**（`H-A8`） | CAM-03 | 要（th-system も） |
-| `WP-MEAS-04` | 4 | 「古い」とみなす時間・天井の余裕の実測（`H-V8`） | LIFT-02・CAM-03 | 要 |
-| `WP-MEAS-05` | 4 | モバイルバッテリの持ち時間（`H-V7`） | CAM-03 | 要 |
+| `WP-MEAS-06` | 0 | **UnitV2 の実機調査**（[-hardware.md](DetailedDesign-hardware.md) §2.1.1 を全部埋める）。**2026-10-06・07 に実施**（UART の電圧・UNO との双方向も済み。2 の再起動後の STA は繋がらないことがあり、対策 `P-13` を `WP-CAM-05` で確かめる） | — | 要（UnitV2・UNO） |
+| `WP-BASE-02` | 0 | `.venv38`・`firmware/cam_io` の骨格・`CLAUDE.md` のビルドと試験の節 | — | 不要 |
+| `WP-LIFT-03` | 1 | `lift_core` v2（`ceiling_check`・`LiftArbiter`・`lift_settings`・判定の変更・`W-1`・`cmd_codec`） | BASE-02 | 不要 |
+| `WP-LIFTUI-01` | 1 | 昇降部の画面・`tools/fake_lift_server.py`・`tools/lift_probe.py` の v2 化 | LIFT-03（取り決めの確定） | 不要 |
+| `WP-LIFT-04` | 1 | ESP32 の実物 v2（WS の 2 つの口・HTTP の設定 API・NVS・画面の埋め込み） | LIFT-03・LIFTUI-01 | 要（昇降部） |
+| `WP-IO-01` | 2 | `io_core`（行・ウォッチドッグ・丸め・刻み）とホスト試験 | BASE-02 | 不要 |
+| `WP-IO-02` | 2 | UNO の実物（Timer2・Timer1 の PWM・`Wire`・ウォッチドッグ） | IO-01 | 要（UNO・モータ・SRF02） |
+| `WP-CAM-04` | 3 | カメラモジュールのアプリを Python 3.8 へ移し、v2 の取り決めにする（`uno_link`・`uno_hw`・`lift_link`・設定の中継・偽物のモード） | BASE-02・LIFT-03・**MEAS-06 の 1・2・5** | 不要 |
+| `WP-VIDEO-02` | 3 | 映像を UnitV2 の取り込みに合わせる | MEAS-06 | 要（UnitV2） |
+| `WP-VIDEO-03` | 5 | **配信を 1 か所の作り直しにまとめ、送れない接続を切る**（2026-10-19 の実機調査） | VIDEO-02 | 不要（実機の確認は管理担当） |
+| `WP-UI-03` | 5 | **1 回の確かめの失敗で「映像がありません」を出さない**（2026-10-19。Wi-Fi の端末で数分に 1 回一瞬出た） | UI-02 | 不要（実機の確認は管理担当） |
+| `WP-CAM-08` | 5 | **昇降部の `state` を溜め続けない**（2026-10-19。`LiftLink.state_history` が 10 Hz で増え続け、`hve_camera` が約 58 MB/時で膨らんで空きメモリ 7〜10 MB） | CAM-04 | 不要（実機の確認は管理担当） |
+| `WP-UI-02` | 3 | カメラモジュールの画面を v2 にする | CAM-04 | 不要（偽物のモード） |
+| `WP-CAM-05` | 3 | UnitV2 への配備・自動起動・実機の結合 | MEAS-06・CAM-04・VIDEO-02・UI-02・IO-02・LIFT-04 | 要（全部） |
+| `WP-MEAS-01`〜`05` | 4 | 旧版と同じ（ストローク・遅延・無線の圧迫・古さと天井の余裕・電池） | 各実物 | 要 |
+| `WP-LIFT-05` | 5 | **高さをエンコーダにする**（`EncoderHeight`・PCNT・HC-SR04 を外す・`P-14`）。spec 2026-10-15 | — | 要（昇降部・エンコーダ） |
+| `WP-LIFT-06` | 5 | **速さのフィードバック**（`SpeedLoop`・`ENCODER_STALL`・`hold` の `speed`・設定を mm/s・NVS の名前空間） | LIFT-05 | 要（同上） |
+| `WP-LIFTUI-02` | 5 | 昇降部の画面・偽の昇降部・`lift_probe` を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要 |
+| `WP-CAM-06` | 5 | カメラモジュール（アプリ・画面）を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-08` | 5 | **モータへの出力の上限を設定に**（`motor_max_pct`・`SpeedLoop` の丸め・設定 API・NVS・昇降部の画面・偽の昇降部）。spec 2026-10-16 | LIFT-06 | 不要（実機の確認は管理担当） |
+| `WP-CAM-07` | 5 | カメラモジュール（設定の検証・中継・偽物のモード・画面）に `motor_max_pct` を足す | LIFT-08（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
 
-**`WP-MEAS-01` は今すぐできる**（先行試作 `../elevator-motor-control` が動くため）。`LIFT_TOP_MM` が未設定でも上昇は試せる（開発中の動作確認。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #2a）が、**そのあいだ上端で止まらない**ので、先に測って設定する。
+**段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
+`WP-MEAS-01`（ストローク）で `ENC_PPR` の確認・`LIFT_UM_PER_COUNT`・速さの制御の係数・`LIFT_TOP_MM` を決める。
+
+**`WP-LIFT-08` と `WP-CAM-07`**: 設定 API の `motor_max_pct` は必須なので、片方だけ新しいと `PUT` が `400` になる。**2 つ揃えてから実機に入れる。**`docs/使い方.md` の設定の節は `WP-LIFT-08` が書き、`WP-CAM-07` はカメラモジュールの画面の欄だけ足す（LIFT-08 のマージ後に始める）。
+
+**`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
+**`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
+**2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
 
 ## 2. パケットの中身
 
-### `WP-BASE-01` 骨格
+### `WP-MEAS-06` UnitV2 の実機調査（管理担当・ユーザー）
 
-- 読む節: [DetailedDesign.md](DetailedDesign.md) §2・[-names.md](DetailedDesign-names.md) §1
-- 作るもの: §1 のファイル構成の空の骨格。`env:native` に空でない試験 1 件、pytest に 1 件。`camera/requirements.txt`・`requirements-dev.txt`（版を固定）。`params.py` の `tomllib`／`tomli` の切り替え。`CLAUDE.md` に「ビルドとテスト」節（上の共通コマンドと `.venv` の作り方）
-- 読む節に追加: [DetailedDesign.md](DetailedDesign.md) §4.4・§4.5
-- 受け入れ: `.venv` を消して作り直してから、共通コマンド 3 つが成功する
+- 読む節: [-hardware.md](DetailedDesign-hardware.md) §2・§3、[DetailedDesign.md](DetailedDesign.md) §4.4・§4.6
+- やること: §2.1.1 の各行を実機で確かめ、**結果を -hardware.md §2.1.1 と -names.md §5 に書き戻す**。とくに:
+  1. 組み込みのサービスを止め、`/dev/video0` と `/dev/ttyS1` を自分で開けること
+  2. `th-rpi-ap` に STA で繋がり、再起動しても繋がること
+  3. **Grove の UART の電圧（テスタ）とピンの並び**。UNO と分圧を挟んでつなぎ、`M`・`C` 相当の行が往復すること（115200 で化けないか）（**2026-10-07 済み**。黄＝TX・白＝RX・3.3 V・D0/D1・分圧・115200 で双方向とも抜け・化け 0）
+  4. 取り込みと 480p の作り直しで何 fps 出るか・CPU・メモリ・温度（**2026-10-07 済み**。1920×1080 は取れず、MJPEG 720p を `v4l2-ctl` で受ける方式に決めた）
+  5. `aiohttp`・`pyserial`（と名前解決の手段）を Python 3.8 で使えるか
+- 受け入れ: -hardware.md §2.1.1 の全行に結果か「できない」が書かれている。[DetailedDesign.md](DetailedDesign.md) §4.4 の取り込みの方式が実測と合っている
 
-### `WP-LIFT-01` 昇降部の判定
+### `WP-BASE-02` 土台 v2
 
-- 読む節: [DetailedDesign.md](DetailedDesign.md) §3・§4.1・[-protocol.md](DetailedDesign-protocol.md) §2.2・§2.3
-- 作るもの: `lift_decide()`・`LiftController`（偽 HAL を差して `step(now)` でモータへ出す）・`cmd_codec`
-- 受け入れ: `pio test -d firmware/lift -e native` が成功し、**次の変異がそれぞれ赤になる**
-  1. `ceil_ok` の判定を消す／反転する
-  2. `cmd_codec` で `ceil_ok` が欠けたときに `true` とみなす
-  3. 高さの読み値が古い・無効でも上昇を許す
-  4. ウォッチドッグ（`CMD_TIMEOUT`）を消す
-  5. `LiftController` が `lift_decide()` の結果を**モータへ渡さず指令をそのまま渡す**（呼び出し側の変異）
-  6. 下端スイッチを見ずに下降を許す
-  7. 連続駆動の上限（`MAX_RUN`）を消す
-  8. 上端の閾値が**設定済み**なのに `TOP` で止めない（未設定のときだけ判定を省く、が崩れる）
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.7・[-names.md](DetailedDesign-names.md) §1
+- 作るもの: `uv` で CPython 3.8 を入れた `.venv38`（`.gitignore`）。`firmware/cam_io` の骨格（`env:uno`・`env:native`。空でない試験 1 件）。`camera/requirements*.txt` を 3.8 で入る版に固定。`CLAUDE.md` の「ビルドとテスト」を §0 の共通コマンドに直す
+- 受け入れ: `.venv38/bin/python --version` が 3.8。`pio test -d firmware/cam_io -e native` と `pio run -d firmware/cam_io -e uno` が成功
 
-### `WP-LIFT-02` 昇降部の実物
+### `WP-LIFT-03` 昇降部の判定 v2
 
-- 読む節: [-hardware.md](DetailedDesign-hardware.md) §1・[-protocol.md](DetailedDesign-protocol.md) §1〜§2.3
-- 作るもの: `hal_esp32`・`main.cpp`（**組み立てと呼び出しだけ**）・WS サーバ（先行試作を流用。静的な画面は持たない）・`tools/lift_probe.py`（PC から `cmd` を送り `state` を表示する確認用）
-- 受け入れ: `pio run -d firmware/lift -e esp32dev` が成功。実機で管理担当が確かめる: 上昇・下降／`lift_probe.py` を止めると `LIFT_CMD_TIMEOUT_MS` で止まる／`ceil_ok:false` で上昇しない／下端スイッチで下降しない／高さの超音波を外すと上昇しない
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §3.1〜§3.3・§4.1、[-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §1・§3・§5.1
+- 作るもの: `ceiling_check`・`LiftArbiter`・`lift_settings`・`lift_decide` の v2 の表・`LiftController`（持ち主・天井・判定を偽 HAL のモータに効かせる）・`cmd_codec`（`hello`・`hold`・`release`・`state`）。判定 #4・#6 の所に `WAIVER(demo): W-1`
+- 受け入れ: `pio test -d firmware/lift -e native` が成功し、`grep -rn 'WAIVER(demo): W-1' firmware/lift` が 1 か所以上で台帳と一致。**次の変異がそれぞれ赤になる**（`LiftController` を通した試験で縛るものに ※）
+  1. ※ `ceiling_check` の古さの判定を消す（`age_ms` だけ見て、受け取ってからの経過を足さない、を含む）
+  2. ※ `ceiling` が欠けた `hold`（距離計を持つ接続）で上昇を許す
+  3. ※ `hello` を受けていない `/ws/module` の接続を「距離計を持たない」とみなす
+  4. 2 度目の `hello` の `ceiling_sensor: false` を受け付ける
+  5. ※ `READ_ERROR` を `NO_ECHO` と同じに扱う
+  6. ※ 持ち主でない接続の古い `press` の `hold` で持ち主を替える
+  7. ※ 持ち主の接続が閉じても止めない
+  8. ※ 持ち主が替わったら連続駆動の時間を数え直す
+  9. `validate_lift_settings` が `min > init` を通す
+  10. ※ `/ws/ui` の接続の上昇で天井の値を求める（spec #4c に反して単体操作で上昇できなくなる）
+  11. `/ws/ui` で `hello` を受けても接続を続ける
+  12. ※ 途絶（`CMD_TIMEOUT`）・`release`・`OWNER_GONE` で止まったあと、同じ接続の同じ `press` の `hold` で動き出す
+  13. ※ `ceiling` が型の違う `hold` を捨てる（前の `hold` の値で動き続ける）
 
-### `WP-CAM-01` カメラ部の純ロジック
+### `WP-LIFTUI-01` 昇降部の画面
 
-- 読む節: [DetailedDesign.md](DetailedDesign.md) §3・§4.2・[-protocol.md](DetailedDesign-protocol.md) §3
-- 作るもの: `ceiling.py`・`settings.py`・`axes.py`・`params.py`
-- 受け入れ: pytest が成功し、変異が赤になる: 天井の古さの判定を消す／**I2C の読み取り失敗を「反射なし（範囲外＝上昇可）」として扱う**／最小測定距離より近い値を上昇可にする／`min ≦ init ≦ max` の検証を消す／ピッチが可動範囲を越える
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.2、[-protocol.md](DetailedDesign-protocol.md) §2・§3、spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§0.2・§1・§2
+- 作るもの: `firmware/lift/web/`（旧版の `camera/web` の作りに揃える）・`tools/fake_lift_server.py`（`/ws/module` の天井の判定も同じ規則で真似る）・`tools/lift_probe.py` の v2 化・`tools/tests`
+- 受け入れ: node の試験・`tools/tests` が成功。偽の昇降部に向けたスクロールの検査が全画面サイズで通る。**変異**: 離したときに `release` を送らない／押し始めで `press` を増やさない → 赤
 
-### `WP-CAM-02` 制御ループ・アプリ・偽物のモード
+### `WP-LIFT-04` 昇降部の実物 v2
 
-- 読む節: [DetailedDesign.md](DetailedDesign.md) §3・§4.2・[-protocol.md](DetailedDesign-protocol.md) 全部
-- 作るもの: `control.py`・`lift_link.py`・`app.py`・`hw/base.py`・`hw/fake_hw.py`・`hw/fake_lift.py`・`__main__.py`（`--fake`）
-- 受け入れ: pytest が成功。**試験は aiohttp の試験クライアント（ブラウザ役）と偽の ESP32 WS サーバを立て、本物の経路で確かめる。**変異が赤になる:
-  1. **送る直前に `ceil_ok` を計算せず、前回の値を使い回す**（天井センサの値が止まったのに `true` が送られ続ける）
-  2. 止まっている間の `stop` の定期送信を消す
-  3. `hold` の鮮度判定（`HOLD_TIMEOUT`）を消す
-  4. ブラウザの WS が閉じても止めない
-  5. 設定の上限を越える `speed` を丸めずに送る
-- 加えて: `python3 -m hve_camera --fake` が起動し、`curl http://localhost/api/settings` が設定を返す（ポートは起動引数で変えられること）
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.2、[-protocol.md](DetailedDesign-protocol.md) §1〜§3
+- 作るもの: `main.cpp`（2 つの WS の口・接続の種類を `LiftController` へ渡す・`state` の配信）・HTTP の設定 API と NVS・`scripts/embed_web.py`
+- 受け入れ: `pio run -d firmware/lift -e esp32dev` が成功。**実機で管理担当が確かめる**: 昇降部の画面から上昇・下降できる／`tools/lift_probe.py`（`/ws/module`）から天井 `TOO_NEAR` で上昇しない／probe を止めると 600 ms 以内に止まる／画面と probe で最後に押した方が勝つ／設定を変えて再起動しても残る／不正な設定は `400` で残らない
 
-### `WP-VIDEO-01` 映像の配信
+### `WP-IO-01` Arduino の判定
 
-- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.3・[-protocol.md](DetailedDesign-protocol.md) §1・spec [Spec-ui.md](../spec/Spec-ui.md) §1.5
-- 作るもの: `camera/hve_video/` の全部
-- 受け入れ: pytest が成功し、変異が赤になる: 切り出しを中央からずらす／縦横比を崩す／倍率の丸め（1〜`zoom_max`）を消す／倍率によって**出力の大きさ**が変わる／`/zoom` を `127.0.0.1` 以外からも受ける。
-  加えて: 偽の画像列で `python3 -m hve_video --fake` を起動し、`curl -s -m 2 http://localhost:8080/stream | head -c 200` に `multipart/x-mixed-replace` の区切りが出る
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §3.4・§4.5、[-protocol.md](DetailedDesign-protocol.md) §5、[-names.md](DetailedDesign-names.md) §5.4
+- 作るもの: `io_codec`・`IoController`（偽 HAL）・`StepRate`
+- 受け入れ: `pio test -d firmware/cam_io -e native` が成功し、**次の変異が赤**: ウォッチドッグを消す／途絶でコイルの電流を切らない／途絶でサーボのパルスを止める／ピッチを `PITCH_MIN_DEG`〜`PITCH_MAX_DEG` に丸めない／ヨーを `YAW_HSPS_ABS_MAX` に丸めない／読めない行を `M 0 0 0` として受け付ける（＝読めない行で生存確認が延びる）
 
-### `WP-CAM-03` カメラ部の実物
+### `WP-IO-02` Arduino の実物
 
-- 読む節: [-hardware.md](DetailedDesign-hardware.md) §2・§3・[DetailedDesign.md](DetailedDesign.md) §4.2・§4.4
-- 作るもの: `hw/rpi_hw.py`・Trixie の準備手順（`config.txt` の PWM・I2C、グループ、`--system-site-packages` の仮想環境）・`systemd/*.service`（:80 で待つため `AmbientCapabilities=CAP_NET_BIND_SERVICE`。root で動かさない）・ラズパイの準備手順（`docs/使い方.md` を作る）
-- 受け入れ: ラズパイで `systemctl status hve-camera hve-video` が active。実機で: ピッチが deg/s で動き範囲で止まり、止めている間サーボが震えない／ヨーが deg/s で 360° 以上回り続けられる／天井の超音波（SRF02）を手で塞ぐと上昇できない／SRF02 の線を抜くと `CEILING_STALE`／ヨーを止めている間は ULN2003 の LED が消えている（コイルの電流が切れている）
+- 読む節: [-hardware.md](DetailedDesign-hardware.md) §2.2〜§2.4・§3
+- 作るもの: `hal_uno`・`main.cpp`
+- 受け入れ: `pio run -d firmware/cam_io -e uno` が成功（`setWireTimeout` があること）。**実機で管理担当が確かめる**: 開発機から `M` 行を送ってヨー・ピッチが動く／送るのを止めると `IO_CMD_TIMEOUT_MS` 以内にヨーが止まりコイルが切れる（ULN2003 の LED）・ピッチは保つ／SRF02 の線を抜くと `C … 1 0` が出続け、`loop` が止まらない
 
-### `WP-UI-01` 画面
+### `WP-CAM-04` カメラモジュールのアプリ v2
 
-- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md)・[-protocol.md](DetailedDesign-protocol.md) §2.1・§2.4・§3（ズームは `zoom` を送るだけ。**ブラウザ側で拡大しない**）
-- 作るもの: `web/` の全部。映像の上に上昇・下降・ピッチ・ヨーのボタン（押している間だけ）と速度スライダー 4 本、デジタルズーム（spec [Spec-ui.md](../spec/Spec-ui.md) §1.5）、状態（高さ・天井・停止理由・仮値・偽物のモード）、設定画面
-- 受け入れ: `--fake` で起動し、管理担当がブラウザで確かめる: スライダーの範囲と初期位置が設定どおり／開き直すと初期値に戻る／設定の不正値が保存されない／ボタンを押したままタブを閉じると止まる／停止理由が出る／ズームしても映像以外（ボタン・ガイド線・停止理由）の大きさと位置が変わらない。**外部への読み込みが無い**（`grep -rE 'https?://' camera/web` が空）。**スクロールが出ない**（spec [Spec-ui.md](../spec/Spec-ui.md) §0.1）: `docs/plan/spec/mockup/check_noscroll.js` を実装の画面向けに状態の作り方だけ差し替えて（URL 引数の代わりに `--fake` の `/api/fake` で状態を作る）全サイズで通す
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §3・§4.3・§4.6、[-protocol.md](DetailedDesign-protocol.md) §2・§4・§5、[-names.md](DetailedDesign-names.md) 全部
+- 作るもの: 3.8 への書き直し・`classify_srf02`・`uno_link.py`・`hw/uno_hw.py`・`lift_link.py` v2・`lift_resolve.py`・設定の中継・偽物のモード v2。`hw/rpi_hw.py` と `test_rpi_hw.py` を消す
+- **`press` を増やすきっかけ**: 昇降部へ送る昇降の操作が「押し始め」になったとき＝`control.py` の動かす軸が `lift_*` 以外から `lift_*` に替わったとき、`lift_up` と `lift_down` が入れ替わったとき、別の画面（ブラウザの接続）の `hold` に替わったとき
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が成功。**次の変異が赤**:
+  1. `UnoClock` を使わず、受け取った時刻を読み値の時刻にする（溜まった古い行が新しく見える試験で縛る）
+  1b. 前回の読み出しから `ceiling_read_stale_ms` より空いたときに、その回の行を捨てない（**受信バッファが溢れて新しい側の行が無い**場合の試験で縛る。窓の全行が遅れた行でも赤になること）
+  2. 読むたびの全部の読み出しをやめ 1 行ずつ処理する
+  3. `hello` の `ceiling_sensor` を天井の読み値の調子から計算する
+  4. 昇降を離したときに `release` を送らない
+  5. 設定の `PUT` で、昇降部が `400` を返したのに自分の 2 軸を保存する
+  6. `classify_srf02` で `st=1` を `NO_ECHO` にする
+
+### `WP-VIDEO-02` 映像の UnitV2 対応
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.4、`WP-MEAS-06` の結果
+- 作るもの: `hve_video` の取り込み元を `MjpegPipeSource`（`v4l2-ctl` の子プロセス。**`ffmpeg`・OpenCV の `VideoCapture` は使わない**）に替え、区切りと作り直しを別スレッドにする。`GET /snapshot`（spec `H-U9`）を足す。3.8 で動く
+- 受け入れ: ホストの試験（偽の画像列・`split_mjpeg` に `v4l2-ctl` の文字が頭に付いたバイト列と途中で切れたバイト列を与える）が `.venv38` で成功。UnitV2 で 480p の MJPEG が `video_fps` 前後で出て、倍率が変わり、`/snapshot` が 1280×720 の JPEG を返す。**15 分続けて** fps が落ちず、温度監視（`check_thermal.py`）と `haveged` が生きている
+- **変異**（赤になること）: `split_mjpeg` が `FFD8` より前のバイトを捨てない／`/snapshot` が作り直した 480p（や切り出した絵）を返す／`/snapshot` を倍率に合わせて切り出す／作り直しが古い 1 枚を順に処理して遅れる（最新の 1 枚だけを使わない）
+
+### `WP-VIDEO-03` 配信のまとめと送れない接続の始末
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.4（「配り方」「送れない接続を切る」）、[-names.md](DetailedDesign-names.md) §5（`video_send_timeout_ms`）、[-hardware.md](DetailedDesign-hardware.md) §2.1.1（2026-10-19 の行）
+- 作るもの: `camera/hve_video/server.py`（作り直しを 1 か所にまとめて全接続へ配る・接続 0 本では作り直さない・書き込みのタイムアウトで接続を捨てる）・`__main__.py`（`video_send_timeout_ms` を渡す）・`camera/config/params.toml`（`video_send_timeout_ms` と `provisional`）。`pipeline.py`・`sources.py`・`/snapshot`・`/zoom` の振る舞いは変えない。画面（`camera/web/`）は変えない
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**次の変異がそれぞれ赤になる**（※ は偽の pipeline で `jpeg_bytes` の呼ばれた回数を数える、または書き込みが返らない偽の接続を使う）
+  1. ※ 接続ごとに `jpeg_bytes` を呼ぶ（2 本つなぐと 1 周期に 2 回になる）
+  2. ※ 接続が 0 本でも作り直し続ける
+  3. ※ 書き込みのタイムアウトを外す（返らない接続のハンドラが抜けない）
+  4. ※ タイムアウトしたとき、捨てずに `close()` で閉じる（送り残しを待つので閉じない）
+  5. ※ 1 本の接続の書き込みが返らないと、他の接続にも次の 1 枚が届かない
+  6. ※ つないですぐ切る接続（画面の状態確認の真似）があると、別の接続が受け取る枚数が減る
+- **実機で管理担当が確かめる**: 受け取らない接続が `video_send_timeout_ms` に少し足した時間で `netstat` から消える（`FIN_WAIT1` で残るなら手当てを考える）／2 本つないでも `hve_video` の CPU が増えない／状態確認の真似を足しても最大間隔が延びない／基準値（[-hardware.md](DetailedDesign-hardware.md) §2.1.1）より fps が落ちない
+
+### `WP-UI-02` カメラモジュールの画面 v2
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §4、spec [Spec-ui.md](../spec/Spec-ui.md)
+- 作るもの: 「上端の検知: 一時無効」・持ち主の表示・昇降部の画面の数・昇降部へのリンク・`IO_LOST`・新しい停止理由の文言・昇降の設定（中継）・**静止画のボタンと重ねた表示**（spec §1.5.1。`:8080/snapshot` を取り寄せる。モックアップにも足す）
+- 受け入れ: 旧版の node の試験とスクロールの検査が通る。**変異**: `top_detect` が `false` でも「一時無効」を出さない → 赤
+
+### `WP-UI-03` 映像の途絶えの見つけ方
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.4.1、[-names.md](DetailedDesign-names.md) §5.3.1
+- 作るもの: `camera/web/app.js`（`video_probe_fail_count`・続けて失敗した回数の数え方を純関数にして `module.exports` に足す・`probeStream` がそれを使う）・`camera/web/tests/web.test.js`（純関数）・`camera/web/tests/browser_paths.js`（経路。Playwright の `page.route` で `/stream` のうち**確かめの `fetch` だけ**を落とす。`<img>` の取り込みは落とさない）。名前は -names.md §1.4 に足す（管理担当）
+- 受け入れ: `node --test camera/web/tests/web.test.js` と `browser_paths.js`（全部）が通る。**次の変異がそれぞれ赤になる**（※ は `browser_paths.js` の経路で縛る）
+  1. ※ 1 回の失敗で「映像がありません」を出す（いまの振る舞い）
+  2. ※ 何回続けて失敗しても出さない
+  3. 成功しても続けて失敗した回数を 0 に戻さない（続かない 2 回の失敗で出る）
+  4. ※ 出したあと確かめが成功しても取り直さない（「映像がありません」が消えない）
+- **実機で管理担当が確かめる**: Wi-Fi の端末で数分開いても一瞬の「映像がありません」が出ない／`hve_video` を止めると約 5 秒以内に出て、戻すと消える
+
+### `WP-CAM-08` 昇降部の `state` を溜め続けない
+
+- 読む節: [-hardware.md](DetailedDesign-hardware.md) §2.1.1（2026-10-19 のメモリの行）
+- 作るもの: `camera/hve_camera/lift_link.py` の `state_history`（受けた `state` を全部溜める。どこからも読まれていない）を消す。他に受けたものを際限なく溜める所があれば同じく直す。試験の偽の昇降部（`camera/tests/cam_support.py` の `state_history`）は試験の道具なので残してよい
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**変異**: `LiftLink` が受けた `state` を溜める（リストに足す）→ 赤（`state` を数千件受けさせ、`tracemalloc` などで `LiftLink` まわりの確保が件数に比例して増えないことを縛る）
+- **実機で管理担当が確かめる**: 昇降部と繋いだまま 5 分、`hve_camera` の RSS が増え続けない
+
+### `WP-CAM-05` 配備と結合
+
+- 読む節: `WP-MEAS-06` の結果・[-hardware.md](DetailedDesign-hardware.md) 全部
+- 作るもの: `camera/deploy/`（自動起動）・配備の手順（`docs/使い方.md` の v2 の節）
+- 受け入れ: **実機で管理担当が確かめる**: 電源を入れるだけで両方の画面が開ける／カメラモジュールの画面だけで昇降・ヨー・ピッチ・ズーム・全設定ができる／天井に近づくとカメラモジュールからの上昇が止まる／UnitV2 の電源を抜くと昇降が `CEILING_STALE_MS` 以内・ヨーが `IO_CMD_TIMEOUT_MS` 以内に止まる
 
 ### `WP-MEAS-*` 測定
 
-測定手順と結果は `docs/試験項目.md` に書き、結果で [-names.md](DetailedDesign-names.md) §5 の `仮` を外す。
+旧版の [`WP-MEAS-*`](../archive/v1/detailed/DetailedDesign-packets.md) と同じ。v2 で変わる点: `WP-MEAS-01` は**上端の検知が無い（`W-1`）ので、上昇は人が見ながら短く行う**。`WP-MEAS-04` の天井の余裕・古さは昇降部の定数（`CEILING_MARGIN_MM`・`CEILING_STALE_MS`）を置き換える。**`WP-MEAS-03` は th-system を動かしながら 480p の映像を流し、`video_jpeg_quality`・`video_fps` の上限を決める**（spec `H-V10`・`H-A8`。高画質の映像 `H-V11` は測らない）。
+
+### `WP-LIFT-05` 高さをエンコーダにする
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.1、[-hardware.md](DetailedDesign-hardware.md) §1.1、[-names.md](DetailedDesign-names.md) §3・§5.1、spec [Spec-safety.md](../spec/Spec-safety.md) §1.2
+- 作るもの: `lib/hal_core` の `EncoderHeight`（PCNT の 16 bit の差の足し込み・原点・`P-14`）とホスト試験。`hal_esp32` の PCNT（A/B の 4 逓倍・ノイズ除去）。**HC-SR04 のコード（`sonar_*`・`HeightFilter`・`SONAR_*`）と試験を消す**。`hal.h` のコメント。`config.h` のピン。**`docs/使い方.md`**（エンコーダの配線・HC-SR04 を外す・電源を入れたらまず下端まで下げる）。`docs/試験項目.md` の HC-SR04 の行は実機の試験を組むときに直す。**ブリーフの前に**、`espressif32@7.0.1` の Arduino コアで使える PCNT の API（`driver/pcnt.h` か `pulse_cnt`）をビルド環境で確かめる
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev` が成功。`grep -rn SONAR firmware/lift` が空。**次の変異がそれぞれ赤になる**（`LiftController` を通した試験で縛るものに ※）
+  1. ※ 起動直後（下端に一度も着いていない）に `height_ok` を真にする（上昇できてしまう。`W-1` の間でも `state.height_ok` で縛る）
+  2. 下端スイッチが押された瞬間に原点を取り直さない（2 回目以降の着地を含む）
+  3. スイッチが押されている間、上昇側へ進んだときも原点を動かす（★が働かなくなる）
+  4. スイッチが押されたまま原点から `HOME_SLACK_MM` を超えて上昇側へ進んでも `height_ok` を偽にしない（`P-14`）
+  5. PCNT の 16 bit の差を符号なしで足す（−1 が +65535 になる）
+  6. `ENC_UP_SIGN` を掛け忘れる
+- **実機で管理担当が確かめる**: 手で巻き取り軸を回して数が増減する向き・起動直後は `height_ok: false`・下端に着けると 0・上げると増える・A/B の線を 1 本抜くと数が進まない
+
+### `WP-LIFT-06` 速さのフィードバック
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.2、[-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §3・§5.1、spec [Spec-ui.md](../spec/Spec-ui.md) §1・[Spec-safety.md](../spec/Spec-safety.md) #4d
+- 作るもの: `lib/lift_core` の `SpeedLoop`（PI・前向き・積分の扱い）・`lift_decide` の #8a と #9・`LiftController` で `SpeedLoop` の出力をモータへ・`cmd_codec`（`hold` の `speed`・`state` の `speed`・`speed_meas`・`ENCODER_STALL`）・`lift_settings` の範囲（mm/s）・`LIFT_NVS_NAMESPACE`・**`docs/使い方.md`**（速さの単位・`ENCODER_STALL` で止まったときの扱い）
+- 受け入れ: native の試験・esp32dev のビルドが成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL で、モータに出した値を見て縛る）
+  1. ※ 測った速さが目標より遅くても出力を上げない（前向きだけで動く）
+  2. ※ 数が進まないのに出力を出し続ける（#8a を消す）
+  3. ※ 逆向きに数が進んでも #8a で止めない
+  4. ※ 止まった・向きが替わったときに積分を 0 に戻さない
+  5. ※ 出力の丸め（`LIFT_DUTY_ABS_MAX_PCT`）を外す
+  6. `duty` だけの `hold` を受け付ける
+  7. 設定の検証が `LIFT_SPEED_ABS_MAX_MM_S` を超える値を通す
+- **実機で管理担当が確かめる**（**`WP-LIFT-08` のマージ後**。それまでは出力が 100 % まで出る）: 同じ速さで上昇・下降の所要時間がほぼ同じ／巻き取り軸からエンコーダを外す（カップリングを抜く）と `ENCODER_STALL` で止まる／`state.speed_meas` が目標に収まる
+
+### `WP-LIFTUI-02` 昇降部の画面・道具を速さ（mm/s）に
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§3、[-names.md](DetailedDesign-names.md) §3、spec [Spec-ui.md](../spec/Spec-ui.md) §1・§2
+- 作るもの: `firmware/lift/web/`（`hold` の `speed`・スライダーと設定の単位 mm/s・測った速さの表示・`ENCODER_STALL` と「下端まで下げて高さの原点を取ってください」（`HEIGHT_UNKNOWN`）の文言）・`tools/fake_lift_server.py`・`tools/lift_probe.py`・**`docs/使い方.md`**（画面の文言）
+- 受け入れ: node の試験・`tools/tests`・スクロールの検査が通る。**変異**: `hold` に `duty` を送る → 赤
+
+### `WP-CAM-06` カメラモジュールを速さ（mm/s）に
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §2・§4、[-names.md](DetailedDesign-names.md) §3
+- 作るもの: `camera/hve_camera`（`lift_link` の `hold` の `speed`・設定の中継の範囲・`state.lift` の `speed`・`speed_meas`）・`camera/web`（単位 mm/s・`ENCODER_STALL`・`HEIGHT_UNKNOWN` の文言）・偽物のモード・**`docs/使い方.md`**（画面の文言）
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験が通る。**変異**: 昇降部へ `duty` を送る／`state.lift` から `speed_meas` を落とす → 赤
+
+### `WP-LIFT-08` モータへの出力の上限を設定に
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1・§4.1.2・§4.2、[-protocol.md](DetailedDesign-protocol.md) §3、[-names.md](DetailedDesign-names.md) §5.1、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
+- 作るもの: `lift_decide.h` の `LIFT_MOTOR_MAX_PCT_DEFAULT`・`LIFT_MOTOR_MAX_PCT_MIN`・`lift_settings`（`motor_max_pct` の構造体・検証・JSON）・`SpeedLoop::update` に上限の引数（丸めと積分の止め方をその上限で）・`LiftController::set_motor_max_pct`・`main.cpp`（起動時と `PUT` 成功時に渡す・エラーの文言）・`firmware/lift/web/`（設定画面の欄と添え書き）・`tools/fake_lift_server.py`・**`docs/使い方.md`**（設定画面の欄・電源を替えたときの合わせ方）。`motor_duty_to_pwm` は変えない
+- 受け入れ: native の試験・esp32dev のビルド・node の試験・`tools/tests`・スクロールの検査が通る。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL で、モータに出した値を見て縛る。偽 HAL は数を目標より遅く進め、#8a で止まらずに出力が上がり続ける状況を作る）
+  1. ※ `tick` が `SpeedLoop` に上限ではなく `LIFT_DUTY_ABS_MAX_PCT` を渡す（50 % を超えて出る）
+  2. ※ `set_motor_max_pct` で上限を下げても、動いている最中の出力が古い上限のまま
+  3. `SpeedLoop` が上限に当たっている間も積分を進める（目標に追いついたあと出力が下がらない）
+  4. `motor_duty_to_pwm` を上限の値で割る（50 % が PWM の最大になる）
+  5. 設定の検証が `motor_max_pct` の欠けた本文・9・101 を通す
+  6. 偽の昇降部が `motor_max_pct` の欠けた `PUT` を通す
+- **実機で管理担当が確かめる**: 既定で `state.duty` が 50 を超えない（重く引っかけて速さが追いつかない状況）／設定画面で 30 にすると 30 で頭打ち／電源を入れ直しても残る
+
+### `WP-CAM-07` カメラモジュールにモータへの出力の上限を
+
+- 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
+- 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
+
+### `WP-LIFT-07` 上端の検知を戻す（`W-1` を閉じる）
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1、[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)
+- 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）。**`docs/使い方.md`**（起動直後は上昇しない・「上端の検知: 一時無効」が出なくなる）
+- 受け入れ: native の試験が成功。`grep -rn 'WAIVER(demo): W-1'` が空。**変異**: ※ 原点を取る前に上昇できる／※ `LIFT_TOP_MM` を設定して高さがそれ以上でも上昇できる → 赤
+- **実機で管理担当が確かめる**: 起動直後は上昇しない（`HEIGHT_UNKNOWN`）→ 下げて下端に着けると上昇できる／`LIFT_TOP_MM` を仮に低く置いて、そこで止まる

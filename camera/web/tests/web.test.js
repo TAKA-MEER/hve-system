@@ -55,6 +55,8 @@ test('スライダーは範囲が下限〜上限、位置が初期値（spec §1
 test('速度の数値の書式', () => {
   assert.equal(app.formatSpeed(30, '%'), '30 %');
   assert.equal(app.formatSpeed(29.6, '%'), '30 %');
+  assert.equal(app.formatSpeed(40, 'mm/s'), '40 mm/s');
+  assert.equal(app.formatSpeed(39.6, 'mm/s'), '40 mm/s');
   assert.equal(app.formatSpeed(10, 'deg/s'), '10.0 deg/s');
   assert.equal(app.formatSpeed(12.25, 'deg/s'), '12.3 deg/s');
 });
@@ -85,10 +87,65 @@ test('停止理由の文言（names §3 → 画面に出る日本語）', () => 
   assert.equal(app.reasonText('CEILING').cls, 'ng');
   assert.equal(app.reasonText('CMD_TIMEOUT').cls, 'warn');
 
+  // 2026-10-15 の設計変更: ENCODER_STALL と HEIGHT_UNKNOWN の文言
+  assert.deepEqual(app.reasonText('ENCODER_STALL'), {
+    cls: 'warn', text: 'エンコーダが回らないため停止しました。反対方向へは動かせます',
+  });
+  assert.deepEqual(app.reasonText('HEIGHT_UNKNOWN'), {
+    cls: 'ng', text: '高さが分からないため上昇できません。一度下端まで下げてください',
+  });
+
   // 知らない理由は黙って隠さない（帯を出して名前も出す）
   const unknown = app.reasonText('SOMETHING_NEW');
   assert.equal(unknown.cls, 'warn');
   assert.match(unknown.text, /SOMETHING_NEW/);
+});
+
+test('IO_LOST・OWNER_GONE の文言（names §3）', () => {
+  assert.deepEqual(app.reasonText('IO_LOST'), {
+    cls: 'ng', text: 'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません',
+  });
+  assert.deepEqual(app.reasonText('OWNER_GONE'), {
+    cls: 'warn', text: '操作していた画面が閉じたため停止しました',
+  });
+  // 知らない理由の文言（「理由が分かりません」）に落ちていない
+  assert.doesNotMatch(app.reasonText('IO_LOST').text, /分かりません/);
+  assert.doesNotMatch(app.reasonText('OWNER_GONE').text, /分かりません/);
+});
+
+test('動いている間の表示は目標と測った速さ（brief §1）', () => {
+  assert.equal(app.liftStateText({dir: 'up', speed: 40, speed_meas: 39}), '上昇中 40 mm/s（測定 39 mm/s）');
+  assert.equal(app.liftStateText({dir: 'down', speed: 30, speed_meas: -30}), '下降中 30 mm/s（測定 -30 mm/s）');
+  // speed_meas が無ければ目標だけ
+  assert.equal(app.liftStateText({dir: 'up', speed: 40}), '上昇中 40 mm/s');
+  assert.equal(app.liftStateText({dir: 'up', speed: 40, speed_meas: null}), '上昇中 40 mm/s');
+  assert.equal(app.liftStateText({dir: 'stop', bottom: false}), '停止中');
+  assert.equal(app.liftStateText({dir: 'stop', bottom: true}), '停止中・下端');
+});
+
+test('上端の検知: top_detect が true でなければ「一時無効」（W-1）', () => {
+  assert.equal(app.topDetectText({top_detect: false}), '上端の検知: 一時無効');
+  assert.equal(app.topDetectText({}), '上端の検知: 一時無効');   // 値が無いときも有効とは言わない
+  assert.equal(app.topDetectText(null), '上端の検知: 一時無効');
+  assert.equal(app.topDetectText({top_detect: true}), null);
+});
+
+test('持ち主・昇降部の画面の数・昇降部へのリンク', () => {
+  assert.equal(app.ownerText('module'), '持ち主 カメラモジュール');
+  assert.equal(app.ownerText('ui'), '持ち主 昇降部の画面');
+  assert.equal(app.ownerText(null), '持ち主 なし');
+  assert.equal(app.liftUiText(2), '昇降部の画面 2');
+  assert.equal(app.liftUiText(0), '昇降部の画面 0');
+  assert.equal(app.liftUiText(undefined), '昇降部の画面 —');
+  assert.deepEqual(app.liftLink('192.168.5.20'), {href: 'http://192.168.5.20/', text: '昇降部 192.168.5.20'});
+  assert.equal(app.liftLink(null), null);
+  assert.equal(app.liftLink(''), null);
+  assert.equal(app.liftLink('a"><script>'), null); // 属性に入れる値なので変な文字は受けない
+});
+
+test('静止画の URL は宿主＝画面と同じ・ポート＝映像と同じ・パスは /snapshot（spec §1.5.1）', () => {
+  assert.equal(app.snapshotUrl('http:', '192.168.5.10', 8080), 'http://192.168.5.10:8080/snapshot');
+  assert.equal(app.snapshotUrl('http:', 'hve-cam.local', 8080), 'http://hve-cam.local:8080/snapshot');
 });
 
 test('天井のバッジは距離・値なし・範囲外を出す（spec Spec-safety.md §2 #3b）', () => {
@@ -96,6 +153,13 @@ test('天井のバッジは距離・値なし・範囲外を出す（spec Spec-s
   assert.deepEqual(app.ceilingText({mm: null, reason: 'CEILING_STALE', ok: false}), {cls: 'ng', text: '天井 値なし'});
   assert.deepEqual(app.ceilingText({mm: 120, reason: 'CEILING_NEAR', ok: false}), {cls: 'warn', text: '天井 120 mm'});
   assert.deepEqual(app.ceilingText({mm: null, reason: 'OUT_OF_RANGE', ok: true}), {cls: '', text: '天井 範囲外'});
+  // 判定が無いとき（止まっている間）は自分で測った status で出す
+  const own = (status, mm) => ({status, mm, ok: null, reason: null});
+  assert.deepEqual(app.ceilingText(own('MEASURED', 2400)), {cls: '', text: '天井 2400 mm'});
+  assert.deepEqual(app.ceilingText(own('TOO_NEAR', null)), {cls: 'warn', text: '天井 近すぎ'});
+  assert.deepEqual(app.ceilingText(own('NO_ECHO', null)), {cls: '', text: '天井 範囲外'});
+  assert.deepEqual(app.ceilingText(own('READ_ERROR', null)), {cls: 'ng', text: '天井 値なし'});
+  assert.deepEqual(app.ceilingText({}), {cls: 'ng', text: '天井 値なし'});
 });
 
 test('高さの OSD は読めない値と値なしを区別する', () => {
@@ -120,6 +184,11 @@ test('ボタンを薄くする条件（昇降部と切断・天井の ok が fal
   const stale = {lift: {link: 'ok', bottom: false}, ceiling: {mm: 2200, ok: false, reason: 'CEILING_STALE'}};
   assert.equal(app.holdBlocked(stale, 'lift_up'), true);
 
+  // 判定が無いだけ（止まっている間）では薄くしない。判定が ok:false のときだけ薄くする
+  const idle = {lift: {link: 'ok', bottom: false}, ceiling: {status: 'MEASURED', mm: 2200, ok: null, reason: null}};
+  assert.equal(app.holdBlocked(idle, 'lift_up'), false);
+  assert.equal(app.holdBlocked({lift: {link: 'ok'}, ceiling: {ok: false, reason: 'LINK_LOST'}}, 'lift_up'), true);
+
   const bottom = {lift: {link: 'ok', bottom: true}, ceiling: {mm: 2200, ok: true, reason: 'NONE'}};
   assert.equal(app.holdBlocked(bottom, 'lift_down'), true);
   assert.equal(app.holdBlocked(bottom, 'lift_up'), false);
@@ -138,6 +207,7 @@ const GOOD = {
   lift_down: {min: 10, max: 60, init: 30},
   pitch: {min: 1, max: 30, init: 10},
   yaw: {min: 1, max: 30, init: 10},
+  motor_max_pct: 50,
 };
 
 const withChange = (axis, field, value) => {
@@ -146,10 +216,31 @@ const withChange = (axis, field, value) => {
   return draft;
 };
 
-test('設定の検証は 4 項目が Save できる形を通す（spec §2）', () => {
+const withMotor = (value) => {
+  const draft = JSON.parse(JSON.stringify(GOOD));
+  draft.motor_max_pct = value;
+  return draft;
+};
+
+test('設定の検証は 4 項目＋上限が Save できる形を通す（spec §2）', () => {
   const result = settings.validateSettingsDraft(GOOD);
   assert.equal(result.ok, true);
   assert.deepEqual(result.errors, []);
+});
+
+test('モータへの出力の上限は 10〜100 の整数（spec §2.1）', () => {
+  assert.equal(settings.validateSettingsDraft(withMotor(10)).ok, true);
+  assert.equal(settings.validateSettingsDraft(withMotor(100)).ok, true);
+  assert.equal(settings.validateSettingsDraft(withMotor(9)).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor(101)).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor('')).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor('abc')).ok, false);
+  assert.equal(settings.validateSettingsDraft(withMotor(50.5)).ok, false);
+  const missing = JSON.parse(JSON.stringify(GOOD));
+  delete missing.motor_max_pct;
+  assert.equal(settings.validateSettingsDraft(missing).ok, false);
+  const over = settings.validateSettingsDraft(withMotor(101));
+  assert.match(over.errors[0].text, /モータへの出力の上限/);
 });
 
 test('下限 > 上限は保存できない', () => {
@@ -171,6 +262,16 @@ test('絶対的な範囲を外すのも保存できない（protocol §3）', ()
   assert.equal(settings.validateSettingsDraft(withChange('pitch', 'init', 0)).ok, false);
 });
 
+test('昇降の設定は mm/s・整数（brief §1）', () => {
+  const axes = Object.fromEntries(settings.SETTING_AXES.map((a) => [a.key, a]));
+  assert.equal(axes.lift_up.unit, 'mm/s');
+  assert.equal(axes.lift_down.unit, 'mm/s');
+  assert.equal(axes.lift_up.step, 1);
+  // 整数でない昇降の値は保存できない。ピッチ・ヨーの小数は通す
+  assert.equal(settings.validateSettingsDraft(withChange('lift_up', 'init', 30.5)).ok, false);
+  assert.equal(settings.validateSettingsDraft(withChange('pitch', 'init', 10.5)).ok, true);
+});
+
 test('数値でない・空欄は保存できない', () => {
   assert.equal(settings.validateSettingsDraft(withChange('yaw', 'min', '')).ok, false);
   assert.equal(settings.validateSettingsDraft(withChange('yaw', 'min', 'abc')).ok, false);
@@ -186,7 +287,25 @@ test('理由の文言は 1 行にまとめる（画面からはみ出さない�
     lift_down: {min: 10, max: 5, init: 30},
     pitch: {min: 1, max: 30, init: 10},
     yaw: {min: 1, max: 30, init: 10},
+    motor_max_pct: 50,
   });
   assert.equal(many.errors.length, 2);
   assert.equal(settings.settingsErrorText(many.errors), '上昇: 下限 ≦ 初期値 ≦ 上限 にしてください（ほか 1 件）');
+});
+
+test('確かめの失敗は 1 回では「映像がありません」を出さず、2 回続けて出す', () => {
+  let r = app.probeOutcome(0, false);
+  assert.deepEqual(r, {failures: 1, hide: false});
+  r = app.probeOutcome(r.failures, false);
+  assert.deepEqual(r, {failures: 2, hide: true});
+  // 出したあとも失敗が続くあいだは出し続ける
+  assert.equal(app.probeOutcome(r.failures, false).hide, true);
+});
+
+test('確かめが成功したら数え直す（間に成功が挟まれば 2 回の失敗は続かない）', () => {
+  assert.deepEqual(app.probeOutcome(5, true), {failures: 0, hide: false});
+  let r = app.probeOutcome(0, false);
+  r = app.probeOutcome(r.failures, true);
+  r = app.probeOutcome(r.failures, false);
+  assert.deepEqual(r, {failures: 1, hide: false});
 });

@@ -1,0 +1,100 @@
+#!/bin/sh
+# /etc/init.d/S86hve — カメラモジュール（UnitV2）のアプリの自動起動（WP-CAM-05）
+#
+# hve_camera（制御と画面。:80）と hve_video（映像。:8080）を root で起動する。
+# 使い方: S86hve {start|stop|restart|status}
+#
+# - アプリの置き場: /home/m5stack/hve/camera（ルートの UBIFS。/tmp は RAM なので使わない）
+# - ログ: /home/m5stack/hve_log/<名前>.log（run_logged.py が 256 KB × 3 世代で回す）
+# - PID ファイル: /var/run/hve_camera.pid・/var/run/hve_video.pid（停止は PID で行う）
+# - 組み込みのサービス（S85runpayload）は配備で自動起動から外してある（:80 と /dev/ttyS1 を取るため）
+
+# ssh を閉じても子（アプリ）が SIGHUP で死なないようにする（無視の設定は子へ引き継がれる）
+trap "" HUP
+# ログを m5stack（ssh の利用者）でも読めるようにする
+umask 022
+
+HVE_HOME=/home/m5stack/hve
+APP=$HVE_HOME/camera
+LOG_DIR=/home/m5stack/hve_log
+PY=/usr/bin/python3
+
+PYTHONPATH=$APP:$APP/vendor
+PYTHONUNBUFFERED=1
+export PYTHONPATH PYTHONUNBUFFERED
+
+# 名前 → 起動するモジュールと引数
+cmdline_of() {
+    case "$1" in
+        hve_camera) echo "hve_camera --port 80" ;;
+        hve_video)  echo "hve_video --port 8080" ;;
+    esac
+}
+
+pid_alive() {
+    [ -f "/var/run/$1.pid" ] || return 1
+    p=$(cat "/var/run/$1.pid")
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
+start_one() {
+    name=$1
+    if pid_alive "$name"; then
+        echo "$name: already running (pid $(cat /var/run/$name.pid))"
+        return 0
+    fi
+    mkdir -p "$LOG_DIR"
+    chmod 755 "$LOG_DIR"
+    # run_logged.py <ログファイル> <モジュール> [引数...]
+    $PY "$APP/deploy/run_logged.py" "$LOG_DIR/$name.log" $(cmdline_of "$name") \
+        < /dev/null > /dev/null 2>&1 &
+    echo $! > "/var/run/$name.pid"
+    echo "$name: started (pid $!)"
+}
+
+stop_one() {
+    name=$1
+    pid_alive "$name" || { echo "$name: not running"; rm -f "/var/run/$name.pid"; return 0; }
+    p=$(cat "/var/run/$name.pid")
+    kill "$p"
+    i=0
+    while kill -0 "$p" 2>/dev/null && [ $i -lt 50 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if kill -0 "$p" 2>/dev/null; then
+        kill -9 "$p"
+        echo "$name: killed (pid $p)"
+    else
+        echo "$name: stopped"
+    fi
+    rm -f "/var/run/$name.pid"
+}
+
+case "$1" in
+    start)
+        start_one hve_video
+        start_one hve_camera
+        ;;
+    stop)
+        stop_one hve_camera
+        stop_one hve_video
+        # v4l2-ctl が孤児で残るとカメラを握ったままになる
+        killall v4l2-ctl 2>/dev/null
+        ;;
+    restart|reload)
+        $0 stop
+        $0 start
+        ;;
+    status)
+        for n in hve_camera hve_video; do
+            if pid_alive "$n"; then echo "$n: running (pid $(cat /var/run/$n.pid))"; else echo "$n: stopped"; fi
+        done
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit 0

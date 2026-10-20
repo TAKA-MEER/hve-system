@@ -1,7 +1,7 @@
-# 通信
+# 通信（v2）
 
-[DetailedDesign.md](DetailedDesign.md) §2 の詳細。**th-system とは何も通信しない**（[Spec.md](../spec/Spec.md) §4 `HD-1`）。
-ここにあるのは本システムの中の通信だけ。値の名前と仮値は [-names.md](DetailedDesign-names.md)。
+[DetailedDesign.md](DetailedDesign.md) §2・§3 の詳細。**th-system とは何も通信しない**（spec [Spec.md](../spec/Spec.md) §4 `HD-1`）。
+値の名前と仮値は [-names.md](DetailedDesign-names.md)。旧版は [archive/v1/detailed/DetailedDesign-protocol.md](../archive/v1/detailed/DetailedDesign-protocol.md)。
 
 ---
 
@@ -9,102 +9,113 @@
 
 | 経路 | 方式 | 向き | 周期 | 鮮度の判定 |
 | --- | --- | --- | --- | --- |
-| ブラウザ → カメラ部 | WS `/ws` | `hold` / `release` | 押している間 `ui_hold_period_ms` ごと | カメラ部: 最後の `hold` から `hold_timeout_ms` 超で「押していない」扱い |
-| カメラ部 → ブラウザ | WS `/ws` | `state` | `state_period_ms` | ブラウザ: `ui_state_timeout_ms` 届かなければ「接続切れ」表示 |
-| カメラ部 → 昇降部 | WS（ESP32 の `:80/ws`） | `cmd` | **常に `lift_cmd_period_ms` ごと**（止まっている間も `stop` を送る＝生存確認） | 昇降部: 最後の `cmd` から `LIFT_CMD_TIMEOUT_MS` 超で停止 |
-| 昇降部 → カメラ部 | 同上 | `state` | `LIFT_STATE_PERIOD_MS` | カメラ部: `lift_state_timeout_ms` 届かなければ `LINK_LOST` |
-| カメラ部 → ブラウザ | HTTP `:8080`（`hve_video`） | 映像（MJPEG） | `video_fps` | — |
-| `hve_camera` → `hve_video` | HTTP `127.0.0.1:8080/zoom`（`POST {"level":2.5}`） | 倍率 | 変わったとき・`hve_video` の再起動を検知したとき | 外からは受けない |
+| 昇降部の画面 → 昇降部 | WS `/ws/ui` | `hold` / `release` | 押している間 `ui_hold_period_ms` ごと | 昇降部: 持ち主の `hold` が `LIFT_CMD_TIMEOUT_MS` 届かなければ停止（[DetailedDesign.md](DetailedDesign.md) §3.3） |
+| カメラモジュール → 昇降部 | WS `/ws/module` | `hello`（繋いだら 1 度）・`hold` / `release` | 昇降を動かしている間 `lift_cmd_period_ms` ごと。**止まっている間は送らない** | 同上 |
+| 昇降部 → 両方 | `/ws/ui`・`/ws/module` | `state` | `LIFT_STATE_PERIOD_MS` | 画面: `ui_state_timeout_ms`、カメラモジュール: `lift_state_timeout_ms` 届かなければ「接続切れ」／`LINK_LOST` |
+| ブラウザ ⇔ カメラモジュール | WS `/ws` | 旧版と同じ（`hold` / `release` / `zoom` ／ `state`） | 旧版と同じ | 旧版と同じ |
+| カメラモジュール → ブラウザ | HTTP `:8080/stream`（`hve_video`） | 映像（MJPEG・480p） | `video_fps` | — |
+| カメラモジュール → ブラウザ | HTTP `GET :8080/snapshot`（`hve_video`） | **静止画**（カメラの JPEG 1280×720 そのまま。spec `H-U9`） | 静止画のボタンを押したときだけ | 無ければ 503 |
+| UnitV2 → Arduino | UART（`/dev/ttyS1`・`IO_BAUD`） | `M` 行 | **常に `io_cmd_period_ms` ごと**（止まっている間も。生存確認を兼ねる） | Arduino: `IO_CMD_TIMEOUT_MS` 届かなければヨーを止める（[DetailedDesign.md](DetailedDesign.md) §3.4） |
+| Arduino → UnitV2 | 同上 | `C` 行（天井の測定ごと）・`B` 行（起動時） | 測定ごと（`SRF02_PERIOD_MS`） | UnitV2: `UnoClock` で直した古さ（§5） |
 
-**正常な切断は待たずに止める。**ブラウザの WS が閉じたらカメラ部はその場で `release` 扱い、
-カメラ部との WS が閉じたら昇降部はその場で停止（先行試作と同じ）。
+**正常な切断は待たずに止める。**持ち主の WS が閉じたら昇降部はその場で止める（`OWNER_GONE`）。
 
-## 2. メッセージ
+**カメラモジュールは、`state` が `lift_state_timeout_ms` 届かなければ、その WS を自分で閉じて繋ぎ直す。**昇降部（ESP32）が再起動すると古い TCP は切断の知らせ無しに死に、受け取りを待つだけでは永久に繋ぎ直さない（2026-10-07 実機。昇降部に書き込んだあと、カメラモジュールが `LINK_LOST` のまま戻らなかった）。繋ぎ直したら `hello` から送り直す。
+
+## 2. 昇降部の WS
 
 すべて UTF-8 の JSON テキスト 1 フレーム 1 メッセージ。`t` で種類を区別する。
-**知らない `t`・読めない JSON・型の違うフィールドは、昇降部では `stop` として扱う**（`cmd_codec`）。
 
-### 2.1 ブラウザ → カメラ部
+### 2.1 画面・上部モジュール → 昇降部
 
 ```json
-{"t":"hold","axis":"lift_up","speed":40}
-{"t":"release"}
-{"t":"zoom","level":2.5}
+{"t":"hello","ceiling_sensor":true,"name":"hve-cam","fw":"0.2.0"}
+{"t":"hold","press":17,"dir":"up","speed":40,"ceiling":{"status":"MEASURED","mm":1450,"age_ms":80}}
+{"t":"release","press":17}
 ```
 
 | フィールド | 値 |
 | --- | --- |
-| `axis` | `lift_up` / `lift_down` / `pitch_up` / `pitch_down` / `yaw_left` / `yaw_right`。**一度に動かすのは 1 軸だけ**（最後に届いた `hold` の軸） |
-| `level`（`zoom`） | 倍率。カメラ部が 1〜`zoom_max` に丸め、`zoom_step` の倍数にそろえる。**全画面で共通** |
-| `speed` | スライダーの値。単位は軸による（`lift_*` は %・`pitch_*` / `yaw_*` は deg/s）。カメラ部が設定の下限〜上限に丸める |
-
-### 2.2 カメラ部 → 昇降部
-
-```json
-{"t":"cmd","seq":1234,"dir":"up","duty":40,"ceil_ok":true}
-```
-
-| フィールド | 値 |
-| --- | --- |
-| `seq` | 送るたびに 1 増やす（ログで欠落を見るため。判定には使わない） |
+| `hello`（`/ws/module` だけ） | 繋いだら 1 度送る。**2 度目以降は無視**。`/ws/ui` で受けたら無視 |
+| `ceiling_sensor` | 距離計を持つか。**欠けている・真偽値でない・`hello` が来ていないときは `true` とみなす**（[DetailedDesign.md](DetailedDesign.md) §3.1） |
+| `name` / `fw` | 表示とログのため（判定に使わない）。欠けてよい |
+| `press` | 押し始めごとに送り手が 1 増やす整数（接続ごとに独立）。**その接続で前に見た値より大きければ「新しい押し始め」**（§3.3） |
 | `dir` | `up` / `down` / `stop` |
-| `duty` | 0〜100 の整数 [%]。MD10C の PWM デューティ比そのもの |
-| `ceil_ok` | **送るその瞬間に計算した天井の許可**（[DetailedDesign.md](DetailedDesign.md) §3）。`dir` が `up` 以外でも毎回載せる |
+| `speed` | 0 以上の整数 [mm/s]。昇降の目標の速さ（spec [Spec-ui.md](../spec/Spec-ui.md) §1。**2026-10-15 に `duty`（%）から替えた**）。**昇降部は設定の下限〜上限に丸めない**（丸めは送り手の画面の役。昇降部は 0〜`LIFT_SPEED_ABS_MAX_MM_S` に丸める）。`duty` だけの `hold` は読めない `hold` として捨てる |
+| `ceiling` | **距離計を持つ接続の `hold` だけ**意味を持つ。`status` は `MEASURED` / `TOO_NEAR` / `NO_ECHO` / `READ_ERROR`。`mm` は `MEASURED` のときだけ。`age_ms` は送るその瞬間の読み値の古さ。**欠けている・読めない・知らない `status`・型の違う中身は、`hold` を捨てずに `MISSING`（→ `CEILING_STALE`）として受け取る**（捨てると前の `hold` の値で最長 `LIFT_CMD_TIMEOUT_MS` 動き続けるので、その場で止める） |
 
-### 2.3 昇降部 → カメラ部
+**読めない JSON・知らない `t`・`ceiling` 以外のフィールドが欠けている・型の違う `hold` は捨てる**（持ち主の `hold` が途絶えれば `LIFT_CMD_TIMEOUT_MS` で止まる）。
+**`/ws/ui` で `hello` を受けたら、昇降部はその接続を閉じる**（[DetailedDesign.md](DetailedDesign.md) §3.1）。
+**読めない `release` も捨てる。**読めない `hello` は「`ceiling_sensor: true`」として扱う（その接続で `hello` を受けたことにする）。
+
+### 2.2 昇降部 → 画面・上部モジュール
 
 ```json
-{"t":"state","seq":88,"dir":"up","duty":40,"reason":"NONE","bottom":false,"height_mm":812,"height_ok":true,"top_mm":1500,"cmd_age_ms":35,"fw":"0.1.0"}
+{"t":"state","seq":88,"dir":"up","duty":52,"speed":40,"speed_meas":39,"reason":"NONE",
+ "bottom":false,"height_mm":812,"height_ok":true,"top_detect":false,
+ "ceiling":{"used":true,"status":"MEASURED","mm":1450,"age_ms":95,"ok":true,"reason":"NONE"},
+ "owner":"module","ui_clients":1,"module":{"connected":true,"ceiling_sensor":true,"ip":"192.168.5.23","name":"hve-cam"},
+ "provisional":["CEILING_MARGIN_MM","CEILING_STALE_MS","LIFT_MAX_RUN_MS"],"fw":"0.2.0"}
 ```
 
 | フィールド | 値 |
 | --- | --- |
-| `dir` / `duty` | **実際にモータへ出している**方向・デューティ（指令ではない） |
+| `dir` / `duty` | **実際にモータへ出している**方向・デューティ（`SpeedLoop` の出力） |
+| `speed` / `speed_meas` | 目標の速さ・エンコーダで測った速さ [mm/s]（`speed_meas` は上向きが正） |
 | `reason` | 停止理由（[-names.md](DetailedDesign-names.md) §3）。動いていれば `NONE` |
-| `bottom` | 下端スイッチが押されている |
-| `height_mm` / `height_ok` | 高さの超音波の最後の読み値と、それが `HEIGHT_STALE_MS` 以内の有効値か |
-| `top_mm` | 上端の閾値。未設定なら `null` |
-| `cmd_age_ms` | 最後の `cmd` からの経過 |
-| `fw` | ファームの版 |
+| `bottom` / `height_mm` / `height_ok` | 旧版と同じ形。**高さはエンコーダから**（[DetailedDesign.md](DetailedDesign.md) §4.1.1）。`height_ok` は**原点を取る前・下端スイッチの故障のとき `false`**。`W-1` の間は判定に使わない |
+| `top_detect` | 上端の検知が有効か。**`W-1` の間は常に `false`**。`false` のとき両方の画面が「上端の検知: 一時無効」を出す |
+| `ceiling.used` | いまの持ち主の命令に天井の値を使っているか（持ち主が距離計を持つ上部モジュールのとき `true`） |
+| `ceiling.status` / `mm` / `age_ms` | 持ち主の最後の `hold` に載っていた天井の値。古さは受け取ってからの経過を足したもの。持ち主がいなければ、上部モジュールの最後の `hold` の値（無ければ `null`） |
+| `ceiling.ok` / `reason` | `ceiling_check()` の結果。`reason` は `NONE` / `CEILING_NEAR` / `CEILING_STALE` / `OUT_OF_RANGE`（反射なし。`ok` は `true`） |
+| `owner` | `ui` / `module` / `null` |
+| `ui_clients` | `/ws/ui` に繋いでいる画面の数 |
+| `module` | 上部モジュールの接続。`connected` が `false` なら他は `null` |
+| `provisional` | 仮値のまま動いている昇降部の定数名（`DD-3`） |
 
-### 2.4 カメラ部 → ブラウザ
-
-```json
-{"t":"state",
- "lift":{"link":"ok","dir":"stop","duty":0,"reason":"CMD_STOP","bottom":true,"height_mm":102,"height_ok":true,"top_mm":null},
- "ceiling":{"mm":1450,"age_ms":80,"ok":true,"reason":"NONE"},
- "pitch_deg":0.0,"zoom":1.0,"video_port":8080,"active_axis":null,"reason":"NONE",
- "provisional":["ceiling_margin_mm","ceiling_stale_ms"],"fake":false,"clients":1}
-```
-
-ヨーの角度は載せない（spec [Spec-ui.md](../spec/Spec-ui.md) §1.4）。`lift.top_mm` が `null` のとき画面は「上端が未設定（開発中）」を常に出す。
-`video_port` は映像（`hve_video`・§1）のポート。**画面は映像の URL を組み立てるのにこれが要る**（2026-09-29 `WP-UI-01` で足した。宿主は画面自身と同じにする）。
-`ceiling.reason` は `NONE` / `CEILING_NEAR` / `CEILING_STALE` / `OUT_OF_RANGE`（反射なし。`ok` は `true`。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3b）。
-`reason` の選び方（**上から順に最初に当たったもの**。2026-09-28 実装時に決定）:
-1. `LINK_LOST`（昇降部と繋がっていない）
-2. いま押している軸が止められている理由（ピッチの `AXIS_LIMIT`、`lift_up` の天井の理由、昇降部の判定の理由）
-3. `HOLD_TIMEOUT`（押していた操作が途絶えた）
-4. 昇降部の `reason`（`NONE` と `CMD_STOP` は出さない。指令で止まっているだけなので）
-5. `NONE`
-
-`reason` は画面に出す停止理由（カメラ部の判断 `HOLD_TIMEOUT` / `LINK_LOST` / 天井の理由 / 昇降部の `reason` のうち最も上流のもの）。
-`provisional` は仮値のまま動いているパラメータ名（`DD-3`）。`clients` は繋いでいる画面の数（spec [Spec-ui.md](../spec/Spec-ui.md) §1.6）。
-
-## 3. 設定 API（カメラ部）
+## 3. 昇降部の HTTP
 
 | メソッド | パス | 中身 |
 | --- | --- | --- |
-| `GET` | `/api/settings` | 現在の設定 |
-| `PUT` | `/api/settings` | 設定をまるごと置き換える。検証に通らなければ `400` と理由の一覧を返し、**保存しない** |
-| `POST` | `/api/fake` | **偽物のモードのときだけ**存在する。天井・高さ・下端の偽の値を変える |
+| `GET` | `/` と画面のファイル | 昇降部の画面（埋め込み。[DetailedDesign.md](DetailedDesign.md) §4.2） |
+| `GET` | `/api/settings` | `{"settings":{"lift_up":{…},"lift_down":{…},"motor_max_pct":50},"using_defaults":false}` |
+| `PUT` | `/api/settings` | `{"lift_up":{"min":10,"max":60,"init":30},"lift_down":{…},"motor_max_pct":50}`（速度は **mm/s**、`motor_max_pct` は %）をまるごと置き換える（**3 つとも必須**）。検証に通らなければ `400` と `errors` を返し、**保存しない** |
 
-```json
-{"lift_up":  {"min":10,"max":60,"init":30},
- "lift_down":{"min":10,"max":60,"init":30},
- "pitch":    {"min":1, "max":30,"init":10},
- "yaw":      {"min":1, "max":30,"init":10}}
-```
+検証（`lift_settings`）: 3 項目が揃う／`min ≦ init ≦ max`／0〜`LIFT_SPEED_ABS_MAX_MM_S` の整数（mm/s）／`motor_max_pct` は `LIFT_MOTOR_MAX_PCT_MIN`（10）〜`LIFT_DUTY_ABS_MAX_PCT`（100）の整数（2026-10-16。spec [Spec-ui.md](../spec/Spec-ui.md) §2.1）。**昇降部が自分で検証する**（カメラモジュール側の検証は便宜のため）。
+保存は NVS（`Preferences` の名前空間 `LIFT_NVS_NAMESPACE`）。読めない・検証を通らないときは既定値で動き、`using_defaults` を `true` にする。
+**`motor_max_pct` が無い古い形で保存されていたら、検証を通らないので全体が既定値（`motor_max_pct` は 50）になる**（実機にはまだ mm/s の設定を保存していないので、移し替えは作らない）。
 
-検証: 4 項目すべてが揃う／`min ≦ init ≦ max`／`lift_*` は 0〜100・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`。
-保存は一時ファイルに書いてから置き換える（書き込み途中の電源断で壊さない）。
-ファイルが無い・壊れているときは既定値（[-names.md](DetailedDesign-names.md) §5）で動き、画面に出す。
+## 4. カメラモジュールの HTTP・WS（旧版からの変更だけ）
+
+| 変更 | 中身 |
+| --- | --- |
+| `GET /api/settings` | 自分のピッチ・ヨーの設定と、**昇降部から取った**昇降の設定をまとめて返す（4 軸 ＋ 昇降部の `motor_max_pct`）。昇降部に繋がらないときは `503` |
+| `PUT /api/settings` | 4 軸と `motor_max_pct` をまとめて受ける。**先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`）→ 成功したら自分の 2 軸を保存**（`motor_max_pct` は自分では保存しない。持ち主は昇降部）。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
+| `state.lift` | 昇降部の `state` のうち `dir`・`duty`・`speed`・`speed_meas`・`reason`・`bottom`・`height_mm`・`height_ok`・`top_detect`・`owner`・`ui_clients` を載せる。**昇降部の IP**（`lift_ip`）も載せる（画面に昇降部へのリンクを出す。[DetailedDesign.md](DetailedDesign.md) §4.6） |
+| `state.ceiling` | 自分で測った値（`status`・`mm`・`age_ms`）と、**昇降部が返した判定**（`ok`・`reason`）。カメラモジュールは許可を計算しない。**判定は、カメラモジュールが持ち主で昇降部が判定を返しているときだけ載せ、それ以外（止まっている・別の画面が持ち主・昇降部が `ceiling` を返さない）は `ok`・`reason` を `null` にする**（昇降部と切れているときは `ok: false`・`reason: LINK_LOST`）。2026-10-07 実機: 判定が無いのに `CEILING_STALE` を入れていたので、止まっている間ずっと画面が「天井 値なし」になり、上昇ボタンも薄くなっていた |
+| 画面の天井のバッジ | **判定（`reason`）があればそれで出す。無ければ自分で測った `status` で出す**（`MEASURED` → 距離・`TOO_NEAR` → 近すぎ・`NO_ECHO` → 範囲外・`READ_ERROR`／値が無い → 値なし）。**上昇ボタンを薄くするのは、昇降部と切れているときと、判定が `ok: false` のときだけ**（判定が無いだけでは薄くしない。上昇してよいかは昇降部が決める） |
+| `state.reason` | 旧版の選び方のうち、天井の理由は昇降部の `ceiling.reason` を使う。`IO_LOST`（Arduino から行が来ない）を `LINK_LOST` の次に足す |
+
+## 5. UART（UnitV2 ⇔ Arduino）
+
+ASCII の 1 行 1 メッセージ。区切りは空白 1 つ、行末は `\n`。1 行は `IO_LINE_MAX` 文字以内。**読めない行は捨てる。**
+
+| 行 | 向き | 形 | 意味 |
+| --- | --- | --- | --- |
+| `M` | UnitV2 → Arduino | `M <seq> <pitch_ddeg> <yaw_hsps>` | `seq`: 0〜65535 で一周する連番（ログ用）。`pitch_ddeg`: ピッチの目標角 [0.1°]（整数）。`yaw_hsps`: ヨーの半ステップの速さ [1 秒あたり]（整数・符号が向き。0 で止める） |
+| `C` | Arduino → UnitV2 | `C <uno_ms> <st> <cm>` | 天井の測定 1 回。`uno_ms`: Arduino の `millis()`（32 bit・符号なし）。`st`: `0`＝読めた・`1`＝I2C で読めない。`cm`: SRF02 の生の値 [cm]（`st` が `1` なら `0`） |
+| `B` | Arduino → UnitV2 | `B <uno_ms> <fw>` | 起動した。UnitV2 は `UnoClock` をやり直す |
+
+**汎用の 4 状態への直し方（UnitV2 の `classify_srf02()`）**:
+
+| 入力 | 状態 |
+| --- | --- |
+| `st` が `1`、または古さが `ceiling_read_stale_ms` を超えた、または行が来ていない | `READ_ERROR` |
+| `cm` が `SRF02_NO_ECHO_RAW`（0） | `NO_ECHO` |
+| `cm × 10` が `srf02_min_range_mm` 未満 | `TOO_NEAR` |
+| それ以外 | `MEASURED`（`mm` ＝ `cm × 10`） |
+
+**古さの測り方（`UnoClock`）**: 行を受け取るたびに `d = 受け取った時刻 − uno_ms` を記録し、直近 `uno_clock_window` 行の `d` の最小を `offset` とする。
+読み値の古さ ＝ 今 −（`uno_ms` ＋ `offset`）。`uno_ms` が前の行より小さくなった・`B` を受けたら、記録を捨ててやり直す。
+**読むたびに受信バッファを全部読み出し**、天井は最も新しい `uno_ms` の行だけを使う。
+**前回読んでから `ceiling_read_stale_ms` より長く空いたら、その回の行はすべて捨てる**（次の回に読めた行が来るまで `READ_ERROR`。[DetailedDesign.md](DetailedDesign.md) §3.5）。

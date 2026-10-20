@@ -1,4 +1,4 @@
-"""`python3 -m hve_video [--fake] [--port N]` の入口（DetailedDesign.md §4.3）。"""
+"""`python3 -m hve_video [--fake] [--port N]` の入口（DetailedDesign.md §4.4）。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from hve_video.sources import open_source
 DEFAULT_PORT = 8080
 # 起動時の倍率（spec Spec-ui.md §1.5「画面を開いたとき 1 倍から始まる」）
 INITIAL_ZOOM = 1.0
+
+
+async def _release_pipeline(app: web.Application) -> None:
+    app["pipeline"].release()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,7 +48,11 @@ def main(argv: list[str] | None = None) -> int:
 
     params = load_params()
     source = open_source(
-        args.fake, params["video_capture_width"], params["video_capture_height"]
+        args.fake,
+        params["video_capture_width"],
+        params["video_capture_height"],
+        params["video_capture_fps"],
+        params["video_device"],
     )
     pipeline = VideoPipeline(
         source,
@@ -61,11 +69,12 @@ def main(argv: list[str] | None = None) -> int:
         params["video_out_height"],
         params["video_jpeg_quality"],
     )
-    web.run_app(
-        create_app(pipeline, params["video_fps"]),
-        port=args.port,
-        on_shutdown=[pipeline.release],
+    app = create_app(
+        pipeline, params["video_fps"], params["video_send_timeout_ms"]
     )
+    # aiohttp 3.6.2（UnitV2）の `run_app` には `on_shutdown` 引数が無いので、アプリに登録する
+    app.on_shutdown.append(_release_pipeline)
+    web.run_app(app, port=args.port)
     return 0
 
 
