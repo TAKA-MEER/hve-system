@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hve-system モックアップ</title>
+<!-- GitHub Pages（main の docs/）の入口。モックアップの本体は写さずにリンクする（写すと食い違う） -->
+<style>
+:root{--bg:#0f1117;--panel:#1a1d24;--bd:#2a2d35;--tx:#e6e8ec;--mut:#8b93a1;--brand:#3f8ae0}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:var(--bg);color:var(--tx);padding:24px 16px;
+  font:15px/1.6 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
+main{max-width:640px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+p{color:var(--mut);margin:0 0 20px}
+a.card{display:block;padding:14px 16px;margin-bottom:12px;border:1px solid var(--bd);border-radius:10px;
+  background:var(--panel);color:var(--tx);text-decoration:none}
+a.card:hover{border-color:var(--brand)}
+a.card b{color:var(--brand)}
+a.card span{display:block;color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>hve-system 昇降・カメラ</h1>
+  <p>操作画面の見た目と操作感を確かめるための静的なモックアップ（実装ではない）。</p>
+  <a class="card" href="plan/spec/mockup/"><b>カメラモジュールの画面</b>
+    <span>映像・昇降・ヨー・ピッチ・設定。ヘッダの紫の「モック」で状況（天井が近い・切断など）を再現できる</span></a>
+  <a class="card" href="https://github.com/TAKA-MEER/hve-system/blob/main/docs/plan/spec/Spec-ui.md"><b>Spec-ui.md</b>
+    <span>画面の仕様（正本）。モックアップと同じ画面構成を持つ</span></a>
+</main>
+</body>
+</html>
