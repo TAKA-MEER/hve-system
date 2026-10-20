@@ -3,6 +3,7 @@
 **何を・どの順番で作るか。**進捗はこのファイルの「状態」列を更新して共有する。
 
 - **2026-10-06 から v2（ブランチ `redesign/v2`）。§1・§3〜§6 は v2 の作業パケットで書き直した。**旧版（[archive/v1/](archive/v1/spec/README.md)）の進捗は §4 の末尾に要約だけ残す。
+- **2026-10-20 に `redesign/v2` を `main` へマージした**（`8c95b48`。GitHub Pages を `main` の `docs/` から公開するため。モックアップは <https://taka-meer.github.io/hve-system/plan/spec/mockup/>）。
 - 何を作るかは [完全設計書](spec/README.md)（正本）と [詳細設計書](detailed/README.md) にある。
   ここはその**順番と進み具合**だけを扱う。
 - 進め方（§2）は th-system の [ImplementationPlan.md](../../../th-system/docs/plan/ImplementationPlan.md) §2 を
