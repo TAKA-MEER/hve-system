@@ -3,7 +3,7 @@
 **何を・どの順番で作るか。**進捗はこのファイルの「状態」列を更新して共有する。
 
 - **2026-10-06 から v2（ブランチ `redesign/v2`）。§1・§3〜§6 は v2 の作業パケットで書き直した。**旧版（[archive/v1/](archive/v1/spec/README.md)）の進捗は §4 の末尾に要約だけ残す。
-- **2026-10-20 に `redesign/v2` を `main` へマージした**（`8c95b48`。GitHub Pages を `main` の `docs/` から公開するため。モックアップは <https://taka-meer.github.io/hve-system/plan/spec/mockup/>）。
+- **2026-10-20 に `redesign/v2` を `main` へマージした**（`8c95b48`。GitHub Pages を `main` の `docs/` から公開するため。`redesign/v2` は 2026-10-22 に消した。以降の作業ブランチは `main` から切る。モックアップは <https://taka-meer.github.io/hve-system/plan/spec/mockup/>）。
 - 何を作るかは [完全設計書](spec/README.md)（正本）と [詳細設計書](detailed/README.md) にある。
   ここはその**順番と進み具合**だけを扱う。
 - 進め方（§2）は th-system の [ImplementationPlan.md](../../../th-system/docs/plan/ImplementationPlan.md) §2 を
@@ -87,7 +87,7 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 #### orca の場合（th-system が 2026-10-01 に試用。hve-system では 2026-10-07 の `WP-BASE-02` から使っている）
 
 ```bash
-orca worktree create --name <n> --no-parent --setup skip --base-branch <元のブランチ> --agent opencode --json   # worktree 作成と opencode 起動を 1 回で（v2 の間は --base-branch redesign/v2）
+orca worktree create --name <n> --no-parent --setup skip --base-branch <元のブランチ> --agent opencode --json   # worktree 作成と opencode 起動を 1 回で（元のブランチは main）
 git -C <worktreeのpath> branch -m <n> <種別>/<主題>     # orca はブランチ名を <n> にするので付け替える
 mkdir -p <worktreeのpath>/.briefs/tmp                    # .briefs は gitignore なので新しい worktree には無い。ブリーフもここに置く
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json   # satisfied:true を確かめてから送る
@@ -247,7 +247,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | 6 | ~~`WP-LIFT-05`~~（`f26d373`）／ ~~`WP-LIFT-06`~~（`9df0689`）／ ~~`WP-LIFTUI-02`~~（`c71e04c`）／ ~~`WP-CAM-06`~~（`930f31e`）。**4 つとも実機確認はまだ**（`hold` の `speed` は 4 つ揃って入れる。**速さの制御の実機確認は 6a のマージ後**。6a は 2026-10-16 にマージ済み）→ `WP-LIFT-07`（`W-1` を閉じる。**LIFT-05 の実機確認のあと**）。エンコーダの分解能（`ENC_PPR`）を手元の個体で確かめる | 実機確認待ち |
 | 6a | ~~`WP-LIFT-08`~~（`10534df`。実機確認はまだ）／ ~~`WP-CAM-07`~~（`7664f32`）。モータへの出力の上限を設定に（既定 50 %。spec 2026-10-16）。**2 つ揃ったので、速さの制御（行 6）と一緒に実機に入れる** | 実機確認待ち |
 | ~~6b~~ | ~~`WP-VIDEO-03`~~（`2d3624c`。実機確認済み。配信を 1 か所の作り直しにまとめ、送れない接続を RST で捨てる）。**残り**: 空きメモリが 13.5 MB（`hve_camera` の RSS 48.9 MB。起動 1 時間・1 分では増えず。漏れか元の大きさかは未確認）→ `WP-MEAS-02`・`05` の長時間運転で `hve_camera`・`hve_video` の RSS を記録する | |
-| ~~6c~~ | ~~`WP-UI-03`~~（`01f1851`）／ ~~`WP-CAM-08`~~（`44fd636`）。`WP-CAM-08` は実機確認済み。**`WP-UI-03` の実機確認はまだ**（Wi-Fi の端末で一瞬の「映像がありません」が出ない）。**別件**: `browser_paths.js` の試験 9（静止画が取れないときの案内）が `redesign/v2` で NG のまま | 実機確認待ち |
+| ~~6c~~ | ~~`WP-UI-03`~~（`01f1851`）／ ~~`WP-CAM-08`~~（`44fd636`）。`WP-CAM-08` は実機確認済み。**`WP-UI-03` の実機確認はまだ**（Wi-Fi の端末で一瞬の「映像がありません」が出ない）。**別件**: `browser_paths.js` の試験 9（静止画が取れないときの案内）が `main`（旧 `redesign/v2`）で NG のまま | 実機確認待ち |
 | 7 | `WP-MEAS-01`〜`05`（`WP-MEAS-01` で `LIFT_UM_PER_COUNT`・速さの係数・`LIFT_TOP_MM` も決める） | 未着手 |
 | 随時 | 組み立て用ファーム（`env:esp32dev_manual`。スイッチで回すだけ・台帳 `W-2`。メカ担当向け）。**実機確認はまだ**。組み立てが終わったら本番を書き戻して `W-2` を閉じる | 実装あり（実機確認待ち） |
 | いつでも | 先方・機構側に聞く値（`H-V1`・`H-V2`）／目標 `H-G1` | 未着手 |

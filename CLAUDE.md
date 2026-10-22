@@ -12,7 +12,7 @@ th-system（`../th-system`）の完全設計書が「範囲外（別担当）」
 （文書の役割分担・herdr／orca ＋ opencode による実装・受け入れ検査・git 運用）。
 **構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/archive/v1/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/archive/v1/detailed/DetailedDesign-hardware.md)）。
 
-**2026-10-06 から、使用できる機器が増えたため設計から見直している（ブランチ `redesign/v2`。2026-10-20 に `main` へマージ済み。GitHub Pages は `main` の `docs/` を公開する）。**
+**2026-10-06 から、使用できる機器が増えたため設計から見直している（ブランチ `redesign/v2` で進め、2026-10-20 に `main` へマージしてブランチは消した。以降は `main` から切る。GitHub Pages は `main` の `docs/` を公開する）。**
 上の実装と構成は旧版（v1）で、その spec・detailed は `docs/plan/archive/v1/` に移した。
 `docs/plan/spec/`・`detailed/` は v2 で書き直した。**2026-10-15 に、昇降の高さを HC-SR04 からロープ巻き取りのエンコーダ E6A2-CW3C に替え、速さを mm/s のフィードバック制御にした**（spec・実装とも。実機確認はまだ）。v2 の実装は 2026-10-07 から（進み具合は [ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1・§6）。**v2 で触っていない旧版のコードのコメントにある spec・detailed への参照は旧版を指す**（触ったら v2 に直す。[spec/README.md](docs/plan/spec/README.md)）。
 
