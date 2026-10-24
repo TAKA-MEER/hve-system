@@ -56,6 +56,9 @@ HoldMsg down_hold(int press, int speed = 40) {
   return hold;
 }
 
+// エンコーダ 1 周のカウント（ENC_PPR 360 の 4 逓倍）。設計値で 37.5 mm。
+constexpr int32_t kCountsPerRev = 4 * 360;
+
 void assert_reason(StopReason expected, const LiftState& state) {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(expected), static_cast<int>(state.reason));
 }
@@ -423,6 +426,56 @@ void test_stall_when_encoder_runs_backwards() {
   assert_reason(StopReason::ENCODER_STALL, stalled);
 }
 
+// (c2) 500 ms で 0.8 mm に満たない進み（20 カウント ≈ 520 µm）は #8a で止まる。
+// 仮の 100 µm のままだと 20 カウント＝2 mm で「進んだ」と数えて止まらない。
+// 閾値を 8 カウントに戻しても、20 カウントで起点を取り直して止まらない。
+void test_stall_when_progress_is_under_800_um() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  for (uint32_t t = 0; t <= 500; t += 100) {
+    // 500 ms で 20 カウントだけ進める
+    hal.set_encoder_count(static_cast<int32_t>(20 * t / 500));
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    TEST_ASSERT_TRUE(ctrl.step(t).dir == LiftDir::UP);
+  }
+  hal.set_encoder_count(20);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 600), 600);
+  const LiftState stalled = ctrl.step(600);
+  TEST_ASSERT_FALSE(hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(0, hal.motor_duty());
+  assert_reason(StopReason::ENCODER_STALL, stalled);
+}
+
+// (c3) 800 µm 以上進んでいれば止まらない（100 ms ごとに 20 カウント ≈ 520 µm）
+void test_no_stall_while_progress_reaches_800_um() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  for (uint32_t t = 0; t <= 600; t += 100) {
+    hal.set_encoder_count(static_cast<int32_t>(20 * (t / 100)));
+    ctrl.on_hold(ui(1), up_hold(1, 40, t), t);
+    const LiftState state = ctrl.step(t);
+    assert_reason(StopReason::NONE, state);
+  }
+  TEST_ASSERT_TRUE(hal.motor_moving());
+}
+
+// (c4) 速さの測定は LIFT_UM_PER_COUNT を使う。1440 カウント / 100 ms は
+// 37.5 mm / 100 ms ＝ 約 374 mm/s。100 µm で測ると 1440 mm/s になる。
+void test_speed_meas_uses_um_per_count() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  hal.set_encoder_count(0);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 0), 0);
+  ctrl.step(0);
+  hal.set_encoder_count(kCountsPerRev);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 100), 100);
+  const LiftState state = ctrl.step(100);
+  TEST_ASSERT_EQUAL_INT(374, state.speed_meas);
+}
+
 // (d) 止まって押し直すと積分が残っていない（最初の出力が前向きの値だけ）
 void test_integral_is_reset_after_stop_and_repress() {
   FakeHal hal;
@@ -700,6 +753,9 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_lowering_cap_mid_motion_applies_on_next_cycle);
   RUN_TEST(test_stall_when_encoder_never_moves);
   RUN_TEST(test_stall_when_encoder_runs_backwards);
+  RUN_TEST(test_stall_when_progress_is_under_800_um);
+  RUN_TEST(test_no_stall_while_progress_reaches_800_um);
+  RUN_TEST(test_speed_meas_uses_um_per_count);
   RUN_TEST(test_integral_is_reset_after_stop_and_repress);
   RUN_TEST(test_opposite_direction_moves_after_stall);
   RUN_TEST(test_integral_is_reset_when_owner_changes);
