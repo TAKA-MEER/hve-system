@@ -25,7 +25,8 @@ constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上�
 constexpr int LIFT_MOTOR_MAX_PCT_MIN = 10;      // モータへの出力の上限の下限 [%]（同上。上限は LIFT_DUTY_ABS_MAX_PCT）
 constexpr int LIFT_SPEED_ABS_MAX_MM_S = 100;    // 速さの絶対上限 [mm/s]（仮。H-V3）
 constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進まなければ止めるまでの時間（仮）
-constexpr int LIFT_STALL_MIN_COUNTS = 8;        // 止めずに済む進行方向への最小の進み [counts]（仮）
+// 止めずに済む進行方向への最小の進みは hal_core.h の LIFT_STALL_MIN_UM /
+// LIFT_STALL_MIN_COUNTS（µm で決めて LIFT_UM_PER_COUNT で割る。#8a）
 
 // 昇降部からカメラ部へ返す状態（DetailedDesign-protocol.md §2.2）
 struct LiftState {

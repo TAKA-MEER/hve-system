@@ -84,7 +84,7 @@ LiftDecideResult lift_decide(const LiftDecideInput& in) {
   }
 
   // 表 8a 同じ方向の命令が続く間に、モータへ出力しているのに LIFT_STALL_MS の間
-  // エンコーダが進行方向へ LIFT_STALL_MIN_COUNTS 未満しか進まない（逆向きも）。
+  // エンコーダが進行方向へ LIFT_STALL_MIN_UM（0.8 mm）未満しか進まない（逆向きも）。
   // 数え方は #8 と同じく、命令が stop になるか向きが替わるまで続ける
   if (in.stalled) {
     return stop_with(StopReason::ENCODER_STALL);
