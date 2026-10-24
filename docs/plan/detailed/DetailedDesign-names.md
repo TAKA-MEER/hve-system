@@ -159,7 +159,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`LIFT_SPEED_CTRL_MS`** / **`LIFT_SPEED_WINDOW_MS`** | `speed_loop.h` | 20 / 100 | **仮** |
 | **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.5 / 2.0（%/(mm/s)・%/mm） | **仮**（`WP-MEAS-01` で合わせる） |
 | **`LIFT_FF_UP_PCT_PER_MM_S`** / **`LIFT_FF_DOWN_PCT_PER_MM_S`** | `speed_loop.h` | 0.5 / 0.3 | **仮**（同上） |
-| **`LIFT_STALL_MS`** / **`LIFT_STALL_MIN_COUNTS`** | `lift_decide.h` | 500 / 8 | **仮**（spec #4d。動き出しの遅れより長く）。**8 カウントは `LIFT_UM_PER_COUNT` = 100 の前提で 0.8 mm。26 µm では 0.2 mm に縮むので `WP-LIFT-09` で mm から決め直す** |
+| **`LIFT_STALL_MS`** | `lift_decide.h` | 500 | **仮**（spec #4d。動き出しの遅れより長く） |
+| **`LIFT_STALL_MIN_UM`** / **`LIFT_STALL_MIN_COUNTS`** | `hal_core.h` | 800 / 31（µm で決め、`LIFT_UM_PER_COUNT` で割って切り上げ。`WP-LIFT-09`） | **仮**（spec #4d。`lift_decide.h` から `hal_core.h` は include すると循環するのでこちらに置く） |
 | `LIFT_STATE_PERIOD_MS` | `config.h` | 100 | **仮** |
 | **`LIFT_WS_UI_PATH`** / **`LIFT_WS_MODULE_PATH`** | `config.h` | `/ws/ui` / `/ws/module` | [-protocol.md](DetailedDesign-protocol.md) §1（v1 の `LIFT_WS_PATH` は廃止） |
 | **`LIFT_NVS_NAMESPACE`** | `config.h` | `hve_lift_mm`（`WP-LIFT-06` で `hve_lift` から替える。% で保存した値を mm/s と読まないため） | [-protocol.md](DetailedDesign-protocol.md) §3 |
@@ -171,7 +172,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`ENC_PPR`** | `config.h` | 360 | E6A2-CW3C（2026-10-25 確定。[-hardware.md](DetailedDesign-hardware.md) §1.1） |
 | **`ENC_GLITCH_FILTER_NS`** | `config.h` | 1000 | **仮**（PCNT のノイズ除去） |
 | **`ENC_UP_SIGN`** | `hal_core.h` | +1 | **仮**（上昇で数が増える向き。実機で確かめる） |
-| **`LIFT_UM_PER_COUNT`** | `hal_core.h` | **26**（設計値。エンコーダ 1 周の上昇 37.5 mm ÷ (4 × `ENC_PPR`)。µm にして整数で持つ。**コードは仮の 100 のまま → `WP-LIFT-09`**） | spec `H-V12`。[-hardware.md](DetailedDesign-hardware.md) §1.1。`WP-MEAS-01` で全行程を測って直す |
+| **`LIFT_UM_PER_COUNT`** | `hal_core.h` | **26**（設計値。エンコーダ 1 周の上昇 37.5 mm ÷ (4 × `ENC_PPR`)。µm にして整数で持つ。`WP-LIFT-09` で反映） | spec `H-V12`。[-hardware.md](DetailedDesign-hardware.md) §1.1。`WP-MEAS-01` で全行程を測って直す |
 | **`HOME_SLACK_MM`** | `hal_core.h` | 20 | **仮**（`P-14`） |
 | **`EncoderHeight`** | `hal_core.h` | 原点・故障（`P-14`）・高さの式を持つ小さな状態（`WP-LIFT-05`） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
 | **`PcntQuadConfig`** / **`kPcntQuadEncoder`** / **`pcnt_quad_step`** | `hal_core.h` | A/B 4 逓倍のチャンネル設定・その値・(A,B) 1 段の遷移の増減（`WP-LIFT-05` 差し戻し 1） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
