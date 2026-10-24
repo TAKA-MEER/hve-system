@@ -51,10 +51,11 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-CAM-06` | 5 | カメラモジュール（アプリ・画面）を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要（偽物のモード） |
 | `WP-LIFT-08` | 5 | **モータへの出力の上限を設定に**（`motor_max_pct`・`SpeedLoop` の丸め・設定 API・NVS・昇降部の画面・偽の昇降部）。spec 2026-10-16 | LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-CAM-07` | 5 | カメラモジュール（設定の検証・中継・偽物のモード・画面）に `motor_max_pct` を足す | LIFT-08（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-09` | 5 | **高さの換算を機構の設計値にする**（`LIFT_UM_PER_COUNT` 100 → 26・`LIFT_STALL_MIN_COUNTS` を mm から決め直す・試験の換算）。2026-10-25 | LIFT-05・LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
-`WP-MEAS-01`（ストローク）で `ENC_PPR` の確認・`LIFT_UM_PER_COUNT`・速さの制御の係数・`LIFT_TOP_MM` を決める。
+`WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
 
 **`WP-LIFT-08` と `WP-CAM-07`**: 設定 API の `motor_max_pct` は必須なので、片方だけ新しいと `PUT` が `400` になる。**2 つ揃えてから実機に入れる。**`docs/使い方.md` の設定の節は `WP-LIFT-08` が書き、`WP-CAM-07` はカメラモジュールの画面の欄だけ足す（LIFT-08 のマージ後に始める）。
 
@@ -249,6 +250,16 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
 - 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
+
+### `WP-LIFT-09` 高さの換算を機構の設計値にする
+
+- 読む節: [-hardware.md](DetailedDesign-hardware.md) §1.1（分解能・高さへの換算）、[-names.md](DetailedDesign-names.md) §5.1、[DetailedDesign.md](DetailedDesign.md) §4.1.1・§4.1.2
+- 作るもの: `hal_core.h` の `LIFT_UM_PER_COUNT` を 26 に（コメントを「設計値。`WP-MEAS-01` で全行程を測って直す」に）・`config.h` の `ENC_PPR` のコメントから「要確認」を消す・`LIFT_STALL_MIN_COUNTS` を **mm で決めた値（いまと同じ 0.8 mm）から `LIFT_UM_PER_COUNT` で割って出す**形に（`LIFT_STALL_MIN_UM` などを置く）。試験の換算（`test_hal_core` の `kCountsPerMm = 1000 / LIFT_UM_PER_COUNT` は 26 で割り切れない。`600` カウント＝10 mm のような直書きの数も）を µm で計算する形に直す。**`docs/使い方.md`** に高さの換算の記述があれば直す
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev` が成功。**次の変異がそれぞれ赤になる**
+  1. `LIFT_UM_PER_COUNT` を 100 に戻す（試験が定数の値そのものではなく、カウント → mm の換算と #8a の止まる進みを縛る）
+  2. ※ `LIFT_STALL_MIN_COUNTS` を 8 に戻す（0.2 mm しか進まなくても `ENCODER_STALL` で止まらない。`LiftController` と偽 HAL で縛る）
+  3. ※ 速さの測定で `LIFT_UM_PER_COUNT` を掛け忘れる（`state.speed_meas` が約 38 倍になる）
+- **実機で管理担当が確かめる**: 昇降機を測れる距離（例 300 mm）だけ上げて、`state` の高さと巻尺の差を記録する（`WP-MEAS-01` の前段）
 
 ### `WP-LIFT-07` 上端の検知を戻す（`W-1` を閉じる）
 
