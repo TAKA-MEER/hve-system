@@ -12,9 +12,18 @@
 
 // 上昇で数が増える向き。実機で確かめるまで仮（+1）。
 constexpr int ENC_UP_SIGN = +1;  // 仮
-// 1 カウントあたりの巻き取りの進み [µm]。仮（H-V12。WP-MEAS-01 で巻き取りの周長 ÷
-// (4 × ENC_PPR) に直す）。整数で持つ。
-constexpr int32_t LIFT_UM_PER_COUNT = 100;  // 仮（H-V12。WP-MEAS-01 で巻き取りの周長 ÷ (4 × ENC_PPR) に直す）
+// 1 カウントあたりの上昇 [µm]。設計値（エンコーダ 1 周 37.5 mm ÷ (4 × ENC_PPR 360)
+// ＝ 26.04 µm。DetailedDesign-hardware.md §1.1。整数に丸めたずれ 0.16 %）。
+// WP-MEAS-01 で全行程を測って直す。
+constexpr int32_t LIFT_UM_PER_COUNT = 26;
+
+// #8a（ENCODER_STALL）で止めずに済む進行方向への最小の進み [µm]。
+// 0.8 mm。カウントは LIFT_UM_PER_COUNT で割って出す（26 µm なら 31）。
+constexpr int32_t LIFT_STALL_MIN_UM = 800;
+// 切り上げる: 800 µm に満たない進みで止める側に倒す。切り捨てると、たとえば
+// 30 カウント（780 µm）でも「進んだ」と数えて下限を割る。
+constexpr int32_t LIFT_STALL_MIN_COUNTS =
+    (LIFT_STALL_MIN_UM + LIFT_UM_PER_COUNT - 1) / LIFT_UM_PER_COUNT;
 // 下端スイッチが押されたまま上昇側へ進んでよい余裕 [mm]。仮（P-14）。
 // 超えたらスイッチの故障とみなす（DetailedDesign.md §4.1.1）。
 constexpr int HOME_SLACK_MM = 20;  // 仮（P-14）

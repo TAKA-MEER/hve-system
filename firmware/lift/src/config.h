@@ -23,7 +23,7 @@ constexpr uint8_t BOTTOM_PIN = 32;
 // A/B 2 相・オープンコレクタ。3.3 V へ 2.2 kΩ でプルアップ（5 V へプルアップしない）
 constexpr uint8_t ENC_A_PIN = 25;
 constexpr uint8_t ENC_B_PIN = 26;
-// 要確認: 手元の個体の型番の末尾（100/200/360/500）
+// 360 P/R（E6A2-CW3C。2026-10-25 確定。DetailedDesign-hardware.md §1.1）
 constexpr int ENC_PPR = 360;
 // PCNT のノイズ除去の幅 [ns]。**仮**
 constexpr int ENC_GLITCH_FILTER_NS = 1000;
