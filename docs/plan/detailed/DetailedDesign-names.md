@@ -157,8 +157,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}`（**mm/s**。spec 2026-10-15 で % から替えた） | **仮**（数だけ旧版の例の値。`H-V3`） |
 | **`LIFT_SPEED_ABS_MAX_MM_S`** | `lift_decide.h` | 100 | **仮**（設定の検証の上限・命令の丸め。`H-V3`） |
 | **`LIFT_SPEED_CTRL_MS`** / **`LIFT_SPEED_WINDOW_MS`** | `speed_loop.h` | 20 / 100 | **仮** |
-| **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.5 / 2.0（%/(mm/s)・%/mm） | **仮**（`WP-MEAS-01` で合わせる） |
-| **`LIFT_FF_UP_PCT_PER_MM_S`** / **`LIFT_FF_DOWN_PCT_PER_MM_S`** | `speed_loop.h` | 0.5 / 0.3 | **仮**（同上） |
+| **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.12 / 0.8（%/(mm/s)・%/mm） | 2026-10-26 に実機で合わせた（0.5 / 2.0 は 5 Hz で 0〜35 % を往復した。30 mm/s で上昇・下降とも平均 30 ± 1 mm/s）。`WP-MEAS-01` で速さを変えて確かめる |
+| **`LIFT_FF_UP_PCT_PER_MM_S`** / **`LIFT_FF_DOWN_PCT_PER_MM_S`** | `speed_loop.h` | 0.4 / 0.22 | 同上（30 mm/s に要った出力: 上昇 13〜16 %・下降 6〜8 %） |
 | **`LIFT_STALL_MS`** | `lift_decide.h` | 500 | **仮**（spec #4d。動き出しの遅れより長く） |
 | **`LIFT_STALL_MIN_UM`** / **`LIFT_STALL_MIN_COUNTS`** | `hal_core.h` | 800 / 31（µm で決め、`LIFT_UM_PER_COUNT` で割って切り上げ。`WP-LIFT-09`） | **仮**（spec #4d。`lift_decide.h` から `hal_core.h` は include すると循環するのでこちらに置く） |
 | `LIFT_STATE_PERIOD_MS` | `config.h` | 100 | **仮** |

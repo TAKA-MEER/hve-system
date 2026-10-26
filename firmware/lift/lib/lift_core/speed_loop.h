@@ -7,13 +7,13 @@
 
 #include "lift_decide.h"  // LiftDir・LIFT_DUTY_ABS_MAX_PCT
 
-// 速さの制御の定数（DetailedDesign-names.md §5.1。すべて仮）
+// 速さの制御の定数（DetailedDesign-names.md §5.1）。KP・KI・FF は 2026-10-26 に実機で合わせた
 constexpr uint32_t LIFT_SPEED_CTRL_MS = 20;    // 制御の周期
 constexpr uint32_t LIFT_SPEED_WINDOW_MS = 100;  // 速さを測る窓
-constexpr float LIFT_SPEED_KP = 0.5f;           // [%/(mm/s)]。仮（WP-MEAS-01 で合わせる）
-constexpr float LIFT_SPEED_KI = 2.0f;           // [%/mm]。仮（同上）
-constexpr float LIFT_FF_UP_PCT_PER_MM_S = 0.5f;    // 上昇の前向き。仮（同上）
-constexpr float LIFT_FF_DOWN_PCT_PER_MM_S = 0.3f;  // 下降の前向き。仮（同上）
+constexpr float LIFT_SPEED_KP = 0.12f;          // [%/(mm/s)]。0.5 では 5 Hz で 0〜35 % を往復した
+constexpr float LIFT_SPEED_KI = 0.8f;           // [%/mm]
+constexpr float LIFT_FF_UP_PCT_PER_MM_S = 0.4f;    // 上昇の前向き（30 mm/s に 13〜16 % 要った）
+constexpr float LIFT_FF_DOWN_PCT_PER_MM_S = 0.22f; // 下降の前向き（30 mm/s に 6〜8 % 要った）
 
 // エンコーダの数の差と経過時間から、上向きが正の速さ [mm/s] を求める純関数。
 // um_per_count は 1 カウントあたりの進み [µm]、up_sign は上昇で数が増える向き。
