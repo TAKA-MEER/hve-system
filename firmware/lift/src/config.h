@@ -13,8 +13,8 @@
 // MD10C（DIR + PWM の 2 線）。先行試作から付け替えた（2026-10-16）
 constexpr uint8_t MOTOR_DIR_PIN = 27;
 constexpr uint8_t MOTOR_PWM_PIN = 14;
-// DIR = HIGH で上昇するか。**実機配線で確認するまで仮**（false にすると逆向きになる）
-constexpr bool MOTOR_DIR_UP_LEVEL = true;
+// DIR = HIGH で上昇するか。2026-10-26 にモータの位置が変わって向きが逆になったので false（実機で確認）
+constexpr bool MOTOR_DIR_UP_LEVEL = false;
 
 // 下端リミットスイッチ。**仮**。INPUT_PULLUP + 常時閉（NC）配線
 constexpr uint8_t BOTTOM_PIN = 32;
