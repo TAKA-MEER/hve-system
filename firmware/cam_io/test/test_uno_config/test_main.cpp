@@ -61,10 +61,12 @@ void test_yaw_pins_match_portd_upper_bits() {
 void test_servo_pulse_at_both_pitch_limits_stays_inside() {
   // ピッチの両端（PITCH_MIN_DEG〜MAX_DEG＝±60°）のパルスが MIN〜MAX の中に入る関係。
   // 仮値のどれかだけを変えて食い違うと、サーボに範囲外のパルスが出る
-  const int lo = SERVO_PULSE_CENTER_US + (PITCH_MIN_DEG * SERVO_US_PER_DEG) / 10;
-  const int hi = SERVO_PULSE_CENTER_US + (PITCH_MAX_DEG * SERVO_US_PER_DEG) / 10;
-  TEST_ASSERT_TRUE_MESSAGE(lo >= SERVO_PULSE_MIN_US, "下端のパルスが MIN を割らない");
-  TEST_ASSERT_TRUE_MESSAGE(hi <= SERVO_PULSE_MAX_US, "上端のパルスが MAX を超えない");
+  const int a = SERVO_PULSE_CENTER_US + (SERVO_PITCH_UP_SIGN * PITCH_MIN_DEG * SERVO_US_PER_DEG) / 10;
+  const int b = SERVO_PULSE_CENTER_US + (SERVO_PITCH_UP_SIGN * PITCH_MAX_DEG * SERVO_US_PER_DEG) / 10;
+  const int lo = a < b ? a : b;
+  const int hi = a < b ? b : a;
+  TEST_ASSERT_TRUE_MESSAGE(lo >= SERVO_PULSE_MIN_US, "短い側のパルスが MIN を割らない");
+  TEST_ASSERT_TRUE_MESSAGE(hi <= SERVO_PULSE_MAX_US, "長い側のパルスが MAX を超えない");
   TEST_ASSERT_TRUE_MESSAGE(SERVO_PULSE_MIN_US < SERVO_PULSE_CENTER_US, "MIN < 中央");
   TEST_ASSERT_TRUE_MESSAGE(SERVO_PULSE_CENTER_US < SERVO_PULSE_MAX_US, "中央 < MAX");
 }
@@ -74,29 +76,36 @@ void test_servo_pwm_period_is_20ms() {
   TEST_ASSERT_EQUAL_INT32(20000, (static_cast<int32_t>(SERVO_PWM_TOP) + 1) / SERVO_PWM_TICKS_PER_US);
 }
 
+void test_servo_pitch_up_sign_is_reversed_on_this_module() {
+  // 2026-10-27 の組み上げで、パルスを増やすとカメラが下を向いた（+1 では上下が逆）
+  TEST_ASSERT_EQUAL_INT(-1, SERVO_PITCH_UP_SIGN);
+}
+
 void test_servo_ocr1a_known_values() {
+  // SERVO_PITCH_UP_SIGN＝-1: 上向き（+）ほどパルスが短い
   TEST_ASSERT_EQUAL_UINT16(3000, servo_ocr1a_from_ddeg(0));      // 1500µs
-  TEST_ASSERT_EQUAL_UINT16(3600, servo_ocr1a_from_ddeg(300));    // +30° → 1800µs
-  TEST_ASSERT_EQUAL_UINT16(2400, servo_ocr1a_from_ddeg(-300));   // -30° → 1200µs
-  TEST_ASSERT_EQUAL_UINT16(4200, servo_ocr1a_from_ddeg(600));    // +60° → 2100µs（上限）
-  TEST_ASSERT_EQUAL_UINT16(1800, servo_ocr1a_from_ddeg(-600));   // -60° → 900µs（下限）
+  TEST_ASSERT_EQUAL_UINT16(2400, servo_ocr1a_from_ddeg(300));    // +30° → 1200µs
+  TEST_ASSERT_EQUAL_UINT16(3600, servo_ocr1a_from_ddeg(-300));   // -30° → 1800µs
+  TEST_ASSERT_EQUAL_UINT16(1800, servo_ocr1a_from_ddeg(600));    // +60° → 900µs（下限）
+  TEST_ASSERT_EQUAL_UINT16(4200, servo_ocr1a_from_ddeg(-600));   // -60° → 2100µs（上限）
 }
 
 void test_servo_ocr1a_clamps_outside_range() {
-  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(30000));
-  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(-30000));
-  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(32767));
-  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(-32768));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(30000));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(-30000));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(32767));
+  TEST_ASSERT_EQUAL_UINT16(SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US, servo_ocr1a_from_ddeg(-32768));
 }
 
 void test_servo_ocr1a_always_within_top_and_monotonic() {
-  uint16_t prev = 0;
+  // 上向き（+）ほどパルスが短い（SERVO_PITCH_UP_SIGN＝-1）ので、角度に対して増えない
+  uint16_t prev = SERVO_PWM_TOP;
   for (int d = -2000; d <= 2000; d += 5) {
     const uint16_t v = servo_ocr1a_from_ddeg(d);
     TEST_ASSERT_TRUE(v < SERVO_PWM_TOP);
     TEST_ASSERT_TRUE(v >= SERVO_PULSE_MIN_US * SERVO_PWM_TICKS_PER_US);
     TEST_ASSERT_TRUE(v <= SERVO_PULSE_MAX_US * SERVO_PWM_TICKS_PER_US);
-    TEST_ASSERT_TRUE(v >= prev);
+    TEST_ASSERT_TRUE(v <= prev);
     prev = v;
   }
 }
@@ -119,6 +128,7 @@ int main() {
   RUN_TEST(test_yaw_pins_match_portd_upper_bits);
   RUN_TEST(test_servo_pulse_at_both_pitch_limits_stays_inside);
   RUN_TEST(test_servo_pwm_period_is_20ms);
+  RUN_TEST(test_servo_pitch_up_sign_is_reversed_on_this_module);
   RUN_TEST(test_servo_ocr1a_known_values);
   RUN_TEST(test_servo_ocr1a_clamps_outside_range);
   RUN_TEST(test_servo_ocr1a_always_within_top_and_monotonic);

@@ -232,6 +232,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `PITCH_MIN_DEG` / `PITCH_MAX_DEG` | `io_controller.h` | -60 / 60 | **仮**。**UnitV2 側（±45）より広い 2 つ目の守り**。機構に当たらない範囲を実機で決める（`H-X5`） |
 | `PITCH_INITIAL_DEG` | `io_controller.h` | 0 | 旧版の考え方（正面・水平。起動時・再起動時に跳ぶ先） |
 | `SERVO_PULSE_CENTER_US` / `SERVO_US_PER_DEG` | `config.h` | 1500 / 10 | **仮**（MG996R のデータシートで確かめる） |
+| `SERVO_PITCH_UP_SIGN` | `config.h` | -1 | 実機（2026-10-27。+1 ではピッチの上下が逆だった。パルスを減らすと上を向く） |
 | `SERVO_PULSE_MIN_US` / `SERVO_PULSE_MAX_US` | `config.h` | 900 / 2100 | **仮**（±60° に当たる範囲。この外側へパルスを出さない） |
 | `IO_STEP_TICK_US` | `config.h` | 100 | **仮**（680 半ステップ毎秒なら約 1.47 ms ごとに刻む。その 1/14 の細かさ） |
 | `YAW_PINS` / `YAW_HALF_STEP_SEQUENCE` | `config.h` | D4〜D7 ／ 旧版と同じ並び | [-hardware.md](DetailedDesign-hardware.md) §2.2・旧版の実機確認 |

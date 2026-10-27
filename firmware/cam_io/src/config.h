@@ -31,6 +31,9 @@ constexpr uint8_t SERVO_PIN = 9;
 // パルス幅と角度の対応（仮。MG996R のデータシートで確かめる）
 constexpr int SERVO_PULSE_CENTER_US = 1500;
 constexpr int SERVO_US_PER_DEG = 10;
+// ピッチの +（上向き）をパルスの増減のどちらにするか（+1＝パルスを増やすと上・-1＝減らすと上）。
+// 2026-10-27 のカメラモジュールの組み上げで、+1 では上下が逆だったので -1
+constexpr int SERVO_PITCH_UP_SIGN = -1;
 // この外側へパルスを出さない（±60° に当たる範囲）
 constexpr int SERVO_PULSE_MIN_US = 900;
 constexpr int SERVO_PULSE_MAX_US = 2100;

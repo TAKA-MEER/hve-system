@@ -11,10 +11,10 @@ constexpr uint16_t SERVO_PWM_TOP = 39999;
 // パルス幅 [µs] 1 つぶんのカウント数（分周 8 で 0.5µs/カウント）
 constexpr int SERVO_PWM_TICKS_PER_US = 2;
 
-// 0.1° → パルス幅 [µs]。SERVO_PULSE_MIN_US〜MAX_US の外へ出さない
+// 0.1° → パルス幅 [µs]。向きは SERVO_PITCH_UP_SIGN。SERVO_PULSE_MIN_US〜MAX_US の外へ出さない
 inline int servo_pulse_us_from_ddeg(int pitch_ddeg) {
   int32_t pulse = static_cast<int32_t>(SERVO_PULSE_CENTER_US) +
-                  (static_cast<int32_t>(pitch_ddeg) * static_cast<int32_t>(SERVO_US_PER_DEG)) / 10;
+                  (static_cast<int32_t>(SERVO_PITCH_UP_SIGN) * pitch_ddeg * static_cast<int32_t>(SERVO_US_PER_DEG)) / 10;
   if (pulse < SERVO_PULSE_MIN_US) {
     pulse = SERVO_PULSE_MIN_US;
   }
