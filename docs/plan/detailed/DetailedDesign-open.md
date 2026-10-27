@@ -35,7 +35,7 @@
 | --- | --- |
 | `H-X9`（`W-1`） | **2026-10-15 にエンコーダの高さに決まった。**`WP-LIFT-05`（エンコーダ）のあと `WP-LIFT-07` で `LIFT_TOP_DETECT_ENABLED` を戻し、`WAIVER(demo): W-1` を消して台帳を閉じる |
 | spec #4d・速さの制御 | `WP-LIFT-06`。`LIFT_SPEED_*`・`LIFT_FF_*`・`LIFT_STALL_*` を `WP-MEAS-01` で合わせる |
-| `H-V12` | `ENC_PPR` は 360 で確定・`LIFT_UM_PER_COUNT` は設計値 26（2026-10-25。`WP-LIFT-09` で反映）。残りは `WP-MEAS-01` で全行程を測って直すことと、巻き太りのずれ |
+| `H-V12` | `ENC_PPR` は 360 で確定・`LIFT_UM_PER_COUNT` は設計値 26（2026-10-25。`WP-LIFT-09` で反映）。残りは `WP-MEAS-01` で全行程を測って直すことと、巻き太りのずれ（2026-10-27 に約 300 mm から 2 層目に乗り、500 mm で −13 mm と実測。[hardware](DetailedDesign-hardware.md) §1.1） |
 | `H-V8` | 実測（`WP-MEAS-01`・`-04`）で -names.md §5 の仮値を置き換える |
 | `H-A8` | `WP-MEAS-03` |
 | `H-V6` | `WP-MEAS-02`（UnitV2 で。spec では「簡単な動作確認で問題なし」） |
