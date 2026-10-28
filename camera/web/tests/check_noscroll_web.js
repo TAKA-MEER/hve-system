@@ -57,7 +57,7 @@ const MEASURE = () => {
       bad.push(`overflow ${el.tagName}.${el.id || el.className} ${el.scrollWidth}x${el.scrollHeight}>${el.clientWidth}x${el.clientHeight}`);
     }
   }
-  const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings, .zoombtn, #snapBtn')];
+  const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings, .zoombtn, #snapBtn, #snapClose')];
   const overlay = document.querySelector('.overlay.show');
   if (overlay) must.push(...overlay.querySelectorAll('input, button'));
   for (const el of must) {

@@ -499,6 +499,139 @@ test('11 確かめが 1 回落ちても出さず、続けて落ちると出て�
   }
 });
 
+/* --- 12〜13. 静止画の拡大・移動（WP-UI-04。その端末の中だけ） ---------------------- */
+// 4:3 の PNG（枠 900×500 の映像の枠に contain で収まると、左右に余白ができる）
+const PNG_4X3 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAFAAAAA8CAIAAAB+RarbAAAAYElEQVR4nO3PAQkAMAzAsGmafwGXdRmHPlABzZzdr5rnB8DAwMDAwMDfBFwPuB5wPeB6wPWA6wHXA64HXA+4HnA94HrA9YDrAdcDrgdcD7gecD3gesD1gOsB1wOuB1zvAuIP+jyGy9HjAAAAAElFTkSuQmCC', 'base64');
+
+/** 静止画を開いて読み込みまで待つ。`/ws` へ送ったメッセージは window.__sent に溜める */
+async function openSnapshotZoomed(page) {
+  await page.evaluate(() => {
+    window.__sent = [];
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) { window.__sent.push(String(data)); return send.call(this, data); };
+  });
+  await page.route('**/snapshot', (route) => route.fulfill({status: 200, contentType: 'image/png', body: PNG_4X3}));
+  await page.click('#snapBtn');
+  await page.waitForFunction(() => document.getElementById('snapImage').complete
+    && document.getElementById('snapImage').naturalWidth > 0, null, {timeout: 3000});
+  await page.waitForFunction(() => document.getElementById('snapImage').style.visibility === 'visible', null, {timeout: 3000});
+}
+
+const snapRect = (page) => page.evaluate(() => {
+  const r = document.getElementById('snapImage').getBoundingClientRect();
+  const m = new DOMMatrix(getComputedStyle(document.getElementById('snapImage')).transform);
+  return {w: r.width, h: r.height, x: m.e, y: m.f, scale: m.a,
+    label: document.getElementById('snapZLvl').textContent.trim()};
+});
+
+async function drag(page, dx, dy) {
+  const box = await page.locator('#snapshot').boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + dx / 2, cy + dy / 2, {steps: 3});
+  await page.mouse.move(cx + dx, cy + dy, {steps: 3});
+  await page.mouse.up();
+}
+
+test('12 静止画の「＋」で静止画だけが大きくなり、{"t":"zoom"} を送らず、閉じて開き直すと 1 倍に戻る', async (browser) => {
+  const watcher = observe();
+  const {page, errors, cleanup} = await openScreen(browser);
+  try {
+    await watcher.opened;
+    await openSnapshotZoomed(page);
+    const before = await snapRect(page);
+    assert.equal(before.scale, 1);
+    assert.equal(before.label, '1.0×');
+    const videoBefore = await page.locator('#videoImage').boundingBox();
+
+    await page.click('#snapZIn');
+    await page.click('#snapZIn');
+    const zoomed = await snapRect(page);
+    assert.equal(zoomed.scale, 2, '静止画の倍率が 2 になる');
+    assert.ok(Math.abs(zoomed.w - before.w * 2) < 1 && Math.abs(zoomed.h - before.h * 2) < 1,
+      `静止画の見た目の大きさが 2 倍になる（${before.w}x${before.h} -> ${zoomed.w}x${zoomed.h}）`);
+    assert.equal(zoomed.label, '2.0×', '倍率の表示が静止画の倍率');
+    await page.click('#snapZOut');
+    assert.equal((await snapRect(page)).scale, 1.5, '「−」で 1 段戻る');
+    await page.click('#snapZLvl');
+    assert.equal((await snapRect(page)).scale, 1, '倍率の表示を押すと 1 倍');
+
+    // 映像の倍率・ほかの端末には影響しない
+    await page.waitForTimeout(STATE_MS * 4);
+    const sent = await page.evaluate(() => window.__sent);
+    assert.equal(sent.some((text) => text.includes('"zoom"')), false, `zoom を送った（${JSON.stringify(sent)}）`);
+    assert.equal(watcher.latest().zoom, 1, '映像の倍率が変わった');
+    const videoAfter = await page.locator('#videoImage').boundingBox();
+    assert.deepEqual(videoAfter, videoBefore, '映像の見た目は変わらない');
+
+    // 拡大してずらしたあと、閉じて開き直すと 1 倍・ずれ 0
+    for (let i = 0; i < 4; i += 1) await page.click('#snapZIn');
+    await drag(page, -60, -40);
+    const moved = await snapRect(page);
+    assert.equal(moved.scale, 3);
+    assert.ok(moved.x !== 0 || moved.y !== 0, 'ずれている');
+    await page.click('#snapClose');
+    await page.locator('#snapshot').waitFor({state: 'hidden', timeout: 3000});
+    await page.click('#snapBtn');
+    await page.waitForFunction(() => document.getElementById('snapImage').style.visibility === 'visible', null, {timeout: 3000});
+    const reopened = await snapRect(page);
+    assert.equal(reopened.scale, 1, '開き直したら 1 倍');
+    assert.equal(reopened.x, 0);
+    assert.equal(reopened.y, 0);
+    assert.equal(reopened.label, '1.0×');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await cleanup();
+    watcher.close();
+  }
+});
+
+test('13 静止画は拡大したときだけドラッグでずれ、端を越えず、1 倍ではずれない', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  try {
+    await openSnapshotZoomed(page);
+    // 1 倍ではずれない
+    await drag(page, 80, 50);
+    let rect = await snapRect(page);
+    assert.equal(rect.x, 0, '1 倍でドラッグすると静止画がずれた（x）');
+    assert.equal(rect.y, 0, '1 倍でドラッグすると静止画がずれた（y）');
+
+    // 4 倍にして左上へ大きくずらす: 端で止まる
+    for (let i = 0; i < 6; i += 1) await page.click('#snapZIn');
+    assert.equal((await snapRect(page)).scale, 4);
+    await drag(page, 40, 30);
+    rect = await snapRect(page);
+    assert.ok(rect.x > 0 && rect.y > 0, `右下へ引いたぶんずれる（${rect.x},${rect.y}）`);
+    await drag(page, 3000, 3000);
+    const far = await snapRect(page);
+    const box = await page.locator('#snapshot').boundingBox();
+    const fitted = Math.min(box.width / 4, box.height / 3);        // 4:3 の絵が contain で収まる大きさ（1 倍）
+    const limitX = Math.max(0, (fitted * 4 * 4 - box.width) / 2);
+    const limitY = Math.max(0, (fitted * 3 * 4 - box.height) / 2);
+    assert.ok(Math.abs(far.x - limitX) < 1, `x は端（${limitX}）で止まる: ${far.x}`);
+    assert.ok(Math.abs(far.y - limitY) < 1, `y は端（${limitY}）で止まる: ${far.y}`);
+    await drag(page, -9000, -9000);
+    const other = await snapRect(page);
+    assert.ok(Math.abs(other.x + limitX) < 1 && Math.abs(other.y + limitY) < 1, `反対の端で止まる: ${other.x},${other.y}`);
+
+    // 縮めると範囲も縮み、1 倍に戻すとずれも 0
+    await page.click('#snapZLvl');
+    rect = await snapRect(page);
+    assert.equal(rect.x, 0);
+    assert.equal(rect.y, 0);
+
+    // 「＋」「−」「閉じる」は押せる位置にある（ドラッグの開始にならない）
+    for (const id of ['#snapZIn', '#snapZLvl', '#snapZOut', '#snapClose']) {
+      assert.equal(await page.locator(id).isVisible(), true, `${id} が見える`);
+    }
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await cleanup();
+  }
+});
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
