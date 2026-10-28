@@ -26,7 +26,7 @@ constexpr int32_t LIFT_STALL_MIN_COUNTS =
     (LIFT_STALL_MIN_UM + LIFT_UM_PER_COUNT - 1) / LIFT_UM_PER_COUNT;
 // 下端スイッチが押されたまま上昇側へ進んでよい余裕 [mm]。仮（P-14）。
 // 超えたらスイッチの故障とみなす（DetailedDesign.md §4.1.1）。
-constexpr int HOME_SLACK_MM = 20;  // 仮（P-14）
+constexpr int HOME_SLACK_MM = 50;  // 仮（P-14）。2026-10-28 に 20 では下端スイッチが押されたまま 23 mm 上がって故障と判定した
 // 下端スイッチが「押された」とみなすまでに、読んだ値が押されたまま続く時間 [ms]。
 // これより短い「押された」（ノイズ・線やコネクタの一瞬の開き）は数えない。仮（2026-10-28）。
 // 原点を取る側だけに使う。下降の BOTTOM（LiftHal::bottom_pressed）には掛けない。
@@ -34,6 +34,8 @@ constexpr uint32_t LIFT_BOTTOM_DEBOUNCE_MS = 30;  // 仮
 // 原点を取ったあと、高さがこれを超える所で押されたら原点にせず、高さを読めないとする [mm]。
 // 下げるときのたるみ（500 mm で約 30 mm）より大きく。仮（2026-10-28）。
 constexpr int LIFT_HOME_ACCEPT_MM = 100;  // 仮
+static_assert(HOME_SLACK_MM < LIFT_HOME_ACCEPT_MM,
+              "押されたまま上がってよい幅は、原点を受け付ける高さより小さくする");
 
 // PCNT の A/B 4 逓倍の数え方（DetailedDesign-hardware.md §1.1）。
 // 値は driver/pcnt.h と同じ（hal_esp32.cpp で static_assert で一致を確かめる）。

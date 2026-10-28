@@ -173,7 +173,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`ENC_GLITCH_FILTER_NS`** | `config.h` | 1000 | **仮**（PCNT のノイズ除去） |
 | **`ENC_UP_SIGN`** | `hal_core.h` | +1 | **仮**（上昇で数が増える向き。実機で確かめる） |
 | **`LIFT_UM_PER_COUNT`** | `hal_core.h` | **26**（設計値。エンコーダ 1 周の上昇 37.5 mm ÷ (4 × `ENC_PPR`)。µm にして整数で持つ。`WP-LIFT-09` で反映） | spec `H-V12`。[-hardware.md](DetailedDesign-hardware.md) §1.1。`WP-MEAS-01` で全行程を測って直す |
-| **`HOME_SLACK_MM`** | `hal_core.h` | 20 | **仮**（`P-14`） |
+| **`HOME_SLACK_MM`** | `hal_core.h` | 50 | **仮**（`P-14`。2026-10-28 に 20 → 50。20 では下端スイッチが押されたまま 23 mm 上がって故障と判定し、上昇も下降もできなくなった。`LIFT_HOME_ACCEPT_MM` より小さく〈`static_assert`〉） |
 | **`LIFT_BOTTOM_DEBOUNCE_MS`** | `hal_core.h` | 30 | **仮**（2026-10-28。これより短い「押された」は数えない。下降の `BOTTOM` には使わない） |
 | **`LIFT_HOME_ACCEPT_MM`** | `hal_core.h` | 100 | **仮**（2026-10-28。原点を取ったあと、これより高い所で押されたら原点にせず高さを読めないとする。下げるときのたるみ〈500 mm で約 30 mm〉より大きく） |
 | **`EncoderHeight`** | `hal_core.h` | 原点・故障（`P-14`）・高さの式を持つ小さな状態（`WP-LIFT-05`） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
