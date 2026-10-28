@@ -348,12 +348,12 @@ test('5 映像が無いときと途絶えたとき「映像がありません」
   });
 
 /* --- 6. 上端の検知・IO_LOST・静止画 ------------------------------------------ */
-test('6 top_detect が false のあいだ「上端の検知: 一時無効」が見える（偽の昇降部は false）', async (browser) => {
+test('6 top_detect が false のあいだ「上端が未設定（開発中）」が見える（偽の昇降部は false）', async (browser) => {
   const {page, errors, cleanup} = await openScreen(browser);
   try {
     const badge = page.locator('#bTop');
     await badge.waitFor({state: 'visible', timeout: 3000});
-    assert.equal((await badge.innerText()).trim(), '上端の検知: 一時無効');
+    assert.equal((await badge.innerText()).trim(), '上端が未設定（開発中）');
     // 持ち主・昇降部の画面の数も state から出ている（偽の昇降部は持ち主なし・0 台）
     assert.match(await page.locator('#bOwner').innerText(), /^持ち主 /);
     assert.equal((await page.locator('#bLiftUi').innerText()).trim(), '昇降部の画面 0');
