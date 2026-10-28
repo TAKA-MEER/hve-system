@@ -245,12 +245,13 @@ void test_read_error_stops_but_no_echo_moves() {
 void test_old_press_from_non_owner_does_not_steal() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
-  hal.set_height(500, true, 0);
+  hal.set_height(500, true, 1000);
   ctrl.on_hold(ui(1), up_hold(5, 20, 1000), 1000);
   ctrl.on_hold(module(2), up_hold(3, 60, 1100), 1100);
   // 取って代わられた側の古い press では持ち主は替わらない（持ち主は module のまま）
   HoldMsg old = up_hold(5, 20, 1200);
   ctrl.on_hold(ui(1), old, 1200);
+  hal.set_height(500, true, 1200);
   const LiftState state = ctrl.step(1200);
   TEST_ASSERT_TRUE(hal.motor_moving());
   TEST_ASSERT_EQUAL_INT(1, state.owner_kind);  // module
@@ -344,11 +345,12 @@ void test_wrong_typed_ceiling_stops_at_once() {
 void test_ceiling_age_counts_transit_through_controller() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
-  hal.set_height(500, true, 0);
+  hal.set_height(500, true, 1000);
   TEST_ASSERT_TRUE(ctrl.on_hello(module(2), hello_with_sensor(true)));
   // 送る瞬間に 590 ms 古い値。受け取ってから 20 ms 経てば CEILING_STALE_MS 超
   ctrl.on_hold(module(2), up_hold(1, 40, 1000, 590), 1000);
   TEST_ASSERT_TRUE(ctrl.step(1000).dir == LiftDir::UP);
+  hal.set_height(500, true, 1020);  // 高さは新しいまま（#4 で止めない）
   const LiftState state = ctrl.step(1020);
   TEST_ASSERT_FALSE(hal.motor_moving());
   assert_reason(StopReason::CEILING_STALE, state);
@@ -668,7 +670,7 @@ void test_motor_is_written_on_every_step() {
 
 // --- state の中身 ---
 
-void test_state_reports_top_detect_false_and_module() {
+void test_state_reports_top_detect_true_and_module() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   hal.set_height(812, true, 900);
@@ -680,7 +682,7 @@ void test_state_reports_top_detect_false_and_module() {
   TEST_ASSERT_TRUE(state.duty > 0);
   TEST_ASSERT_EQUAL_INT(40, state.speed);
   TEST_ASSERT_EQUAL_INT(0, state.speed_meas);
-  TEST_ASSERT_FALSE(state.top_detect);  // W-1 の間は常に false
+  TEST_ASSERT_TRUE(state.top_detect);  // LIFT_TOP_MM が設定済み
   TEST_ASSERT_TRUE(state.ceiling_present);
   TEST_ASSERT_TRUE(state.ceiling_used);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MEASURED),
@@ -752,8 +754,22 @@ void test_state_before_step_is_stopped() {
   const LiftState& state = ctrl.state();
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(state.dir));
   TEST_ASSERT_EQUAL_INT(0, state.duty);
-  TEST_ASSERT_FALSE(state.top_detect);
+  TEST_ASSERT_TRUE(state.top_detect);
   TEST_ASSERT_FALSE(state.ceiling_present);
+}
+
+// 上端が未設定（-1。#2a）のときは top_detect が偽で、高さが大きくても上昇できる
+void test_top_unset_reports_top_detect_false_and_still_climbs() {
+  FakeHal hal;
+  LiftController ctrl(&hal, -1);
+  TEST_ASSERT_FALSE(ctrl.state().top_detect);
+  hal.set_height(5000, true, 1000);
+  hal.set_encoder_count(40);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 1000), 1000);
+  const LiftState state = ctrl.step(1000);
+  TEST_ASSERT_FALSE(state.top_detect);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
 }
 
 // --- millis() が一周したあと ---
@@ -779,10 +795,10 @@ void test_height_ok_in_state_survives_millis_wrap_when_fresh() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(hal.motor_dir()));
 }
 
-void test_height_unknown_shows_in_state_while_waiver() {
+void test_height_unknown_shows_in_state() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
-  // 原点を取る前（height_ok が偽）でも state.height_ok は偽（W-1 の間も表示用に縛る）
+  // 原点を取る前（height_ok が偽）は state.height_ok も偽。下降はできる
   hal.set_height(0, false, 0);
   ctrl.on_hold(ui(1), down_hold(1), 0);
   const LiftState state = ctrl.step(0);
@@ -831,12 +847,13 @@ struct EncoderRig {
 void test_glitch_during_climb_does_not_reset_height() {
   EncoderRig rig;
   rig.land_and_leave();
-  // 上端付近まで上がった状態にする（同じ方向の連続駆動の上限があるので、数だけ進めておく）
-  rig.hal.set_count(1800 * 1000 / LIFT_UM_PER_COUNT);
+  // 高いところまで上がった状態にする（上端 LIFT_TOP_MM の手前。連続駆動の上限があるので、数だけ進めておく）
+  rig.hal.set_count(1000 * 1000 / LIFT_UM_PER_COUNT);
   rig.hal.poll(rig.t);
-  rig.run_to(rig.t + 3000, 38);
+  rig.run_to(rig.t + 1000, 38);
   TEST_ASSERT_TRUE(rig.last.height_ok);
-  TEST_ASSERT_TRUE(rig.last.height_mm > 1800);
+  TEST_ASSERT_TRUE(rig.last.height_mm > 1000);
+  TEST_ASSERT_TRUE(rig.last.height_mm < LIFT_TOP_MM - 300);
   // 上昇中に 1 回だけ「押された」と読めた
   rig.hal.set_raw_pressed(true);
   rig.hal.set_count(rig.hal.encoder_count() + 38);
@@ -845,7 +862,7 @@ void test_glitch_during_climb_does_not_reset_height() {
   rig.hal.set_raw_pressed(false);
   rig.run_to(rig.t + 300, 38);
   TEST_ASSERT_TRUE(rig.last.height_ok);
-  TEST_ASSERT_TRUE(rig.last.height_mm > 1800);
+  TEST_ASSERT_TRUE(rig.last.height_mm > 1000);  // 0 に戻らない
   TEST_ASSERT_TRUE(rig.hal.motor_moving());
   assert_reason(StopReason::NONE, rig.last);
 }
@@ -862,11 +879,9 @@ void test_long_press_while_high_makes_height_unknown() {
   // 原点にしない（0 に戻らない）。高さは読めないことになる
   TEST_ASSERT_FALSE(rig.last.height_ok);
   TEST_ASSERT_TRUE(rig.last.height_mm >= before);
-  // W-1 が解けたあとは判定 #4 で上昇が止まる（いまは WAIVER で判定しない）
-  if (LIFT_TOP_DETECT_ENABLED) {
-    assert_reason(StopReason::HEIGHT_UNKNOWN, rig.last);
-    TEST_ASSERT_FALSE(rig.hal.motor_moving());
-  }
+  // 判定 #4 で上昇が止まる
+  assert_reason(StopReason::HEIGHT_UNKNOWN, rig.last);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
 }
 
 // 下降の BOTTOM は読んだそのまま。1 回読めただけでも止まる（時間の続きを掛けない）
@@ -881,6 +896,88 @@ void test_bottom_stops_down_on_a_single_raw_read() {
   assert_reason(StopReason::BOTTOM, state);
   TEST_ASSERT_TRUE(state.bottom);
   TEST_ASSERT_FALSE(rig.hal.motor_moving());
+}
+
+// --- 上端の検知と高さが読めないとき（W-1 を解いた。判定 #2・#4。モータに出た値で縛る）---
+
+// 原点を取る前（エンコーダの高さが無い）は上昇しない。下降はできる
+void test_up_before_origin_is_refused_but_down_works() {
+  EncoderRig rig;  // 下端に着けていない
+  rig.ctrl.on_hello(module(2), hello_with_sensor(true));
+  rig.hal.poll(0);
+  rig.ctrl.on_hold(module(2), up_hold(1, 40, 100), 100);
+  rig.hal.poll(100);
+  const LiftState up = rig.ctrl.step(100);
+  TEST_ASSERT_FALSE(up.height_ok);
+  assert_reason(StopReason::HEIGHT_UNKNOWN, up);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  rig.ctrl.on_hold(module(2), down_hold(2), 200);
+  rig.hal.poll(200);
+  const LiftState down = rig.ctrl.step(200);
+  assert_reason(StopReason::NONE, down);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(rig.hal.motor_dir()));
+}
+
+// 下端に着けて原点を取ると上昇できる
+void test_up_after_landing_on_bottom_works() {
+  EncoderRig rig;
+  rig.land_and_leave();
+  rig.run_to(rig.t + 500, 38);
+  assert_reason(StopReason::NONE, rig.last);
+  TEST_ASSERT_TRUE(rig.last.height_ok);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 高さが LIFT_TOP_MM に届く手前は上昇でき、ちょうど届いたら止まる（境界）
+void test_up_below_top_moves_and_at_top_stops() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(LIFT_TOP_MM - 1, true, 1000);
+  hal.set_encoder_count(40);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 1000), 1000);
+  const LiftState below = ctrl.step(1000);
+  assert_reason(StopReason::NONE, below);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  hal.set_height(LIFT_TOP_MM, true, 1100);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 1100), 1100);
+  const LiftState at = ctrl.step(1100);
+  assert_reason(StopReason::TOP, at);
+  TEST_ASSERT_FALSE(hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(0, at.duty);
+}
+
+// 上端を超えていても上昇しない。下降はできる
+void test_above_top_refuses_up_but_down_works() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(LIFT_TOP_MM + 50, true, 1000);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 1000), 1000);
+  assert_reason(StopReason::TOP, ctrl.step(1000));
+  TEST_ASSERT_FALSE(hal.motor_moving());
+  hal.set_height(LIFT_TOP_MM + 50, true, 1100);
+  ctrl.on_hold(ui(1), down_hold(2), 1100);
+  const LiftState down = ctrl.step(1100);
+  assert_reason(StopReason::NONE, down);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(hal.motor_dir()));
+  TEST_ASSERT_TRUE(hal.motor_moving());
+}
+
+// 高さの読み値が HEIGHT_STALE_MS を超えて古いと上昇しない（天井は新しいまま）。ちょうどなら動く
+void test_up_with_stale_height_is_refused() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 1000);
+  hal.set_encoder_count(40);
+  ctrl.on_hold(ui(1), up_hold(1, 40, 1000 + HEIGHT_STALE_MS), 1000 + HEIGHT_STALE_MS);
+  const LiftState edge = ctrl.step(1000 + HEIGHT_STALE_MS);  // 経過がちょうど HEIGHT_STALE_MS
+  assert_reason(StopReason::NONE, edge);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  const uint32_t late = 1000 + HEIGHT_STALE_MS + 1;
+  ctrl.on_hold(ui(1), up_hold(1, 40, late), late);
+  const LiftState stale = ctrl.step(late);
+  assert_reason(StopReason::HEIGHT_UNKNOWN, stale);
+  TEST_ASSERT_FALSE(stale.height_ok);
+  TEST_ASSERT_FALSE(hal.motor_moving());
 }
 
 int main(int /*argc*/, char** /*argv*/) {
@@ -924,15 +1021,21 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_speed_is_clamped_before_speed_loop);
   RUN_TEST(test_motor_is_written_on_every_step);
 
-  RUN_TEST(test_state_reports_top_detect_false_and_module);
+  RUN_TEST(test_state_reports_top_detect_true_and_module);
   RUN_TEST(test_state_keeps_last_module_ceiling_after_release);
   RUN_TEST(test_state_keeps_last_module_ceiling_after_hold_timeout);
   RUN_TEST(test_state_ceiling_null_when_no_module_hold_ever);
   RUN_TEST(test_state_before_step_is_stopped);
+  RUN_TEST(test_top_unset_reports_top_detect_false_and_still_climbs);
 
   RUN_TEST(test_cmd_timeout_survives_millis_wrap);
   RUN_TEST(test_height_ok_in_state_survives_millis_wrap_when_fresh);
-  RUN_TEST(test_height_unknown_shows_in_state_while_waiver);
+  RUN_TEST(test_height_unknown_shows_in_state);
+  RUN_TEST(test_up_before_origin_is_refused_but_down_works);
+  RUN_TEST(test_up_after_landing_on_bottom_works);
+  RUN_TEST(test_up_below_top_moves_and_at_top_stops);
+  RUN_TEST(test_above_top_refuses_up_but_down_works);
+  RUN_TEST(test_up_with_stale_height_is_refused);
 
   RUN_TEST(test_glitch_during_climb_does_not_reset_height);
   RUN_TEST(test_long_press_while_high_makes_height_unknown);
