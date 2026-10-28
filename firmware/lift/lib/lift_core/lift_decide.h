@@ -16,9 +16,9 @@ enum class LiftDir : uint8_t {
 // 判定に使う定数（DetailedDesign-names.md §5.1）
 constexpr uint32_t LIFT_CMD_TIMEOUT_MS = 600;  // 持ち主の hold が途絶えたら止まるまでの時間
 constexpr uint32_t HEIGHT_STALE_MS = 600;      // 高さを「読めない」とみなすまでの時間（仮値）
-constexpr int LIFT_TOP_MM = -1;                // 上端の閾値。-1 は未設定（判定しない）
-// WAIVER(demo): W-1 上端の検知を一時無効（false の間は判定 #4・#6 を行わない）
-constexpr bool LIFT_TOP_DETECT_ENABLED = false;
+constexpr int LIFT_TOP_MM = 1800;              // 上端の閾値 [mm]（仮。-1 にすると未設定: 判定 #6 をしない・#2a）
+// 上端の検知の有効（W-1 は 2026-10-28 に解いた）。state.top_detect の元で、判定 #4・#6 は常に行う
+constexpr bool LIFT_TOP_DETECT_ENABLED = true;
 constexpr uint32_t LIFT_MAX_RUN_MS = 10000;     // 同じ方向へ動き続けてよい時間の上限（仮値）
 constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上限 [%]。% ⇔ PWM の換算の基準（モータ保護の上限ではない）
 constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上限の既定値 [%]（定格 12 V ÷ 電源 24 V。Spec-ui §2.1）
@@ -39,7 +39,7 @@ struct LiftState {
   bool bottom = false;
   int height_mm = 0;
   bool height_ok = false;  // 読み値が有効で、HEIGHT_STALE_MS 以内か（表示用）
-  bool top_detect = false;  // 上端の検知が有効か（W-1 の間は常に false）
+  bool top_detect = false;  // 上端の検知が有効か（LIFT_TOP_MM が未設定の -1 のときは false）
   // 持ち主の最後の hold に載っていた天井の値（古さは受け取ってからの経過を足したもの）
   bool ceiling_used = false;  // 持ち主の命令に天井の値を使っているか
   bool ceiling_present = false;  // 天井の値があるか（無いとき state の ceiling は null）

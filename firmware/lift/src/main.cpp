@@ -52,8 +52,8 @@ AsyncWebSocket ws_module(LIFT_WS_MODULE_PATH);
 
 LiftEsp32Hal hal;
 
-// 上端の閾値は LIFT_TOP_MM（names.md §5.1。未設定の -1 の間は上端で止めない。
-// 実機で上昇を試すときは特に注意）
+// 上端の閾値は LIFT_TOP_MM（names.md §5.1。1800 mm。-1 に戻すと未設定になり、
+// 上端で止めない）
 LiftController controller(&hal, LIFT_TOP_MM);
 
 // 昇降の速度の設定（protocol §3）。検証は lift_settings、保存は NVS。

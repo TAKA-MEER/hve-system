@@ -55,20 +55,16 @@ LiftDecideResult lift_decide(const LiftDecideInput& in) {
   }
 
   // 表 4 上昇 かつ 高さが読めない・古い
-  // WAIVER(demo): W-1 上端の検知を一時無効（LIFT_TOP_DETECT_ENABLED が偽の間は判定しない）
-  if (LIFT_TOP_DETECT_ENABLED) {
+  if (in.dir == LiftDir::UP) {
     const bool height_usable = in.height_ok && height_is_fresh(in.now_ms, in.height_at_ms);
-    if (in.dir == LiftDir::UP && !height_usable) {
+    if (!height_usable) {
       return stop_with(StopReason::HEIGHT_UNKNOWN);
     }
   }
 
   // 表 6 上昇 かつ 上端の閾値が設定済み（-1 なら判定しない）かつ 高さ ≧ 閾値
-  // WAIVER(demo): W-1 上端の検知を一時無効（LIFT_TOP_DETECT_ENABLED が偽の間は判定しない）
-  if (LIFT_TOP_DETECT_ENABLED) {
-    if (in.dir == LiftDir::UP && in.top_mm >= 0 && in.height_mm >= in.top_mm) {
-      return stop_with(StopReason::TOP);
-    }
+  if (in.dir == LiftDir::UP && in.top_mm >= 0 && in.height_mm >= in.top_mm) {
+    return stop_with(StopReason::TOP);
   }
 
   // 表 7 下降 かつ 下端スイッチが押されている

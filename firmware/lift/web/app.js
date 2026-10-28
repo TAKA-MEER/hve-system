@@ -376,7 +376,7 @@ function render() {
     : `端末 ${state.ui_clients}`;
   $('bClients').lastElementChild.textContent = clientsText;
   $('bProv').style.display = state.provisional && state.provisional.length ? '' : 'none';
-  // 上端の検知が有効になったら「一時無効」の帯は消す（W-1 の間は常に出す）
+  // 上端の検知が有効なら「上端が未設定」の帯は消す（LIFT_TOP_MM が -1 のときだけ出る。#2a）
   $('bTop').style.display = state.top_detect ? 'none' : '';
 
   $('stHeight').textContent = heightText(state.height_mm, state.height_ok);
