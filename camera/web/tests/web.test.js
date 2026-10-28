@@ -123,10 +123,10 @@ test('動いている間の表示は目標と測った速さ（brief §1）', ()
   assert.equal(app.liftStateText({dir: 'stop', bottom: true}), '停止中・下端');
 });
 
-test('上端の検知: top_detect が true でなければ「一時無効」（W-1）', () => {
-  assert.equal(app.topDetectText({top_detect: false}), '上端の検知: 一時無効');
-  assert.equal(app.topDetectText({}), '上端の検知: 一時無効');   // 値が無いときも有効とは言わない
-  assert.equal(app.topDetectText(null), '上端の検知: 一時無効');
+test('上端の検知: top_detect が true でなければ「上端が未設定（開発中）」', () => {
+  assert.equal(app.topDetectText({top_detect: false}), '上端が未設定（開発中）');
+  assert.equal(app.topDetectText({}), '上端が未設定（開発中）');   // 値が無いときも有効とは言わない
+  assert.equal(app.topDetectText(null), '上端が未設定（開発中）');
   assert.equal(app.topDetectText({top_detect: true}), null);
 });
 

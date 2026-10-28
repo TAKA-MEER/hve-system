@@ -52,8 +52,8 @@ const REASON_TEXT = {
   IO_LOST: ['ng', 'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません'],
 };
 
-/* 上端の検知が一時的に無効なあいだの表示（spec Spec-safety.md §1.1 `W-1`） */
-const TOP_DETECT_OFF_TEXT = '上端の検知: 一時無効';
+/* 上端の閾値が未設定のあいだの表示（spec Spec-safety.md §2 #2a。昇降部の画面と同じ文言） */
+const TOP_DETECT_OFF_TEXT = '上端が未設定（開発中）';
 
 /* --- DOM に触れない部分（Node の試験で見る） --- */
 
@@ -165,7 +165,7 @@ function ceilingText(ceiling) {
   return {cls: 'ng', text: '天井 値なし'};
 }
 
-/** 上端の検知の表示。`top_detect` が `true` でなければ「一時無効」（`W-1`）。出さないときは `null` */
+/** 上端の検知の表示。`top_detect` が `true` でなければ「上端が未設定（開発中）」（#2a）。出さないときは `null` */
 function topDetectText(lift) {
   const value = lift || {};
   return value.top_detect === true ? null : TOP_DETECT_OFF_TEXT;
@@ -572,7 +572,7 @@ function render() {
   document.querySelector('[data-axis=lift_down]').classList.toggle('blocked', holdBlocked(state, 'lift_down'));
 
   // 高さのゲージ。上端が設定されたら上端の線と満量に使う
-  // v2 の昇降部は上端の高さを返さない（`W-1`）。値があるときだけ上端の線と満量に使う
+  // 昇降部が上端の高さを返さないことがある。値があるときだけ上端の線と満量に使う
   const hasTop = isFinite(Number(lift.top_mm)) && lift.top_mm !== null && Number(lift.top_mm) > 0;
   const full = hasTop ? Number(lift.top_mm) : lift_gauge_full_mm;
   const height = lift.height_ok === false ? 0 : Number(lift.height_mm) || 0;
