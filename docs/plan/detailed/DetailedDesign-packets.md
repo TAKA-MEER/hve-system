@@ -307,6 +307,6 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 ### `WP-LIFT-07` 上端の検知を戻す（`W-1` を閉じる）
 
 - 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1、[EXCEPTION-LEDGER.md](../EXCEPTION-LEDGER.md)
-- 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）。**`docs/使い方.md`**（起動直後は上昇しない・「上端の検知: 一時無効」が出なくなる）
+- 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・**`LIFT_TOP_MM` を 1800**（2026-10-28 ユーザー決定。-names.md）・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）。**`docs/使い方.md`**（起動直後は上昇しない・「上端の検知: 一時無効」が出なくなる）
 - 受け入れ: native の試験が成功。`grep -rn 'WAIVER(demo): W-1'` が空。**変異**: ※ 原点を取る前に上昇できる／※ `LIFT_TOP_MM` を設定して高さがそれ以上でも上昇できる → 赤
 - **実機で管理担当が確かめる**: 起動直後は上昇しない（`HEIGHT_UNKNOWN`）→ 下げて下端に着けると上昇できる／`LIFT_TOP_MM` を仮に低く置いて、そこで止まる
