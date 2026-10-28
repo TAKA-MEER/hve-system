@@ -10,7 +10,8 @@
       `lostpointercapture` / ページが隠れた / ページを閉じた）に `release` を送る。
    2. **映像はブラウザ側で拡大しない。**ズームは `{"t":"zoom"}` を送るだけで、
       見えている倍率は `state.zoom`（camera/hve_camera/control.py が持つ）だけを使う
-      （spec §1.5・protocol §2.1）。
+      （spec §1.5・protocol §2.1）。**静止画は別**で、表示中だけその端末のブラウザの中で
+      拡大・移動する（CSS の transform。`{"t":"zoom"}` は送らない。spec §1.5.1）。
    3. **速度スライダーの位置は保存しない。**画面を開くたびに設定の初期値から
       始める（spec §1）。
    4. **スライダーの値は保存し、ヨーの角度は出さない**（spec §1.4・§2）。
@@ -77,6 +78,31 @@ function zoomTarget(current, delta) {
   const step = Number(delta) > 0 ? Math.abs(Number(delta)) : -Math.abs(Number(delta) || 0);
   const snapped = Math.round((from + step) / zoom_step) * zoom_step;
   return Math.min(zoom_max, Math.max(1, Math.round(snapped * 1000) / 1000));
+}
+
+/**
+ * 静止画の拡大したあとの、ずらせる範囲（画面の px。中央からの片側の最大）。
+ * 静止画は `object-fit: contain` で枠に収まって出る（実際の大きさ＝natural を枠に合わせた大きさ）。
+ * 拡大した大きさが枠より大きい分だけずらせる（端が枠の内側に入らない範囲。小さいうちは 0）。
+ */
+function snapPanLimit(scale, boxW, boxH, naturalW, naturalH) {
+  const s = Number(scale) > 0 ? Number(scale) : 1;
+  const nw = Number(naturalW) > 0 ? Number(naturalW) : 0;
+  const nh = Number(naturalH) > 0 ? Number(naturalH) : 0;
+  const bw = Number(boxW) > 0 ? Number(boxW) : 0;
+  const bh = Number(boxH) > 0 ? Number(boxH) : 0;
+  if (nw === 0 || nh === 0 || bw === 0 || bh === 0) return {x: 0, y: 0};
+  const fit = Math.min(bw / nw, bh / nh);
+  return {
+    x: Math.max(0, (nw * fit * s - bw) / 2),
+    y: Math.max(0, (nh * fit * s - bh) / 2),
+  };
+}
+
+/** ずれ（px）を `snapPanLimit` の範囲に収める */
+function clampPan(x, y, limit) {
+  const clamp = (value, max) => Math.min(max, Math.max(-max, isFinite(Number(value)) ? Number(value) : 0));
+  return {x: clamp(x, limit.x) + 0, y: clamp(y, limit.y) + 0};
 }
 
 /** 軸 → 送る速度。`pitch_*` は `pitch`・`yaw_*` は `yaw` を見る */
@@ -351,10 +377,69 @@ function bindHoldButtons() {
 
 /* --- 静止画（spec §1.5.1。押した端末だけ・映像の上に重ねる） --- */
 
+/* 静止画の見え方（その端末の中だけ。映像の倍率・カメラ部・ほかの端末には送らない） */
+let snap_scale = 1;
+let snap_x = 0;
+let snap_y = 0;
+let snap_drag = null; // ドラッグ中: {id, x, y}（直前の指の位置）
+
+function snapLimit(scale) {
+  const box = $('snapshot');
+  const image = $('snapImage');
+  return snapPanLimit(scale, box.clientWidth, box.clientHeight, image.naturalWidth, image.naturalHeight);
+}
+
+function applySnapView() {
+  const pan = clampPan(snap_x, snap_y, snapLimit(snap_scale));
+  snap_x = pan.x;
+  snap_y = pan.y;
+  $('snapImage').style.transform = `translate(${snap_x}px, ${snap_y}px) scale(${snap_scale})`;
+  $('snapZLvl').textContent = `${snap_scale.toFixed(1)}×`;
+}
+
+function resetSnapView() {
+  snap_scale = 1;
+  snap_x = 0;
+  snap_y = 0;
+  snap_drag = null;
+  applySnapView();
+}
+
+/** 静止画の倍率を 1 段変える（delta=0 は 1 倍に戻す）。映像の `zoom_max`・`zoom_step` を使い回す */
+function snapZoom(delta) {
+  snap_scale = delta === 0 ? 1 : zoomTarget(snap_scale, delta);
+  applySnapView();
+}
+
+function bindSnapshotZoom() {
+  $('snapZIn').addEventListener('click', () => snapZoom(zoom_step));
+  $('snapZOut').addEventListener('click', () => snapZoom(-zoom_step));
+  $('snapZLvl').addEventListener('click', () => snapZoom(0));
+  const box = $('snapshot');
+  box.addEventListener('pointerdown', (event) => {
+    if (event.target.closest && event.target.closest('button')) return;
+    snap_drag = {id: event.pointerId, x: event.clientX, y: event.clientY};
+    if (box.setPointerCapture) box.setPointerCapture(event.pointerId);
+  });
+  box.addEventListener('pointermove', (event) => {
+    if (!snap_drag || snap_drag.id !== event.pointerId) return;
+    snap_x += event.clientX - snap_drag.x;
+    snap_y += event.clientY - snap_drag.y;
+    snap_drag.x = event.clientX;
+    snap_drag.y = event.clientY;
+    applySnapView();
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((name) => {
+    box.addEventListener(name, () => { snap_drag = null; });
+  });
+  addEventListener('resize', applySnapView);
+}
+
 /** 静止画を取り寄せて重ねて出す。映像のポートが分からないうちは何もしない */
 function openSnapshot() {
   if (video_port === null) return;
   const image = $('snapImage');
+  resetSnapView();
   $('snapMsg').textContent = '取得中…';
   $('snapMsg').style.display = '';
   image.style.visibility = 'hidden';
@@ -363,6 +448,7 @@ function openSnapshot() {
 }
 
 function closeSnapshot() {
+  resetSnapView();
   $('snapshot').classList.remove('show');
   $('snapImage').removeAttribute('src');
 }
@@ -547,7 +633,9 @@ function initApp() {
 
   $('snapBtn').addEventListener('click', openSnapshot);
   $('snapClose').addEventListener('click', closeSnapshot);
+  bindSnapshotZoom();
   $('snapImage').addEventListener('load', () => {
+    applySnapView();
     $('snapImage').style.visibility = 'visible';
     $('snapMsg').style.display = 'none';
   });
@@ -584,7 +672,7 @@ if (typeof document !== 'undefined') initApp();
 
 if (typeof module === 'object' && module !== null) {
   module.exports = {
-    holdMessage, releaseMessage, zoomMessage, zoomTarget, speedFor, sliderSpec,
+    holdMessage, releaseMessage, zoomMessage, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
     topDetectText, ownerText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,
