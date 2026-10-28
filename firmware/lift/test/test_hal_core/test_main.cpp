@@ -31,9 +31,24 @@ constexpr int32_t counts_for_mm(int mm) {
 // その µm 以下に収まる最大のカウント数（切り捨て）。閾値の手前を作るのに使う。
 constexpr int32_t counts_under_um(int32_t um) { return um / LIFT_UM_PER_COUNT; }
 
+// 試験の時計。press() は押された状態を LIFT_BOTTOM_DEBOUNCE_MS 続けて読ませる
+// （EncoderHeight に「押された」とみなされる）。release() は離れた状態を 1 回読ませる。
+uint32_t g_now = 1000;
+
+void press(EncoderHeight* h, int32_t count, int up_sign = ENC_UP_SIGN) {
+  h->update(count, true, g_now, up_sign);
+  g_now += LIFT_BOTTOM_DEBOUNCE_MS;
+  h->update(count, true, g_now, up_sign);
+}
+
+void release(EncoderHeight* h, int32_t count, int up_sign = ENC_UP_SIGN) {
+  g_now += 10;
+  h->update(count, false, g_now, up_sign);
+}
+
 }  // namespace
 
-void setUp() {}
+void setUp() { g_now = 1000; }
 
 void tearDown() {}
 
@@ -41,13 +56,13 @@ void tearDown() {}
 
 void test_not_pressed_at_boot_is_unknown() {
   EncoderHeight h;
-  h.update(1234, false);
+  release(&h, 1234);
   TEST_ASSERT_FALSE(h.ok());
 }
 
 void test_pressed_at_boot_takes_home() {
   EncoderHeight h;
-  h.update(1234, true);
+  press(&h, 1234);
   TEST_ASSERT_TRUE(h.ok());
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
 }
@@ -56,22 +71,22 @@ void test_pressed_at_boot_takes_home() {
 
 void test_second_landing_retakes_home() {
   EncoderHeight h;
-  h.update(1000, true);
-  h.update(1000 + counts_for_mm(10), false);  // 上げる（10 mm）
+  press(&h, 1000);
+  release(&h, 1000 + counts_for_mm(10));  // 上げる（10 mm）
   TEST_ASSERT_EQUAL_INT(10, h.height_mm());
   // 2 回目の着地で原点を取り直す
-  h.update(500, true);
+  press(&h, 500);
   TEST_ASSERT_TRUE(h.ok());
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
   // 離れてから上げると高さが増える
-  h.update(500 + counts_for_mm(10), false);
+  release(&h, 500 + counts_for_mm(10));
   TEST_ASSERT_EQUAL_INT(10, h.height_mm());
 }
 
 void test_height_grows_when_raising_after_release() {
   EncoderHeight h;
-  h.update(0, true);
-  h.update(counts_for_mm(10), false);
+  press(&h, 0);
+  release(&h, counts_for_mm(10));
   TEST_ASSERT_EQUAL_INT(10, h.height_mm());
   TEST_ASSERT_TRUE(h.ok());
 }
@@ -80,8 +95,8 @@ void test_height_grows_when_raising_after_release() {
 // 仮の 100 µm に戻すと 144 mm になり、カウント → mm の換算が落ちる。
 void test_one_encoder_revolution_is_37_mm() {
   EncoderHeight h;
-  h.update(0, true);
-  h.update(kCountsPerRev, false);
+  press(&h, 0);
+  release(&h, kCountsPerRev);
   TEST_ASSERT_EQUAL_INT(37, h.height_mm());
 }
 
@@ -89,13 +104,13 @@ void test_one_encoder_revolution_is_37_mm() {
 
 void test_pressed_going_down_lowers_home() {
   EncoderHeight h;
-  h.update(1000, true);
+  press(&h, 1000);
   // 押されている間に下降側へ 5 mm 進むと原点が下がる（高さは 0 のまま）
-  h.update(1000 - counts_for_mm(5), true);
+  press(&h, 1000 - counts_for_mm(5));
   TEST_ASSERT_TRUE(h.ok());
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
   // 離れてから 15 mm 上げると、ずらした原点からの高さになる
-  h.update(1000 - counts_for_mm(5) + counts_for_mm(15), false);
+  release(&h, 1000 - counts_for_mm(5) + counts_for_mm(15));
   TEST_ASSERT_EQUAL_INT(15, h.height_mm());
 }
 
@@ -103,13 +118,13 @@ void test_pressed_going_down_lowers_home() {
 
 void test_pressed_going_up_does_not_move_home() {
   EncoderHeight h;
-  h.update(1000, true);
+  press(&h, 1000);
   // 押されている間に上昇側へ進んでも原点は動かない（高さが付く）
-  h.update(1000 + counts_for_mm(5), true);
+  press(&h, 1000 + counts_for_mm(5));
   TEST_ASSERT_TRUE(h.ok());
   TEST_ASSERT_EQUAL_INT(5, h.height_mm());
   // 離れて戻しても原点は最初のまま
-  h.update(1000, false);
+  release(&h, 1000);
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
 }
 
@@ -117,28 +132,28 @@ void test_pressed_going_up_does_not_move_home() {
 
 void test_pressed_within_slack_stays_ok() {
   EncoderHeight h;
-  h.update(1000, true);
-  h.update(1000 + counts_under_um(HOME_SLACK_MM * 1000), true);
+  press(&h, 1000);
+  press(&h, 1000 + counts_under_um(HOME_SLACK_MM * 1000));
   TEST_ASSERT_TRUE(h.ok());
 }
 
 void test_pressed_beyond_slack_is_fault() {
   EncoderHeight h;
-  h.update(1000, true);
-  h.update(1000 + counts_under_um(HOME_SLACK_MM * 1000) + 1, true);
+  press(&h, 1000);
+  press(&h, 1000 + counts_under_um(HOME_SLACK_MM * 1000) + 1);
   TEST_ASSERT_FALSE(h.ok());
 }
 
 void test_fault_stays_after_release_until_repress() {
   EncoderHeight h;
-  h.update(1000, true);
-  h.update(1000 + counts_under_um(HOME_SLACK_MM * 1000) + 1, true);
+  press(&h, 1000);
+  press(&h, 1000 + counts_under_um(HOME_SLACK_MM * 1000) + 1);
   TEST_ASSERT_FALSE(h.ok());
   // 離れても偽のまま
-  h.update(1000, false);
+  release(&h, 1000);
   TEST_ASSERT_FALSE(h.ok());
   // 押し直したら原点を取り直して真に戻る
-  h.update(900, true);
+  press(&h, 900);
   TEST_ASSERT_TRUE(h.ok());
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
 }
@@ -147,8 +162,8 @@ void test_fault_stays_after_release_until_repress() {
 
 void test_below_home_is_negative() {
   EncoderHeight h;
-  h.update(1000, true);
-  h.update(1000 - counts_for_mm(10), false);  // 離れている間の下降側へのずれ
+  press(&h, 1000);
+  release(&h, 1000 - counts_for_mm(10));  // 離れている間の下降側へのずれ
   TEST_ASSERT_TRUE(h.ok());
   TEST_ASSERT_EQUAL_INT(-10, h.height_mm());
 }
@@ -234,10 +249,10 @@ void test_guarded_allows_exactly_half_limit() {
 
 void test_up_sign_minus_one_reverses() {
   EncoderHeight h;
-  h.update(1000, true, -1);
+  press(&h, 1000, -1);
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
   // +1 のとき下げ方向の進みが、-1 では上げ方向になる
-  h.update(1000 - counts_for_mm(10), false, -1);
+  release(&h, 1000 - counts_for_mm(10), -1);
   TEST_ASSERT_EQUAL_INT(10, h.height_mm());
   TEST_ASSERT_TRUE(h.ok());
 }
@@ -308,6 +323,162 @@ void test_pwm_works_at_12_bit_too() {
   TEST_ASSERT_EQUAL_UINT32(full, motor_duty_to_pwm(100, 12));
 }
 
+// --- 下端スイッチの一瞬の誤り（2026-10-28。LIFT_BOTTOM_DEBOUNCE_MS・LIFT_HOME_ACCEPT_MM）---
+
+namespace {
+// 原点を取ってから離れ、mm だけ上げた状態にする。そのときの数を返す
+int32_t home_then_raise(EncoderHeight* h, int mm) {
+  press(h, 0);
+  const int32_t count = counts_for_mm(mm);
+  release(h, count);
+  return count;
+}
+
+// 読んだ値を押されのまま ms だけ見せる（1 ms ごと）。最後の時刻で終わる
+void hold_raw_pressed(EncoderHeight* h, int32_t count, uint32_t ms) {
+  for (uint32_t i = 0; i <= ms; ++i) {
+    h->update(count, true, g_now);
+    ++g_now;
+  }
+  --g_now;
+}
+}  // namespace
+
+void test_single_pressed_read_does_not_take_home() {
+  EncoderHeight h;
+  h.update(1234, true, g_now);
+  TEST_ASSERT_FALSE(h.ok());
+  // 短く押されてすぐ離れた
+  g_now += LIFT_BOTTOM_DEBOUNCE_MS - 1;
+  h.update(1234, true, g_now);
+  TEST_ASSERT_FALSE(h.ok());
+  g_now += 1;
+  h.update(1234, false, g_now);
+  TEST_ASSERT_FALSE(h.ok());
+}
+
+void test_pressed_counts_after_exactly_debounce_ms() {
+  EncoderHeight h;
+  h.update(1234, true, g_now);
+  g_now += LIFT_BOTTOM_DEBOUNCE_MS - 1;
+  h.update(1234, true, g_now);
+  TEST_ASSERT_FALSE(h.ok());
+  g_now += 1;
+  h.update(1234, true, g_now);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+}
+
+void test_release_in_between_restarts_the_debounce() {
+  EncoderHeight h;
+  h.update(10, true, g_now);
+  g_now += LIFT_BOTTOM_DEBOUNCE_MS - 1;
+  h.update(10, false, g_now);  // 続かずに離れた
+  g_now += 1;
+  h.update(10, true, g_now);  // 押し直し。ここから数え直す
+  g_now += LIFT_BOTTOM_DEBOUNCE_MS - 1;
+  h.update(10, true, g_now);
+  TEST_ASSERT_FALSE(h.ok());
+  g_now += 1;
+  h.update(10, true, g_now);
+  TEST_ASSERT_TRUE(h.ok());
+}
+
+void test_debounce_survives_millis_wrap() {
+  EncoderHeight h;
+  g_now = 0xFFFFFFF0u;
+  h.update(10, true, g_now);
+  g_now += LIFT_BOTTOM_DEBOUNCE_MS - 1;  // 折り返して小さい値になる
+  h.update(10, true, g_now);
+  TEST_ASSERT_TRUE(g_now < 0x1000u);
+  TEST_ASSERT_FALSE(h.ok());
+  g_now += 1;
+  h.update(10, true, g_now);
+  TEST_ASSERT_TRUE(h.ok());
+}
+
+void test_short_glitch_while_raised_keeps_home_and_height() {
+  EncoderHeight h;
+  const int32_t count = home_then_raise(&h, 1900);
+  TEST_ASSERT_EQUAL_INT(1900, h.height_mm());
+  // 10 ms だけ押されたと読めて離れた
+  g_now += 5;
+  h.update(count, true, g_now);
+  g_now += 5;
+  h.update(count, false, g_now);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(1900, h.height_mm());
+}
+
+void test_long_press_above_accept_is_rejected() {
+  EncoderHeight h;
+  const int32_t count = home_then_raise(&h, 500);
+  hold_raw_pressed(&h, count, LIFT_BOTTOM_DEBOUNCE_MS + 20);
+  TEST_ASSERT_FALSE(h.ok());
+  // 原点にしていない（高さは 0 に戻らない）
+  TEST_ASSERT_EQUAL_INT(500, h.height_mm());
+}
+
+void test_accept_boundary_is_inclusive() {
+  EncoderHeight h;
+  // ちょうど LIFT_HOME_ACCEPT_MM の高さ（µm で見て以下）なら原点にする
+  const int32_t under = counts_under_um(LIFT_HOME_ACCEPT_MM * 1000);
+  press(&h, 0);
+  release(&h, under);
+  press(&h, under);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+  // 1 カウント超えたら拒否する
+  EncoderHeight h2;
+  press(&h2, 0);
+  release(&h2, under + 1);
+  press(&h2, under + 1);
+  TEST_ASSERT_FALSE(h2.ok());
+}
+
+void test_rejected_press_takes_home_when_it_comes_down_within_accept() {
+  EncoderHeight h;
+  const int32_t count = home_then_raise(&h, 500);
+  hold_raw_pressed(&h, count, LIFT_BOTTOM_DEBOUNCE_MS + 5);
+  TEST_ASSERT_FALSE(h.ok());
+  // 押されたまま下がる。まだ高い間は偽のまま
+  h.update(counts_for_mm(300), true, ++g_now);
+  TEST_ASSERT_FALSE(h.ok());
+  // LIFT_HOME_ACCEPT_MM 以下へ下がったら、そこで原点を取って真に戻る
+  const int32_t low = counts_under_um(LIFT_HOME_ACCEPT_MM * 1000);
+  h.update(low, true, ++g_now);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+}
+
+void test_rejected_stays_false_after_release_and_repress_is_judged_again() {
+  EncoderHeight h;
+  const int32_t count = home_then_raise(&h, 500);
+  hold_raw_pressed(&h, count, LIFT_BOTTOM_DEBOUNCE_MS + 5);
+  TEST_ASSERT_FALSE(h.ok());
+  // 離れても偽のまま
+  release(&h, count);
+  TEST_ASSERT_FALSE(h.ok());
+  // 高い所で押し直しても偽のまま
+  press(&h, count);
+  TEST_ASSERT_FALSE(h.ok());
+  release(&h, count);
+  // 下げてから押し直せば原点を取って真に戻る
+  press(&h, 5);
+  TEST_ASSERT_TRUE(h.ok());
+  TEST_ASSERT_EQUAL_INT(0, h.height_mm());
+}
+
+void test_rejected_press_does_not_trigger_slack_fault_path() {
+  // 拒否された押下で上へ進んでも、HOME_SLACK_MM の故障の経路には入らない（高さは数え続ける）
+  EncoderHeight h;
+  const int32_t count = home_then_raise(&h, 500);
+  hold_raw_pressed(&h, count, LIFT_BOTTOM_DEBOUNCE_MS + 5);
+  h.update(count + counts_for_mm(50), true, ++g_now);
+  TEST_ASSERT_FALSE(h.ok());
+  TEST_ASSERT_EQUAL_INT(550, h.height_mm());
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
   RUN_TEST(test_not_pressed_at_boot_is_unknown);
@@ -321,6 +492,16 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_pressed_beyond_slack_is_fault);
   RUN_TEST(test_fault_stays_after_release_until_repress);
   RUN_TEST(test_below_home_is_negative);
+  RUN_TEST(test_single_pressed_read_does_not_take_home);
+  RUN_TEST(test_pressed_counts_after_exactly_debounce_ms);
+  RUN_TEST(test_release_in_between_restarts_the_debounce);
+  RUN_TEST(test_debounce_survives_millis_wrap);
+  RUN_TEST(test_short_glitch_while_raised_keeps_home_and_height);
+  RUN_TEST(test_long_press_above_accept_is_rejected);
+  RUN_TEST(test_accept_boundary_is_inclusive);
+  RUN_TEST(test_rejected_press_takes_home_when_it_comes_down_within_accept);
+  RUN_TEST(test_rejected_stays_false_after_release_and_repress_is_judged_again);
+  RUN_TEST(test_rejected_press_does_not_trigger_slack_fault_path);
   RUN_TEST(test_quad_forward_cycle_is_minus4);
   RUN_TEST(test_quad_backward_cycle_is_plus4);
   RUN_TEST(test_quad_two_cycles_are_plusminus8);

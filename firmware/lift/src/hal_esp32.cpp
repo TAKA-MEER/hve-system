@@ -119,8 +119,8 @@ void LiftEsp32Hal::poll(uint32_t now_ms) {
   pcnt_get_counter_value(kPcntUnit, &raw);
   portEXIT_CRITICAL(&g_pcnt_mux);
   total_count_ = encoder_total_guarded(total_count_, overflow, raw, ENC_PCNT_LIMIT);
-  // 下端スイッチの状態と一緒に渡す。判断は EncoderHeight 側
-  encoder_.update(total_count_, bottom_pressed(), ENC_UP_SIGN);
+  // 下端スイッチは読んだそのままを時刻と一緒に渡す。時間の続きの判断は EncoderHeight 側
+  encoder_.update(total_count_, bottom_pressed(), now_ms, ENC_UP_SIGN);
   height_mm_ = encoder_.height_mm();
   height_ok_ = encoder_.ok();
   height_at_ms_ = now_ms;

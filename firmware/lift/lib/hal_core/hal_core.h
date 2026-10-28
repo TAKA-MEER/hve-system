@@ -27,6 +27,13 @@ constexpr int32_t LIFT_STALL_MIN_COUNTS =
 // 下端スイッチが押されたまま上昇側へ進んでよい余裕 [mm]。仮（P-14）。
 // 超えたらスイッチの故障とみなす（DetailedDesign.md §4.1.1）。
 constexpr int HOME_SLACK_MM = 20;  // 仮（P-14）
+// 下端スイッチが「押された」とみなすまでに、読んだ値が押されたまま続く時間 [ms]。
+// これより短い「押された」（ノイズ・線やコネクタの一瞬の開き）は数えない。仮（2026-10-28）。
+// 原点を取る側だけに使う。下降の BOTTOM（LiftHal::bottom_pressed）には掛けない。
+constexpr uint32_t LIFT_BOTTOM_DEBOUNCE_MS = 30;  // 仮
+// 原点を取ったあと、高さがこれを超える所で押されたら原点にせず、高さを読めないとする [mm]。
+// 下げるときのたるみ（500 mm で約 30 mm）より大きく。仮（2026-10-28）。
+constexpr int LIFT_HOME_ACCEPT_MM = 100;  // 仮
 
 // PCNT の A/B 4 逓倍の数え方（DetailedDesign-hardware.md §1.1）。
 // 値は driver/pcnt.h と同じ（hal_esp32.cpp で static_assert で一致を確かめる）。
@@ -86,16 +93,22 @@ inline int32_t encoder_total_guarded(int32_t prev_total, int32_t overflow, int16
 // （DetailedDesign.md §4.1.1。判断はすべてここに置き、hal_esp32 は読んで渡すだけ）。
 class EncoderHeight {
  public:
-  // エンコーダの累積の数（原点に依らない）と下端スイッチの状態を渡す。
+  // エンコーダの累積の数（原点に依らない）と、下端スイッチを読んだそのままの状態と、
+  // 読んだ時刻 [ms] を渡す。時刻は millis() の折り返しに耐える引き算で使う。
+  // 読んだ値が LIFT_BOTTOM_DEBOUNCE_MS 続けて押されているときだけ「押された」とみなす。
   // up_sign は上昇で数が増える向き（+1 / -1。実機では ENC_UP_SIGN）。
-  void update(int32_t count, bool bottom_pressed, int up_sign = ENC_UP_SIGN);
-  bool ok() const { return has_home_ && !fault_; }
+  void update(int32_t count, bool bottom_pressed_raw, uint32_t now_ms,
+              int up_sign = ENC_UP_SIGN);
+  bool ok() const { return has_home_ && !fault_ && !rejected_; }
   // 原点を取ったあとの高さ [mm]。原点より下（ずれ）は負のまま出す。丸めない。
   int height_mm() const;
 
  private:
   bool has_home_ = false;      // 下端に一度でも着いたか
-  bool prev_pressed_ = false;  // 前回押されていたか（押された瞬間を見るため）
+  bool prev_pressed_ = false;  // 前回「押された」とみなしていたか（押された瞬間を見るため）
+  bool raw_pressed_ = false;   // 前回読んだ値が押されていたか（時間の続きを数えるため）
+  uint32_t raw_since_ms_ = 0;  // 読んだ値が押されになった時刻
+  bool rejected_ = false;      // LIFT_HOME_ACCEPT_MM を超える所で押された（原点にしていない）
   bool fault_ = false;         // 押されたまま HOME_SLACK_MM を超えた（スイッチの故障）
   int32_t home_count_ = 0;     // 原点の数
   int32_t last_count_ = 0;     // 最後に渡された数
