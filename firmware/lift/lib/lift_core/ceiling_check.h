@@ -12,8 +12,8 @@ enum class StopReason : uint8_t {
   OWNER_GONE,  // 持ち主の接続が閉じた
   CEILING_NEAR,  // 天井が近い（MEASURED で閾値以下・TOO_NEAR）
   CEILING_STALE,  // 天井の値が無い・読めない・古い
-  HEIGHT_UNKNOWN,  // WAIVER(demo): W-1 上端の検知を一時無効の間は出ない
-  TOP,             // WAIVER(demo): W-1 上端の検知を一時無効の間は出ない
+  HEIGHT_UNKNOWN,  // 高さが読めない・古い（原点を取る前を含む）。上昇しない
+  TOP,             // 高さが LIFT_TOP_MM に達した。上昇しない
   BOTTOM,
   MAX_RUN,
   ENCODER_STALL,  // モータへ出力しているのにエンコーダが回らない・逆に回る（spec #4d）

@@ -49,7 +49,7 @@ LiftController::LiftController(LiftHal* hal, int top_mm)
       turning_(false),
       run_at_ms_(0),
       state_() {
-  state_.top_detect = LIFT_TOP_DETECT_ENABLED;
+  state_.top_detect = LIFT_TOP_DETECT_ENABLED && top_mm_ >= 0;
 }
 
 LiftController::ConnInfo* LiftController::find_or_add(const ConnId& conn) {
@@ -325,9 +325,9 @@ LiftState LiftController::step(uint32_t now_ms) {
                                                               : speed_up_mm_s_ - 0.5f);
   state_.bottom = in.bottom_pressed;
   state_.height_mm = in.height_mm;
-  // 高さは表示と配信だけに使い続ける（W-1）。鮮度の判断は height_is_fresh の 1 か所
+  // 鮮度の判断は height_is_fresh の 1 か所（判定 #4 と共有）
   state_.height_ok = in.height_ok && height_is_fresh(now_ms, in.height_at_ms);
-  state_.top_detect = LIFT_TOP_DETECT_ENABLED;
+  state_.top_detect = LIFT_TOP_DETECT_ENABLED && top_mm_ >= 0;
   // 天井は持ち主の最後の hold の値。持ち主がいなければ上部モジュールの
   // 最後の hold の値（無ければ null）
   state_.ceiling_used = has_owner && owner_has_sensor;

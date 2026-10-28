@@ -137,32 +137,71 @@ void test_ceiling_wins_over_height_unknown() {
   assert_decision(in, LiftDir::STOP, 0, StopReason::CEILING_STALE);
 }
 
-// --- 表 4 高さが読めない・古い（W-1 の間は判定しない） ---
+// --- 表 4 高さが読めない・古い ---
 
-void test_up_with_invalid_height_still_moves_while_waived() {
-  TEST_ASSERT_FALSE(LIFT_TOP_DETECT_ENABLED);  // WAIVER(demo): W-1
+void test_up_with_invalid_height_stops_with_height_unknown() {
   LiftDecideInput in = movable();
   in.height_ok = false;
-  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+  assert_decision(in, LiftDir::STOP, 0, StopReason::HEIGHT_UNKNOWN);
 }
 
-void test_up_with_stale_height_still_moves_while_waived() {
-  TEST_ASSERT_FALSE(LIFT_TOP_DETECT_ENABLED);  // WAIVER(demo): W-1
+void test_up_with_stale_height_stops_with_height_unknown() {
   LiftDecideInput in = movable();
   in.height_at_ms = 1000;
   in.now_ms = 1000 + HEIGHT_STALE_MS + 1;
   in.ceiling.received_at_ms = in.now_ms;  // 天井は新しいまま（表 3 で止めない）
+  assert_decision(in, LiftDir::STOP, 0, StopReason::HEIGHT_UNKNOWN);
+}
+
+void test_up_with_height_exactly_at_stale_limit_moves() {
+  LiftDecideInput in = movable();
+  in.height_at_ms = 1000;
+  in.now_ms = 1000 + HEIGHT_STALE_MS;
+  in.ceiling.received_at_ms = in.now_ms;
   assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
 }
 
-// --- 表 6 上端（W-1 の間は判定しない） ---
+void test_down_with_invalid_height_still_moves() {
+  LiftDecideInput in = movable();
+  in.dir = LiftDir::DOWN;
+  in.height_ok = false;
+  assert_decision(in, LiftDir::DOWN, 40, StopReason::NONE);
+}
 
-void test_up_at_top_threshold_still_moves_while_waived() {
-  TEST_ASSERT_FALSE(LIFT_TOP_DETECT_ENABLED);  // WAIVER(demo): W-1
+// --- 表 6 上端 ---
+
+void test_up_at_top_threshold_stops_with_top() {
   LiftDecideInput in = movable();
   in.top_mm = 1500;
-  in.height_mm = 1600;
+  in.height_mm = 1500;  // ちょうど届いた
+  assert_decision(in, LiftDir::STOP, 0, StopReason::TOP);
+}
+
+void test_up_just_below_top_threshold_moves() {
+  LiftDecideInput in = movable();
+  in.top_mm = 1500;
+  in.height_mm = 1499;
   assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+}
+
+void test_down_above_top_threshold_still_moves() {
+  LiftDecideInput in = movable();
+  in.dir = LiftDir::DOWN;
+  in.top_mm = 1500;
+  in.height_mm = 1600;
+  assert_decision(in, LiftDir::DOWN, 40, StopReason::NONE);
+}
+
+void test_up_with_top_unset_moves_at_any_height() {
+  LiftDecideInput in = movable();
+  in.top_mm = -1;  // 未設定（#2a）
+  in.height_mm = 5000;
+  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+}
+
+void test_default_top_threshold_is_1800() {
+  TEST_ASSERT_EQUAL_INT(1800, LIFT_TOP_MM);
+  TEST_ASSERT_TRUE(LIFT_TOP_DETECT_ENABLED);
 }
 
 // --- 表 7 下端 ---
@@ -276,6 +315,7 @@ void test_cmd_timestamp_newer_than_now_does_not_stop() {
   LiftDecideInput in = movable();
   in.now_ms = 0x00001000u;
   in.ceiling.received_at_ms = in.now_ms;  // 天井は新しいまま
+  in.height_at_ms = in.now_ms;            // 高さも新しいまま
   assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
 }
 
@@ -314,10 +354,16 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_up_without_sensor_ignores_ceiling);
   RUN_TEST(test_ceiling_wins_over_height_unknown);
 
-  RUN_TEST(test_up_with_invalid_height_still_moves_while_waived);
-  RUN_TEST(test_up_with_stale_height_still_moves_while_waived);
+  RUN_TEST(test_up_with_invalid_height_stops_with_height_unknown);
+  RUN_TEST(test_up_with_stale_height_stops_with_height_unknown);
+  RUN_TEST(test_up_with_height_exactly_at_stale_limit_moves);
+  RUN_TEST(test_down_with_invalid_height_still_moves);
 
-  RUN_TEST(test_up_at_top_threshold_still_moves_while_waived);
+  RUN_TEST(test_up_at_top_threshold_stops_with_top);
+  RUN_TEST(test_up_just_below_top_threshold_moves);
+  RUN_TEST(test_down_above_top_threshold_still_moves);
+  RUN_TEST(test_up_with_top_unset_moves_at_any_height);
+  RUN_TEST(test_default_top_threshold_is_1800);
 
   RUN_TEST(test_down_with_bottom_pressed_stops_with_bottom);
   RUN_TEST(test_up_with_bottom_pressed_still_moves);
