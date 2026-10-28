@@ -174,6 +174,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`ENC_UP_SIGN`** | `hal_core.h` | +1 | **仮**（上昇で数が増える向き。実機で確かめる） |
 | **`LIFT_UM_PER_COUNT`** | `hal_core.h` | **26**（設計値。エンコーダ 1 周の上昇 37.5 mm ÷ (4 × `ENC_PPR`)。µm にして整数で持つ。`WP-LIFT-09` で反映） | spec `H-V12`。[-hardware.md](DetailedDesign-hardware.md) §1.1。`WP-MEAS-01` で全行程を測って直す |
 | **`HOME_SLACK_MM`** | `hal_core.h` | 20 | **仮**（`P-14`） |
+| **`LIFT_BOTTOM_DEBOUNCE_MS`** | `hal_core.h` | 30 | **仮**（2026-10-28。これより短い「押された」は数えない。下降の `BOTTOM` には使わない） |
+| **`LIFT_HOME_ACCEPT_MM`** | `hal_core.h` | 100 | **仮**（2026-10-28。原点を取ったあと、これより高い所で押されたら原点にせず高さを読めないとする。下げるときのたるみ〈500 mm で約 30 mm〉より大きく） |
 | **`EncoderHeight`** | `hal_core.h` | 原点・故障（`P-14`）・高さの式を持つ小さな状態（`WP-LIFT-05`） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
 | **`PcntQuadConfig`** / **`kPcntQuadEncoder`** / **`pcnt_quad_step`** | `hal_core.h` | A/B 4 逓倍のチャンネル設定・その値・(A,B) 1 段の遷移の増減（`WP-LIFT-05` 差し戻し 1） | [DetailedDesign.md](DetailedDesign.md) §4.1.1 |
 | **`encoder_total`** | `hal_core.h` | 溢れの累積 ＋ 今のカウンタの純関数（`WP-LIFT-05` 差し戻し 1） | 同 |

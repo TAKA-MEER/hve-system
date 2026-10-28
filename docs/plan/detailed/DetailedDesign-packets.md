@@ -53,6 +53,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-CAM-06` | 5 | カメラモジュール（アプリ・画面）を `speed`（mm/s）・`ENCODER_STALL`・原点を取る前の表示に合わせる | LIFT-06（取り決め） | 不要（偽物のモード） |
 | `WP-LIFT-08` | 5 | **モータへの出力の上限を設定に**（`motor_max_pct`・`SpeedLoop` の丸め・設定 API・NVS・昇降部の画面・偽の昇降部）。spec 2026-10-16 | LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-CAM-07` | 5 | カメラモジュール（設定の検証・中継・偽物のモード・画面）に `motor_max_pct` を足す | LIFT-08（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-10` | 5 | **下端スイッチの一瞬の誤りで原点を取らない**（2026-10-28。上端付近で高さが 0 に戻った。`LIFT_BOTTOM_DEBOUNCE_MS`・`LIFT_HOME_ACCEPT_MM`） | LIFT-09 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-09` | 5 | **高さの換算を機構の設計値にする**（`LIFT_UM_PER_COUNT` 100 → 26・`LIFT_STALL_MIN_COUNTS` を mm から決め直す・試験の換算）。2026-10-25 | LIFT-05・LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
 
@@ -279,6 +280,19 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
 - 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
+
+### `WP-LIFT-10` 下端スイッチの一瞬の誤りで原点を取らない
+
+- 読む節: spec [Spec-safety.md](../spec/Spec-safety.md) §1.2（「スイッチの誤り」の行）、[DetailedDesign.md](DetailedDesign.md) §4.1.1 の表（2026-10-28 の 2 行と本文）、[-names.md](DetailedDesign-names.md) の `LIFT_BOTTOM_DEBOUNCE_MS`・`LIFT_HOME_ACCEPT_MM`
+- 作るもの: `lib/hal_core` の `EncoderHeight::update` に時刻を渡し（`hal_esp32` の `poll(now_ms)` から）、表の 2 行を入れる。定数は `hal_core.h`。**`LiftHal::bottom_pressed()`（下降の `BOTTOM`）は読んだそのままのまま変えない**。ホスト試験（`test_hal_core`）。`LiftController` を通した試験で、上昇中の一瞬の「押された」で高さが 0 に戻らないこと・高い所で押され続けると上昇しないことを縛る
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` を通した試験で縛る）
+  1. ※ 時間の続きを見ない（1 回読めただけで原点を取る）
+  2. ※ `LIFT_HOME_ACCEPT_MM` を見ない（高い所でも原点を取る）
+  3. 高い所で押されたとき `height_ok` を偽にしない（原点にしないだけ）
+  4. 押されている間に `LIFT_HOME_ACCEPT_MM` 以下へ下がっても原点を取らない（真に戻らない）
+  5. ※ 下降の `BOTTOM` にも時間の続きを掛ける（スイッチに着いても止まるのが遅れる）
+  6. `hal_esp32` が `update` に時刻を渡さない（固定値）→ ビルドか試験で見つかる形にする
+- **実機で管理担当が確かめる**: 下端で `BOTTOM` と原点が今までどおり／上端付近まで 100 mm/s で上げても高さが 0 に戻らない／下端スイッチの線を上昇中に一瞬外すと、原点にならず上昇が止まる（`HEIGHT_UNKNOWN`）・下げて下端に着けると戻る
 
 ### `WP-LIFT-09` 高さの換算を機構の設計値にする
 
