@@ -790,6 +790,99 @@ void test_height_unknown_shows_in_state_while_waiver() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(hal.motor_dir()));
 }
 
+// --- 下端スイッチの一瞬の誤り（WP-LIFT-10。EncoderHeight を載せた偽 HAL を通す）---
+
+namespace {
+
+// 10 ms ごとに poll し、100 ms ごとに持ち主の上昇の hold と step を回す。
+// 上昇は約 99 mm/s（10 ms で 38 カウント）。end_ms まで進めて最後の step の状態を返す。
+struct EncoderRig {
+  EncoderFakeHal hal;
+  LiftController ctrl{&hal, LIFT_TOP_MM};
+  uint32_t t = 0;
+  LiftState last;
+
+  void run_to(uint32_t end_ms, int32_t counts_per_10ms) {
+    for (; t <= end_ms; t += 10) {
+      hal.set_count(hal.encoder_count() + counts_per_10ms);
+      hal.poll(t);
+      if (t % 100 == 0) {
+        ctrl.on_hold(module(2), up_hold(1, 100, t), t);
+        last = ctrl.step(t);
+      }
+    }
+  }
+
+  // 下端に着けて原点を取り、離れる
+  void land_and_leave() {
+    hal.set_raw_pressed(true);
+    for (uint32_t i = 0; i < 6; ++i, t += 10) {
+      hal.poll(t);
+    }
+    hal.set_raw_pressed(false);
+    hal.poll(t);
+    t = ((t / 100) + 1) * 100;
+    ctrl.on_hello(module(2), hello_with_sensor(true));
+  }
+};
+
+}  // namespace
+
+void test_glitch_during_climb_does_not_reset_height() {
+  EncoderRig rig;
+  rig.land_and_leave();
+  // 上端付近まで上がった状態にする（同じ方向の連続駆動の上限があるので、数だけ進めておく）
+  rig.hal.set_count(1800 * 1000 / LIFT_UM_PER_COUNT);
+  rig.hal.poll(rig.t);
+  rig.run_to(rig.t + 3000, 38);
+  TEST_ASSERT_TRUE(rig.last.height_ok);
+  TEST_ASSERT_TRUE(rig.last.height_mm > 1800);
+  // 上昇中に 1 回だけ「押された」と読めた
+  rig.hal.set_raw_pressed(true);
+  rig.hal.set_count(rig.hal.encoder_count() + 38);
+  rig.hal.poll(rig.t);
+  rig.t += 10;
+  rig.hal.set_raw_pressed(false);
+  rig.run_to(rig.t + 300, 38);
+  TEST_ASSERT_TRUE(rig.last.height_ok);
+  TEST_ASSERT_TRUE(rig.last.height_mm > 1800);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+}
+
+void test_long_press_while_high_makes_height_unknown() {
+  EncoderRig rig;
+  rig.land_and_leave();
+  rig.run_to(5000, 38);
+  TEST_ASSERT_TRUE(rig.last.height_ok);
+  const int before = rig.last.height_mm;
+  TEST_ASSERT_TRUE(before > 300);
+  rig.hal.set_raw_pressed(true);
+  rig.run_to(rig.t + 300, 38);
+  // 原点にしない（0 に戻らない）。高さは読めないことになる
+  TEST_ASSERT_FALSE(rig.last.height_ok);
+  TEST_ASSERT_TRUE(rig.last.height_mm >= before);
+  // W-1 が解けたあとは判定 #4 で上昇が止まる（いまは WAIVER で判定しない）
+  if (LIFT_TOP_DETECT_ENABLED) {
+    assert_reason(StopReason::HEIGHT_UNKNOWN, rig.last);
+    TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  }
+}
+
+// 下降の BOTTOM は読んだそのまま。1 回読めただけでも止まる（時間の続きを掛けない）
+void test_bottom_stops_down_on_a_single_raw_read() {
+  EncoderRig rig;
+  rig.land_and_leave();
+  rig.run_to(3000, 38);
+  rig.ctrl.on_hold(module(2), down_hold(2), rig.t);
+  rig.hal.set_raw_pressed(true);
+  rig.hal.poll(rig.t);  // 押されたと読めたのはこの 1 回だけ
+  const LiftState state = rig.ctrl.step(rig.t);
+  assert_reason(StopReason::BOTTOM, state);
+  TEST_ASSERT_TRUE(state.bottom);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -840,6 +933,10 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_cmd_timeout_survives_millis_wrap);
   RUN_TEST(test_height_ok_in_state_survives_millis_wrap_when_fresh);
   RUN_TEST(test_height_unknown_shows_in_state_while_waiver);
+
+  RUN_TEST(test_glitch_during_climb_does_not_reset_height);
+  RUN_TEST(test_long_press_while_high_makes_height_unknown);
+  RUN_TEST(test_bottom_stops_down_on_a_single_raw_read);
 
   return UNITY_END();
 }
