@@ -309,3 +309,25 @@ test('確かめが成功したら数え直す（間に成功が挟まれば 2 �
   r = app.probeOutcome(r.failures, false);
   assert.deepEqual(r, {failures: 1, hide: false});
 });
+
+test('静止画のずらせる範囲は、拡大した大きさが枠を越えた分だけ（contain の余白を含む）', () => {
+  // 枠 400×200・絵 100×100（contain で 200×200 になり、左右に余白）
+  assert.deepEqual(app.snapPanLimit(1, 400, 200, 100, 100), {x: 0, y: 0});   // 1 倍はずれない
+  assert.deepEqual(app.snapPanLimit(1.5, 400, 200, 100, 100), {x: 0, y: 50}); // 横は 300 < 400 でまだ余白
+  assert.deepEqual(app.snapPanLimit(4, 400, 200, 100, 100), {x: 200, y: 300});
+  // 枠いっぱいの絵（400×200）
+  assert.deepEqual(app.snapPanLimit(2, 400, 200, 800, 400), {x: 200, y: 100});
+  assert.deepEqual(app.snapPanLimit(1, 400, 200, 800, 400), {x: 0, y: 0});
+  // 読めない値・絵が未読み込み（natural 0）はずれない
+  assert.deepEqual(app.snapPanLimit(2, 400, 200, 0, 0), {x: 0, y: 0});
+  assert.deepEqual(app.snapPanLimit('x', 400, 200, 800, 400), {x: 0, y: 0});
+});
+
+test('静止画のずれは範囲に収める（両側・読めない値は 0）', () => {
+  const limit = {x: 200, y: 100};
+  assert.deepEqual(app.clampPan(50, -30, limit), {x: 50, y: -30});
+  assert.deepEqual(app.clampPan(999, -999, limit), {x: 200, y: -100});
+  assert.deepEqual(app.clampPan(-201, 101, limit), {x: -200, y: 100});
+  assert.deepEqual(app.clampPan(10, 10, {x: 0, y: 0}), {x: 0, y: 0});
+  assert.deepEqual(app.clampPan('x', undefined, limit), {x: 0, y: 0});
+});
