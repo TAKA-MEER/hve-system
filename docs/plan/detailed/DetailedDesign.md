@@ -67,6 +67,7 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2・[Spec-module.md](../spec/Spe
 | `/ws/ui` | 昇降部の画面（単体での操作） | **使わない**（spec #4c） |
 | `/ws/module`、`hello` で `ceiling_sensor: false` を送ってきた | 距離計を持たない上部モジュール | **使わない**（spec `H-X11`） |
 | `/ws/module`、`hello` で `ceiling_sensor: true` を送ってきた、**または `hello` をまだ受けていない・読めない** | 距離計を持つ上部モジュール | **使う**（spec #3〜#4） |
+| （接続ではない）`ConnKind::BUTTON` | 昇降部の点検用の物理ボタン（2026-10-29。§4.1.3） | **使わない**（spec #4c） |
 
 - **口はコードの定数**（`LIFT_WS_UI_PATH`・`LIFT_WS_MODULE_PATH`。カメラモジュール側も `LIFT_WS_MODULE_PATH` と同じ値の定数）。**設定で変えられるようにしない**（書き間違えて `/ws/ui` に繋ぐと、天井を見ないまま昇降できてしまう）。
 - **昇降部は `/ws/ui` で `hello` を受けたら、その接続を閉じる。**上部モジュールが誤って画面の口に繋いだら、黙って動かずに大きく失敗させる。
@@ -108,6 +109,8 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2・[Spec-module.md](../spec/Spe
 | `release`（持ち主でないものから） | 無視する（[-open.md](DetailedDesign-open.md) `P-9`） |
 | 持ち主の `hold` が `LIFT_CMD_TIMEOUT_MS` 届かない | 止める（`CMD_TIMEOUT`）。持ち主を空にする |
 | 持ち主の接続が閉じた | **その場で**止める（`OWNER_GONE`）。持ち主を空にする |
+| ★`hold`（**持ち主が物理ボタン**のときの、物理ボタン以外の接続から。新しい `press` でも） | **無視する**（2026-10-29。spec [Spec-ui.md](../spec/Spec-ui.md) §0.3）。**ただし、その `press` を接続の「前に見た `press`」に記録する**（物理ボタンを離して持ち主が空になったあと、押し続けていた遠隔の操作が同じ `press` で持ち主にならない。上の「持ち主が空のとき」の行で無視される） |
+| ★物理ボタンの `hold`（新しい `press`） | 今までどおり持ち主を替える（遠隔の操作から取って代わる） |
 
 この規則は純ロジック `LiftArbiter` にまとめ、ホストで試験する（[-names.md](DetailedDesign-names.md) §1）。
 
@@ -212,6 +215,19 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 
 **呼び出し側を縛る**: `SpeedLoop` の単体試験だけでなく、`LiftController` を偽 HAL（数を進める・進めない）で回し、
 「出力が上がって速さが目標に近づく」「数が進まなければ `ENCODER_STALL` で 0 になる」をモータに出した値で確かめる（[-packets.md](DetailedDesign-packets.md) `WP-LIFT-06`）。
+
+#### 4.1.3 点検用の物理ボタン（`ButtonInput`。spec [Spec-ui.md](../spec/Spec-ui.md) §0.3。2026-10-29）
+
+| 項目 | 決まり |
+| --- | --- |
+| 読み方 | `ButtonInput`（`lib/lift_core/button_input.{h,cpp}`。純ロジック）。`loop` ごとに 2 本のピンの電圧と時刻を渡す。読みの部分（入ってから動き出すまでのチャタリング除け 30 ms・両方 LOW は止める・反転は 150 ms の停止を挟む・**離したらすぐ止める**）は組み立て用の `ManualSwitch`（[-hardware.md](DetailedDesign-hardware.md) §1.2）を中で使う |
+| 起動時 | **両方が HIGH（離れている）と一度読めるまでは、何を読んでも止まり**（起動したときに入っていた・固着した） |
+| `press` | 止まりから動きへ替わるたびに 1 つ増やす（`hold` の `press` と同じ役割） |
+| `LiftController` への渡し方 | 純関数 **`button_step`**（`ButtonInput`・`LiftController`・2 本の電圧・`LiftSettings`・時刻を受け取る）が、動いている間は**毎回** `on_hold(LIFT_BUTTON_CONN_ID, …)`（速さは設定の上昇・下降の `init_mm_s`・天井の値は `MISSING`）を、止まりに替わった回に `on_release` を呼ぶ。**`main.cpp` の `loop()` はピンを読んでこれを呼ぶだけ**（呼び出し側の判断を native で縛るため） |
+| 接続 | `ConnKind::BUTTON`・接続番号 **`LIFT_BUTTON_CONN_ID`**（-1。WS の接続番号と重ならない）。**距離計を持たない**（天井を使わない。spec #4c）。閉じることは無い |
+| 持ち主の規則 | §3.3 の★の 2 行。`loop` が `LIFT_CMD_TIMEOUT_MS` より長く詰まったら `CMD_TIMEOUT` で止まり、同じ `press` では動き直さない（押し直す。止まる側） |
+| `state` | 持ち主が物理ボタンなら `owner` は **`button`**（[-protocol.md](DetailedDesign-protocol.md) §2.2） |
+| 画面 | 昇降部の画面・カメラモジュールの画面とも、`owner` が `button` の間は「物理ボタンで操作中（遠隔からは動かせません）」を出す。持ち主の表示は「物理ボタン（点検）」 |
 
 ### 4.2 昇降部の画面（`firmware/lift/web/`）
 

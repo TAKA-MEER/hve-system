@@ -68,7 +68,7 @@
 | `ceiling.used` | いまの持ち主の命令に天井の値を使っているか（持ち主が距離計を持つ上部モジュールのとき `true`） |
 | `ceiling.status` / `mm` / `age_ms` | 持ち主の最後の `hold` に載っていた天井の値。古さは受け取ってからの経過を足したもの。持ち主がいなければ、上部モジュールの最後の `hold` の値（無ければ `null`） |
 | `ceiling.ok` / `reason` | `ceiling_check()` の結果。`reason` は `NONE` / `CEILING_NEAR` / `CEILING_STALE` / `OUT_OF_RANGE`（反射なし。`ok` は `true`） |
-| `owner` | `ui` / `module` / `null` |
+| `owner` | `ui` / `module` / `button`（点検用の物理ボタン。2026-10-29。[DetailedDesign.md](DetailedDesign.md) §4.1.3） / `null` |
 | `ui_clients` | `/ws/ui` に繋いでいる画面の数 |
 | `module` | 上部モジュールの接続。`connected` が `false` なら他は `null` |
 | `provisional` | 仮値のまま動いている昇降部の定数名（`DD-3`） |

@@ -55,6 +55,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-CAM-07` | 5 | カメラモジュール（設定の検証・中継・偽物のモード・画面）に `motor_max_pct` を足す | LIFT-08（取り決め） | 不要（偽物のモード） |
 | `WP-LIFT-10` | 5 | **下端スイッチの一瞬の誤りで原点を取らない**（2026-10-28。上端付近で高さが 0 に戻った。`LIFT_BOTTOM_DEBOUNCE_MS`・`LIFT_HOME_ACCEPT_MM`） | LIFT-09 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-11` | 5 | **連続駆動の上限を目標の速さから都度求める**（2026-10-29 ユーザー決定。固定 10 秒では全行程を一度で動かせない。`LIFT_MAX_RUN_PCT`・`LIFT_STROKE_FALLBACK_MM`） | LIFT-07 | 不要（実機の確認は管理担当） |
+| `WP-LIFT-12` | 5 | **点検用の物理ボタン**（2026-10-29 ユーザー決定。本番のファームで組み立て用と同じスイッチを読み、安全の判定を通して動かす。押している間だけ遠隔より優先。`ButtonInput`・`button_step`・`ConnKind::BUTTON`・`owner: button`・両方の画面の表示） | LIFT-11 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-09` | 5 | **高さの換算を機構の設計値にする**（`LIFT_UM_PER_COUNT` 100 → 26・`LIFT_STALL_MIN_COUNTS` を mm から決め直す・試験の換算）。2026-10-25 | LIFT-05・LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
 
@@ -281,6 +282,29 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
 - 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
+
+### `WP-LIFT-12` 点検用の物理ボタン
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.3（受け入れているリスクまで）・[Spec-module.md](../spec/Spec-module.md) §2〜§4・[Spec-safety.md](../spec/Spec-safety.md) §2 #4c、[DetailedDesign.md](DetailedDesign.md) §3.1・§3.3（★の 2 行）・§4.1.3、[-hardware.md](DetailedDesign-hardware.md) §1.2・§1.3、[-names.md](DetailedDesign-names.md) の `ButtonInput`・`button_step`・`LIFT_BUTTON_CONN_ID`・`LIFT_SW_*_PIN`、[-protocol.md](DetailedDesign-protocol.md) §2.2 の `owner`
+- 作るもの:
+  - `lib/lift_core/button_input.{h,cpp}`: `ButtonInput`（中で `ManualSwitch` を使う）と `button_step`。`Arduino.h` を include しない
+  - `lift_arbiter`: `ConnKind::BUTTON` と §3.3 の★の 2 行
+  - `lift_controller`: `BUTTON` は距離計を持たない（`sensor_of`）。`state.owner_kind` に 2（`button`）
+  - `cmd_codec`: `state_encode`・`state_decode` に `owner: "button"`
+  - `src/main.cpp`: 起動時に 2 本を `INPUT_PULLUP`、`loop()` でピンを読んで `button_step` を呼ぶだけ。`src/config.h` のピンの定数を `LIFT_SW_UP_PIN`・`LIFT_SW_DOWN_PIN` に改め、`src/manual/` も同じ名前を使う（組み立て用ファームの振る舞いは変えない）
+  - 画面: `firmware/lift/web/app.js`・`camera/web/app.js` の持ち主の表示に `button`（「物理ボタン（点検）」）、`owner` が `button` の間は「物理ボタンで操作中（遠隔からは動かせません）」を出す（両画面の純関数の試験）
+  - **`docs/使い方.md`** に L 節を 1 つ足す（点検用の物理ボタン。組み立て用 L-4 との違い・効く安全装置・遠隔との関係・受け入れているリスク）
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual`・`.venv38/bin/python -m pytest camera/tests`・`.venv/bin/python -m pytest tools/tests`・`node firmware/lift/web/tests/web.test.js`・`node --test camera/web/tests/web.test.js` が成功。**次の変異がそれぞれ赤になる**（※ は `button_step` と `LiftController`・偽 HAL を通した試験で縛る）
+  1. ※ 離したときにもチャタリング除けを掛ける（離してから止まるまで遅れる）
+  2. ※ 起動したときに入っていたボタンで動く
+  3. ※ 両方 LOW でも動く
+  4. ※ 物理ボタンを押している間に、遠隔の新しい `press` で持ち主が替わる
+  5. ※ 物理ボタンを離したあと、押し続けていた遠隔の `hold`（同じ `press`）で動き出す
+  6. ※ 物理ボタンの命令に天井の値を使う（`BUTTON` を距離計ありにすると、天井 `MISSING` で上昇しない）
+  7. ※ 物理ボタンの命令で下端（`BOTTOM`）・原点の前の上昇（`HEIGHT_UNKNOWN`）が効かない
+  8. ※ 速さに設定の初期値でなく固定の値を使う
+  9. `state` の `owner` が `button` にならない
+- **実機で管理担当が確かめる**: スイッチを倒したまま電源を入れると動かない→離して倒し直すと動く／下端で `BOTTOM`・原点の前は上昇しない／押している間、画面から押しても動かず「物理ボタンで操作中」が両方の画面に出る／画面で押し続けている間に物理ボタンを押すと物理ボタンに替わり、離すと画面は押し直すまで動かない／上昇中にスイッチの線を外すと止まる
 
 ### `WP-LIFT-11` 連続駆動の上限を目標の速さから都度求める
 

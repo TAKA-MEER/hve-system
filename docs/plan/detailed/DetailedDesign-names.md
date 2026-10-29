@@ -46,7 +46,9 @@
 | `CeilingStatus` | `lift_core/ceiling_check.h` | `MEASURED` / `TOO_NEAR` / `NO_ECHO` / `READ_ERROR` / `MISSING`（欠けている・読めない） |
 | `CeilingReport` | 同 | `hold` に載る天井の値（状態・mm・`age_ms`）と、受け取った時刻 |
 | `ceiling_check` | 同 | `ceiling_check(report, now_ms, connection_has_sensor)` → `CeilingVerdict{ok, reason}`。**距離計を持たない接続なら常に `ok`**。古さは `age_ms ＋ elapsed_ms(now, received_at)` |
-| `ConnId` | `lift_core/lift_arbiter.h` | 接続の識別子（整数）と種類（`UI` / `MODULE`） |
+| `ConnId` | `lift_core/lift_arbiter.h` | 接続の識別子（整数）と種類（`UI` / `MODULE` / `BUTTON`） |
+| **`ButtonInput`** ／ **`button_step`** ／ **`LIFT_BUTTON_CONN_ID`**（-1） | `lift_core/button_input.h` | 点検用の物理ボタンの読み（起動時に入っていたら離すまで止まり・`press` を数える）と、`LiftController` へ `hold`・`release` を渡す 1 周期（[DetailedDesign.md](DetailedDesign.md) §4.1.3。2026-10-29） |
+| **`LIFT_SW_UP_PIN`** ／ **`LIFT_SW_DOWN_PIN`** | `firmware/lift/src/config.h` | 物理ボタン（点検用）と組み立て用ファームのスイッチのピン（33 / 13。旧 `MANUAL_SW_UP_PIN`・`MANUAL_SW_DOWN_PIN`。[-hardware.md](DetailedDesign-hardware.md) §1.3） |
 | `LiftArbiter` | 同 | 持ち主の規則（[DetailedDesign.md](DetailedDesign.md) §3.3）。`on_hold`・`on_release`・`on_close`・`tick(now)`・`owner()` |
 | `LiftSettings` ／ `validate_lift_settings` ／ `lift_settings_from_json` ／ `lift_settings_to_json` | `lift_core/lift_settings.h` | 昇降の速度の設定（[-protocol.md](DetailedDesign-protocol.md) §3） |
 | `IoCmd` ／ `parse_m_line` ／ `format_c_line` ／ `format_b_line` | `cam_io/lib/io_core/io_codec.h` | UART の行（[-protocol.md](DetailedDesign-protocol.md) §5） |
@@ -65,7 +67,7 @@
 
 | 名前 | 置き場 | 中身 |
 | --- | --- | --- |
-| `ConnKind`（`UI`・`MODULE`）／ `ConnId` | `lift_arbiter.h` | 命令の出どころの接続の種類（`/ws/ui`・`/ws/module`）と接続の識別 |
+| `ConnKind`（`UI`・`MODULE`・`BUTTON`）／ `ConnId` | `lift_arbiter.h` | 命令の出どころの接続の種類（`/ws/ui`・`/ws/module`・点検用の物理ボタン〈2026-10-29〉）と接続の識別 |
 | `StopReason`・`CeilingStatus`・`CeilingReport`（`received_at_ms` を含む）・`CeilingVerdict` | `ceiling_check.h` | 停止理由（§3）・天井の値の状態と判定の結果。`StopReason` は循環 include を避けてここに置く |
 | `HelloMsg`・`HoldMsg`・`ReleaseMsg` ／ `decode_hello`・`decode_hold`・`decode_release`・`state_encode`・`state_decode` | `cmd_codec.h` | [-protocol.md](DetailedDesign-protocol.md) §2・§3 のメッセージ |
 | `LiftAxisSettings`・`LiftSettings` ／ `validate_lift_settings`・`lift_settings_from_json`・`lift_settings_to_json` | `lift_settings.h` | 昇降の設定 |
