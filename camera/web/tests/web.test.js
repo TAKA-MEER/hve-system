@@ -133,7 +133,12 @@ test('上端の検知: top_detect が true でなければ「上端が未設定�
 test('持ち主・昇降部の画面の数・昇降部へのリンク', () => {
   assert.equal(app.ownerText('module'), '持ち主 カメラモジュール');
   assert.equal(app.ownerText('ui'), '持ち主 昇降部の画面');
+  assert.equal(app.ownerText('button'), '持ち主 物理ボタン（点検）');
   assert.equal(app.ownerText(null), '持ち主 なし');
+  assert.equal(app.buttonNoteText('button'), '物理ボタンで操作中（遠隔からは動かせません）');
+  assert.equal(app.buttonNoteText('ui'), null);
+  assert.equal(app.buttonNoteText('module'), null);
+  assert.equal(app.buttonNoteText(null), null);
   assert.equal(app.liftUiText(2), '昇降部の画面 2');
   assert.equal(app.liftUiText(0), '昇降部の画面 0');
   assert.equal(app.liftUiText(undefined), '昇降部の画面 —');

@@ -59,6 +59,7 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .osd span{background:rgba(0,0,0,.6);padding:1px 7px;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums}
 .stopbar{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.75);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px}
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
+.stopbar.top{bottom:auto;top:0;border-top:0;border-bottom:3px solid var(--warn)}
 .stopbar.show{display:block}
 .guidebtn{position:absolute;right:6px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
 .snapbtn{position:absolute;right:80px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
