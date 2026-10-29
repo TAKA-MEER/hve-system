@@ -36,7 +36,8 @@ from aiohttp import WSMsgType, web
 LIFT_CMD_TIMEOUT_MS = 600
 CEILING_MARGIN_MM = 500  # 仮
 CEILING_STALE_MS = 600  # 仮
-LIFT_MAX_RUN_MS = 10000  # 仮
+LIFT_MAX_RUN_PCT = 150  # 仮（連続駆動の上限 = 全行程の何 % か。spec #4b）
+LIFT_TOP_MM = 1800  # 偽物は上端の判定を持たないので、連続駆動の上限の全行程はこれで数える
 LIFT_DUTY_ABS_MAX_PCT = 100
 LIFT_SPEED_ABS_MAX_MM_S = 100  # 仮（設定の検証の上限・命令の丸め）
 LIFT_STALL_MS = 500  # 仮（spec #4d。動き出しの遅れより長く）
@@ -46,7 +47,7 @@ LIFT_MOTOR_MAX_PCT_MIN = 10  # 同・下限（上限は LIFT_DUTY_ABS_MAX_PCT）
 LIFT_WS_UI_PATH = "/ws/ui"
 LIFT_WS_MODULE_PATH = "/ws/module"
 FW = "fake-0.2.0"
-PROVISIONAL = ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_MS"]
+PROVISIONAL = ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"]
 
 DEFAULT_SETTINGS = {
     "lift_up": {"min": 10, "max": 60, "init": 30},
@@ -193,7 +194,9 @@ class FakeLift:
         self._owner_sensor = False
         self._idle_reason = "CMD_TIMEOUT"
         self._last_module_ceiling: CeilingReport | None = None
-        self._run_ms = 0
+        self._run_ms = 0  # ENCODER_STALL の真似に使う（回していた時間）
+        self._run_travel_um = 0  # MAX_RUN 用: 目標の速さで進んだとみなした距離 [µm]
+        self._run_speed = 0
         self._run_dir = "stop"
         self._turning = False
         self._run_at = now_ms()
@@ -276,16 +279,24 @@ class FakeLift:
             self._owner_cmd = None
             self._idle_reason = "CMD_TIMEOUT"
 
+    @staticmethod
+    def _max_run_um() -> int:
+        return LIFT_TOP_MM * 10 * LIFT_MAX_RUN_PCT
+
     # --- 判定（lift_decide の表の順）---
 
     def step(self, now: int) -> dict:
         self.tick(now)
         elapsed = now - self._run_at
         if self._turning and elapsed > 0:
-            self._run_ms = min(LIFT_MAX_RUN_MS + 1, self._run_ms + elapsed)
+            self._run_ms = min(LIFT_STALL_MS + 1, self._run_ms + elapsed)
+            # 直前の step で決めた目標の速さ [mm/s] × 経過 [ms] = µm（測った速さは使わない）
+            self._run_travel_um = min(self._max_run_um() + 1,
+                                      self._run_travel_um + self._run_speed * elapsed)
         cmd_dir = self._owner_cmd["dir"] if self._owner_cmd else "stop"
         if cmd_dir == "stop" or cmd_dir != self._run_dir:
             self._run_ms = 0
+            self._run_travel_um = 0
         self._run_dir = cmd_dir
 
         if not self._owner or not self._owner_cmd:
@@ -304,7 +315,7 @@ class FakeLift:
                 out_dir, out_duty, reason = "stop", 0, ceiling_reason
             elif cmd_dir == "down" and self.bottom:
                 out_dir, out_duty, reason = "stop", 0, "BOTTOM"
-            elif self._run_ms > LIFT_MAX_RUN_MS:
+            elif self._run_travel_um > self._max_run_um():
                 out_dir, out_duty, reason = "stop", 0, "MAX_RUN"
             elif self.stall and self._run_ms > LIFT_STALL_MS:
                 # エンコーダが回らない（#8a の真似。数え方は MAX_RUN と同じ）。
@@ -317,6 +328,7 @@ class FakeLift:
         self._turning = (reason == "NONE" and out_dir in ("up", "down")
                          and self._owner is not None and out_dir == cmd_dir)
         self._run_at = now
+        self._run_speed = cmd_speed if self._turning else 0
 
         moving = self._turning
         if moving:

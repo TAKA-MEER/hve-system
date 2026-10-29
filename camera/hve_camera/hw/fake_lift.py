@@ -20,7 +20,8 @@ from hve_camera.lift_link import LiftPort
 
 #: 昇降部の定数（`lift_core` と同じ値。**偽物でしか使わない。**本物はファームウェア側にある）
 LIFT_CMD_TIMEOUT_MS = 600
-LIFT_MAX_RUN_MS = 10000
+LIFT_TOP_MM = 1800  # 偽物は上端の判定を持たないので、連続駆動の上限の全行程はこれで数える
+LIFT_MAX_RUN_PCT = 150  # 連続駆動の上限 = 全行程の何 % か（lift_core の LIFT_MAX_RUN_PCT と同じ）
 LIFT_SPEED_ABS_MAX_MM_S = 100
 LIFT_STATE_PERIOD_MS = 100
 CEILING_MARGIN_MM = 500
@@ -57,7 +58,10 @@ class FakeLift(LiftPort):
         self._cmd_at_ms = clock()
         self._ceiling: Dict[str, Any] = {"status": "MISSING", "mm": None, "age_ms": 0}
         self._run_dir: Optional[str] = None
-        self._run_since_ms: Optional[float] = None
+        # 連続駆動の上限（#4b）。回していた間に目標の速さで進んだとみなした距離 [µm]
+        self._run_travel_um = 0.0
+        self._turning = False
+        self._run_speed_mm_s = 0
         self._last_step_ms = clock()
         self._seq = 0
         self._task: Optional[asyncio.Task] = None
@@ -147,7 +151,7 @@ class FakeLift(LiftPort):
             pass  # 同じ方向のまま動き続けているので続けて数える
         else:
             self._run_dir = direction if direction in ("up", "down") else None
-            self._run_since_ms = now
+            self._run_travel_um = 0.0
         self._cmd = {"dir": direction, "speed": int(speed)}
         self._cmd_at_ms = now
         self._ceiling = {
@@ -210,19 +214,22 @@ class FakeLift(LiftPort):
                 return "stop", 0, reason
         if direction == "down" and self._bottom:
             return "stop", 0, "BOTTOM"
-        run_ms = 0.0
-        if self._run_dir is not None and self._run_since_ms is not None:
-            run_ms = now - self._run_since_ms
-        if run_ms > LIFT_MAX_RUN_MS:
+        if self._run_travel_um > LIFT_TOP_MM * 10 * LIFT_MAX_RUN_PCT:
             return "stop", 0, "MAX_RUN"
         return direction, speed, "NONE"
 
     def _step(self, now: float) -> None:
         """1 周期ぶん進める。判定 → 動かす → `state` を作る。"""
-        dt_s = max(0.0, (now - self._last_step_ms) / 1000.0)
+        dt_ms = max(0.0, now - self._last_step_ms)
+        dt_s = dt_ms / 1000.0
         self._last_step_ms = now
 
+        # 回していた間だけ、直前に決めた目標の速さ [mm/s] × 経過 [ms] = µm を足してから判定する
+        if self._turning:
+            self._run_travel_um += self._run_speed_mm_s * dt_ms
         direction, speed, reason = self._decide(now)
+        self._turning = reason == "NONE" and direction in ("up", "down")
+        self._run_speed_mm_s = speed
         if direction == "up":
             self._height_mm += speed * dt_s
         elif direction == "down":
@@ -264,7 +271,7 @@ class FakeLift(LiftPort):
                 "ip": None,
                 "name": "hve-cam",
             },
-            "provisional": ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_MS"],
+            "provisional": ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],
             "fw": "fake-0.2.0",
         }
         self._state_at_ms = now

@@ -216,6 +216,7 @@ void test_state_encode_contains_v2_fields() {
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"module\":{"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"provisional\":["));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "CEILING_MARGIN_MM"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "LIFT_MAX_RUN_PCT"));
   const std::string expected_fw = std::string("\"fw\":\"") + lift_core_version() + "\"";
   TEST_ASSERT_NOT_NULL(std::strstr(json, expected_fw.c_str()));
 
