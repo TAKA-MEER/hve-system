@@ -14,6 +14,7 @@
 
 #include <cstring>
 
+#include "button_input.h"
 #include "cmd_codec.h"
 #include "config.h"
 #include "hal_esp32.h"
@@ -59,6 +60,8 @@ LiftController controller(&hal, LIFT_TOP_MM);
 // 昇降の速度の設定（protocol §3）。検証は lift_settings、保存は NVS。
 // 画面のスライダーの範囲・初期値として出すだけで、昇降部側で丸めには使わない。
 LiftSettings g_settings;
+// 点検用の物理ボタン（DetailedDesign.md §4.1.3）。読みと渡し方は lib/lift_core/button_input
+ButtonInput g_button;
 bool g_using_defaults = true;
 
 int g_state_seq = 0;  // state 送出ごとの連番（DetailedDesign-protocol.md §2.2）
@@ -531,6 +534,10 @@ void setup() {
   Serial.begin(115200);
   delay(200);  // シリアル出力の 1 行目が消えないように
 
+  // 点検用の物理ボタン。共通端子は GND、入っている側が LOW
+  pinMode(LIFT_SW_UP_PIN, INPUT_PULLUP);
+  pinMode(LIFT_SW_DOWN_PIN, INPUT_PULLUP);
+
   hal.begin();  // モータは停止から始める
   // 指令を一度も受けていないので、この 1 回は CMD_TIMEOUT で止まる
   controller.step(millis());
@@ -594,6 +601,10 @@ void loop() {
     }
   }
   controller.set_ui_clients(static_cast<int>(ws_ui.count()));
+
+  // 1b) 点検用の物理ボタン。ピンを読んで渡すだけ（判断は button_step の中）
+  button_step(g_button, controller, digitalRead(LIFT_SW_UP_PIN), digitalRead(LIFT_SW_DOWN_PIN),
+              g_settings, now);
 
   // 2) エンコーダの数を読み、高さを更新する。loop() は止めない
   hal.poll(now);

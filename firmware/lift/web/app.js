@@ -134,7 +134,13 @@ function moveText(dir, speed, speed_meas, bottom) {
 function ownerText(owner) {
   if (owner === 'ui') return 'この画面';
   if (owner === 'module') return '上部モジュール';
+  if (owner === 'button') return '物理ボタン（点検）';
   return 'なし';
+}
+
+/** 物理ボタンが持ち主の間だけ出す注意（遠隔からは動かせない。Spec-ui §0.3）。出さないときは `null` */
+function buttonNoteText(owner) {
+  return owner === 'button' ? '物理ボタンで操作中（遠隔からは動かせません）' : null;
 }
 
 /** `state` が `ui_state_timeout_ms` 届かないか（「接続切れ」を出す） */
@@ -382,6 +388,9 @@ function render() {
   $('stHeight').textContent = heightText(state.height_mm, state.height_ok);
   $('stBottom').textContent = state.bottom ? '押されている' : '離れている';
   $('stOwner').textContent = ownerText(state.owner);
+  const note = buttonNoteText(state.owner);
+  $('buttonNote').className = note ? 'stopbar show' : 'stopbar';
+  $('buttonNote').textContent = note || '';
   $('stModule').textContent = module.connected
     ? `接続中（距離計${module.ceiling_sensor ? 'あり' : 'なし'}）` : '未接続';
   $('stReason').textContent = state.reason || 'NONE';
@@ -581,7 +590,7 @@ if (typeof document !== 'undefined') initApp();
 if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
-    formatSpeed, reasonText, ceilingText, heightText, ownerText, moveText, stateStale,
+    formatSpeed, reasonText, ceilingText, heightText, ownerText, buttonNoteText, moveText, stateStale,
     validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, MOTOR_NOTE,
   };
 }

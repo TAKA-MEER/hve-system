@@ -175,7 +175,13 @@ function topDetectText(lift) {
 function ownerText(owner) {
   if (owner === 'module') return '持ち主 カメラモジュール';
   if (owner === 'ui') return '持ち主 昇降部の画面';
+  if (owner === 'button') return '持ち主 物理ボタン（点検）';
   return '持ち主 なし';
+}
+
+/** 物理ボタンが持ち主の間だけ出す注意（遠隔からは動かせない。Spec-ui §0.3）。出さないときは `null` */
+function buttonNoteText(owner) {
+  return owner === 'button' ? '物理ボタンで操作中（遠隔からは動かせません）' : null;
 }
 
 /** 昇降部の画面を開いている台数の表示 */
@@ -556,6 +562,10 @@ function render() {
   $('osdP').textContent = `ピッチ ${Number(state.pitch_deg).toFixed(1)}°`;
   $('cP').textContent = `↕ ${Math.round(Number(state.pitch_deg))}°`;
 
+  const note = buttonNoteText(lift.owner);
+  $('buttonNote').className = note ? 'stopbar top show' : 'stopbar top';
+  $('buttonNote').textContent = note || '';
+
   const reason = reasonText(state.reason);
   const bar = $('stopbar');
   if (reason) {
@@ -674,7 +684,7 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, zoomMessage, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
-    topDetectText, ownerText, liftUiText, liftLink, snapshotUrl, liftStateText,
+    topDetectText, ownerText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,
   };
 }

@@ -38,6 +38,13 @@ void assert_owner_kind(LiftArbiter* arbiter, ConnKind expected_kind) {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(expected_kind), static_cast<int>(conn.kind));
 }
 
+ConnId button() {
+  ConnId conn;
+  conn.id = -1;
+  conn.kind = ConnKind::BUTTON;
+  return conn;
+}
+
 }  // namespace
 
 // --- 最初の hold が持ち主になる ---
@@ -175,6 +182,45 @@ void test_timeout_across_millis_wrap() {
   assert_owner(&arbiter, false);
 }
 
+// --- 物理ボタン（DetailedDesign.md §3.3 の★。2026-10-29）---
+
+void test_button_owner_ignores_remote_new_press() {
+  LiftArbiter arbiter;
+  TEST_ASSERT_TRUE(arbiter.on_hold(button(), 1, 1000));
+  TEST_ASSERT_FALSE(arbiter.on_hold(ui(1), 5, 1010));
+  TEST_ASSERT_FALSE(arbiter.on_hold(module(2), 9, 1020));
+  assert_owner(&arbiter, true, -1, 1);
+  assert_owner_kind(&arbiter, ConnKind::BUTTON);
+}
+
+void test_button_new_press_takes_over_from_remote() {
+  LiftArbiter arbiter;
+  TEST_ASSERT_TRUE(arbiter.on_hold(ui(1), 3, 1000));
+  TEST_ASSERT_TRUE(arbiter.on_hold(button(), 1, 1100));
+  assert_owner(&arbiter, true, -1, 1);
+}
+
+void test_button_ignored_press_is_remembered_after_button_release() {
+  LiftArbiter arbiter;
+  TEST_ASSERT_TRUE(arbiter.on_hold(button(), 1, 1000));
+  // 遠隔の新しい press は無視されるが、前に見た press として記録される
+  TEST_ASSERT_FALSE(arbiter.on_hold(ui(1), 5, 1010));
+  TEST_ASSERT_TRUE(arbiter.on_release(button(), 1));
+  // 離したあとも押し続けている同じ press では持ち主になれない
+  TEST_ASSERT_FALSE(arbiter.on_hold(ui(1), 5, 1020));
+  assert_owner(&arbiter, false);
+  // より新しい press なら持ち主になる
+  TEST_ASSERT_TRUE(arbiter.on_hold(ui(1), 6, 1030));
+  assert_owner(&arbiter, true, 1, 6);
+}
+
+void test_button_release_clears_owner() {
+  LiftArbiter arbiter;
+  TEST_ASSERT_TRUE(arbiter.on_hold(button(), 2, 1000));
+  TEST_ASSERT_TRUE(arbiter.on_release(button(), 2));
+  assert_owner(&arbiter, false);
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -196,6 +242,11 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_timeout_boundary_keeps_owner_at_600ms);
   RUN_TEST(test_timeout_clears_owner_over_600ms);
   RUN_TEST(test_timeout_across_millis_wrap);
+
+  RUN_TEST(test_button_owner_ignores_remote_new_press);
+  RUN_TEST(test_button_new_press_takes_over_from_remote);
+  RUN_TEST(test_button_ignored_press_is_remembered_after_button_release);
+  RUN_TEST(test_button_release_clears_owner);
 
   return UNITY_END();
 }

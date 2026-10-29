@@ -112,7 +112,12 @@ test('動いている間の表示は目標と測った速さ（§1）', () => {
 test('持ち主の文言（最後の操作が勝つことを気づけるように出す。§1.6）', () => {
   assert.equal(app.ownerText('ui'), 'この画面');
   assert.equal(app.ownerText('module'), '上部モジュール');
+  assert.equal(app.ownerText('button'), '物理ボタン（点検）');
   assert.equal(app.ownerText(null), 'なし');
+  assert.equal(app.buttonNoteText('button'), '物理ボタンで操作中（遠隔からは動かせません）');
+  assert.equal(app.buttonNoteText('ui'), null);
+  assert.equal(app.buttonNoteText('module'), null);
+  assert.equal(app.buttonNoteText(null), null);
 });
 
 test('state が ui_state_timeout_ms 届かないとき「接続切れ」', () => {

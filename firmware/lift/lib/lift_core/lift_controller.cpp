@@ -87,6 +87,10 @@ bool LiftController::sensor_of(int conn_id, ConnKind kind) const {
   if (kind == ConnKind::UI) {
     return false;
   }
+  // 物理ボタンも距離計を持たない（spec #4c。DetailedDesign.md §4.1.3）
+  if (kind == ConnKind::BUTTON) {
+    return false;
+  }
   for (int i = 0; i < kMaxConns; ++i) {
     if (conns_[i].used && conns_[i].id == conn_id) {
       return conns_[i].has_sensor;
@@ -357,7 +361,7 @@ LiftState LiftController::step(uint32_t now_ms) {
     }
   }
   state_.has_owner = has_owner;
-  state_.owner_kind = has_owner && owner.kind == ConnKind::MODULE ? 1 : 0;
+  state_.owner_kind = !has_owner ? 0 : owner.kind == ConnKind::MODULE ? 1 : owner.kind == ConnKind::BUTTON ? 2 : 0;
   state_.ui_clients = ui_clients_;
   // 上部モジュールの接続（/ws/module で hello を受けたもの）
   state_.module_connected = false;
