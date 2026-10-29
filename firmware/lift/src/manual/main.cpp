@@ -50,8 +50,8 @@ void setup() {
   ledcWrite(PWM_CH, 0);
 
   // スイッチの共通端子は GND。入っている側が LOW
-  pinMode(MANUAL_SW_UP_PIN, INPUT_PULLUP);
-  pinMode(MANUAL_SW_DOWN_PIN, INPUT_PULLUP);
+  pinMode(LIFT_SW_UP_PIN, INPUT_PULLUP);
+  pinMode(LIFT_SW_DOWN_PIN, INPUT_PULLUP);
 
   g_switch = ManualSwitch(millis());
   Serial.printf("[manual] 組み立て用ファーム（安全装置なし・W-2）。デューティ %d%%\n",
@@ -60,7 +60,7 @@ void setup() {
 
 void loop() {
   const ManualDir dir =
-      g_switch.update(digitalRead(MANUAL_SW_UP_PIN), digitalRead(MANUAL_SW_DOWN_PIN), millis());
+      g_switch.update(digitalRead(LIFT_SW_UP_PIN), digitalRead(LIFT_SW_DOWN_PIN), millis());
   if (dir != g_applied) {
     motor_apply(dir);
     g_applied = dir;
