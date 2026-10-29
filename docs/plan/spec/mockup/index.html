@@ -316,9 +316,9 @@ td input.bad{border-color:var(--ng)}
   // origin が偽の間（電源投入から下端に着くまで）は、画面に高さを出せない
   const S = {height:0, origin:true, ceilingAt:2400, pitch:0, yaw:0,
              link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true,
-             active:null, reason:'NONE', runAxis:null, runT:0, meas:0};
-  // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_MS・pitch_min/max_deg）
-  const CEIL_MARGIN = 500, PITCH_LIM = 45, MAX_RUN_S = 10, GAUGE_FULL = 1800;
+             active:null, reason:'NONE', runAxis:null, runT:0, runDist:0, meas:0};
+  // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_PCT・pitch_min/max_deg）。GAUGE_FULL は上端の閾値
+  const CEIL_MARGIN = 500, PITCH_LIM = 45, MAX_RUN_PCT = 150, GAUGE_FULL = 1800;
 
   // 停止理由の文言（camera/web/app.js の REASON_TEXT と同じ。文言は仮）
   const REASON = {
@@ -328,7 +328,7 @@ td input.bad{border-color:var(--ng)}
     HEIGHT_UNKNOWN:['ng','高さが分からないため上昇できません。一度下端まで下げてください'],
     ENCODER_STALL:['warn','エンコーダが回らないため停止しました。反対方向へは動かせます'],
     LINK_LOST:['ng','昇降部と繋がっていません。昇降できません'],
-    MAX_RUN:['warn','同じ方向へ動き続けた時間が上限（10 秒）を超えたため停止しました。反対方向へは動かせます'],
+    MAX_RUN:['warn','同じ方向へ動き続けた時間が上限を超えたため停止しました。反対方向へは動かせます'],
     TOP:['warn','上端に達しました'],
     BOTTOM:['warn','下端です'],
     HOLD_TIMEOUT:['warn','操作が途絶えたため停止しました'],
@@ -377,7 +377,8 @@ td input.bad{border-color:var(--ng)}
   function liftDecide(axis){
     if (axis === 'lift_up'){ const c = ceilingVerdict(); if (c !== 'NONE' && c !== 'OUT_OF_RANGE') return c; }
     if (axis === 'lift_down' && S.height <= 0) return 'BOTTOM';
-    if (S.runAxis === axis && S.runT > MAX_RUN_S) return 'MAX_RUN';
+    // 連続駆動の上限（#4b）: 目標の速さで進んだとみなした距離が全行程の MAX_RUN_PCT % を超えた
+    if (S.runAxis === axis && S.runDist > GAUGE_FULL * MAX_RUN_PCT / 100) return 'MAX_RUN';
     if (S.stall && S.runAxis === axis && S.runT > 0.5) return 'ENCODER_STALL';  // 出力しているのに進まない（#4d）
     return 'NONE';
   }
@@ -397,9 +398,10 @@ td input.bad{border-color:var(--ng)}
     const dt = Math.min(0.2, (now - last) / 1000); last = now;
     const a = S.active;
     if (a && a.startsWith('lift') && S.link){
-      if (S.runAxis !== a){ S.runAxis = a; S.runT = 0; }
+      if (S.runAxis !== a){ S.runAxis = a; S.runT = 0; S.runDist = 0; }
       S.runT += dt;   // 止められても同じ方向の命令が続く限り数え続ける（lift_decide.cpp 表 8）
-    } else if (!a || !a.startsWith('lift')) { S.runAxis = null; S.runT = 0; }
+      S.runDist += speedOf(a) * dt;
+    } else if (!a || !a.startsWith('lift')) { S.runAxis = null; S.runT = 0; S.runDist = 0; }
     S.reason = screenReason();
     S.meas = 0;
     if (a && S.reason === 'NONE'){
@@ -689,7 +691,7 @@ td input.bad{border-color:var(--ng)}
       return;
     }
     if (m === 'reload'){ applySliders(); setZoom(1); return; }
-    if (m === 'maxrun'){ S.runAxis = 'lift_up'; S.runT = MAX_RUN_S + 1; S.active = 'lift_up'; setTimeout(() => { S.active = null; }, 1500); return; }
+    if (m === 'maxrun'){ S.runAxis = 'lift_up'; S.runT = 1; S.runDist = GAUGE_FULL * MAX_RUN_PCT / 100 + 1; S.active = 'lift_up'; setTimeout(() => { S.active = null; }, 1500); return; }
     if (m === 'noOrigin'){ // 途中の高さで再起動した: 一度下端に着くまで高さは読めない（Spec-safety.md §1.2）
       S.height = Math.max(S.height, 600); S.origin = false;
       document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');

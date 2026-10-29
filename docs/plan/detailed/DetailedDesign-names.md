@@ -147,7 +147,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `HEIGHT_STALE_MS` | `lift_decide.h` | 600 | **仮**（旧版） |
 | `LIFT_TOP_MM` | `lift_decide.h` | 1800 | **仮**（2026-10-28 ユーザー決定。機械の上端に当たったのは表示 1891 mm。`WP-MEAS-01` で見直す） |
 | **`LIFT_TOP_DETECT_ENABLED`** | `lift_decide.h` | `true` | 2026-10-28 に `W-1` を閉じて `true`（`5688686`）。**判定にはもう効かず**、`state.top_detect`（`LIFT_TOP_MM` が -1 でないときだけ真）の元になるだけ |
-| `LIFT_MAX_RUN_MS` | `lift_decide.h` | 10000 | **仮**（旧版。spec #4b） |
+| **`LIFT_MAX_RUN_PCT`** | `lift_decide.h` | 150 | **仮**（spec #4b。全行程に対する割合 [%]。2026-10-29 に固定の `LIFT_MAX_RUN_MS` 10000 から替えた） |
+| **`LIFT_STROKE_FALLBACK_MM`** | `lift_decide.h` | 1900 | **仮**（`LIFT_TOP_MM` が未設定〈-1〉のときに #8 が使う全行程。2026-10-28 に機械の上端に当たった表示 1891 mm） |
 | `LIFT_DUTY_ABS_MAX_PCT` | `lift_decide.h` | 100 | MD10C（**% ⇔ PWM の換算の基準**。モータ保護の上限ではない） |
 | **`LIFT_MOTOR_MAX_PCT_DEFAULT`** / **`LIFT_MOTOR_MAX_PCT_MIN`** | `lift_decide.h` | 50 / 10 | spec [Spec-ui.md](../spec/Spec-ui.md) §2.1（定格 12 V ÷ 電源 24 V）。設定の `motor_max_pct` の既定値と下限（2026-10-16） |
 | **`LiftSettings::motor_max_pct`** / JSON の **`motor_max_pct`** | `lift_settings.h` | モータへの出力の上限 [%]（設定。NVS に保存） | 同上 |

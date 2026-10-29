@@ -54,6 +54,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-08` | 5 | **モータへの出力の上限を設定に**（`motor_max_pct`・`SpeedLoop` の丸め・設定 API・NVS・昇降部の画面・偽の昇降部）。spec 2026-10-16 | LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-CAM-07` | 5 | カメラモジュール（設定の検証・中継・偽物のモード・画面）に `motor_max_pct` を足す | LIFT-08（取り決め） | 不要（偽物のモード） |
 | `WP-LIFT-10` | 5 | **下端スイッチの一瞬の誤りで原点を取らない**（2026-10-28。上端付近で高さが 0 に戻った。`LIFT_BOTTOM_DEBOUNCE_MS`・`LIFT_HOME_ACCEPT_MM`） | LIFT-09 | 不要（実機の確認は管理担当） |
+| `WP-LIFT-11` | 5 | **連続駆動の上限を目標の速さから都度求める**（2026-10-29 ユーザー決定。固定 10 秒では全行程を一度で動かせない。`LIFT_MAX_RUN_PCT`・`LIFT_STROKE_FALLBACK_MM`） | LIFT-07 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-09` | 5 | **高さの換算を機構の設計値にする**（`LIFT_UM_PER_COUNT` 100 → 26・`LIFT_STALL_MIN_COUNTS` を mm から決め直す・試験の換算）。2026-10-25 | LIFT-05・LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
 
@@ -280,6 +281,27 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
 - 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
+
+### `WP-LIFT-11` 連続駆動の上限を目標の速さから都度求める
+
+- 読む節: spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4b とその下の 2026-10-29 の表・受け入れているリスク、[DetailedDesign.md](DetailedDesign.md) §4.1 の表 #8 と「連続駆動の上限の数え方」、[-names.md](DetailedDesign-names.md) §5.1 の `LIFT_MAX_RUN_PCT`・`LIFT_STROKE_FALLBACK_MM`、[-protocol.md](DetailedDesign-protocol.md) §2.2 の `provisional`
+- 作るもの:
+  - `lift_decide.h`: `LIFT_MAX_RUN_MS` を消し、`LIFT_MAX_RUN_PCT`（150）・`LIFT_STROKE_FALLBACK_MM`（1900）を置く。`LiftDecideInput::run_ms` を `run_travel_um`（目標の速さで進んだとみなした距離 [µm]）に替える
+  - `lift_decide.cpp` の表 8: 全行程は `top_mm` が 0 以上ならそれ、-1 なら `LIFT_STROKE_FALLBACK_MM`。`run_travel_um` が `全行程 × 10 × LIFT_MAX_RUN_PCT` を超えたら `MAX_RUN`
+  - `lift_controller`: `run_ms_` を `run_travel_um_` に替える。**実際に回していた間（`turning_`）だけ**、直前の `step` で決めた目標の速さ × 経過 [ms] を足す（足してから判定）。0 に戻すときは今までどおり（停止指令・向きの変化。持ち主の交代では戻さない）。飽和させる。**表 8a（`ENCODER_STALL`）の数え方には触らない**
+  - `cmd_codec.cpp` の `provisional`: `LIFT_MAX_RUN_MS` → `LIFT_MAX_RUN_PCT`
+  - 偽物: `camera/hve_camera/hw/fake_lift.py`・`tools/fake_lift_server.py` を同じ数え方に（`provisional` の名前も）
+  - 画面: `camera/web/app.js` の `MAX_RUN` の文言から「（10 秒）」を消す（`firmware/lift/web/app.js` と同じ文言に）
+  - **`docs/使い方.md`** の L-3 に、連続駆動の上限（目標の速さで全行程を進む時間の約 1.5 倍で `MAX_RUN`。出力の上限に当たって遅いと手前で止まることがある。押し直せば動く）を足す
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual`・`.venv38/bin/python -m pytest camera/tests`・`.venv/bin/python -m pytest tools/tests`・`node firmware/lift/web/tests/web.test.js`・`node --test camera/web/tests/web.test.js` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL〈エンコーダの数を進める〉を通した試験で縛る）
+  1. ※ 上限を固定の 10 秒に戻す（30 mm/s で全行程 1800 mm を上げる 60 秒の間に止まる）
+  2. ※ 測った速さで数える（偽 HAL が目標の半分の速さで数を進めても、目標の速さで数えた時刻に止まる）
+  3. ※ 「経過時間 × いまの目標の速さ」で数える（10 mm/s で長く動いたあと 60 mm/s に上げた途端に止まる）
+  4. ※ `top_mm` を見ない（`LiftController` を `top_mm` 400 で作り、100 mm/s で**下降**し続けると 6 秒を超えて `MAX_RUN`。1900 や 1800 で数えると止まらない。上昇だと高さ 400 mm の `TOP` が先に当たるので下降で縛る）
+  5. `top_mm` が -1 のとき `LIFT_STROKE_FALLBACK_MM` を使わない
+  6. ※ 回していない間（上昇を `CEILING_NEAR` などで止めている間）も足す
+  7. ※ 持ち主が替わったら数え直す
+- **実機で管理担当が確かめる**: 30 mm/s で下端から上端（`TOP`）まで一度で上がる・上端から下端（`BOTTOM`）まで一度で下がる（どちらも `MAX_RUN` で止まらない）／設定の出力の上限を 10 % にして 100 mm/s で上げると、上端の手前・約 27 秒で `MAX_RUN`・反対方向へは動く
 
 ### `WP-LIFT-10` 下端スイッチの一瞬の誤りで原点を取らない
 

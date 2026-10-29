@@ -55,7 +55,7 @@
  "bottom":false,"height_mm":812,"height_ok":true,"top_detect":false,
  "ceiling":{"used":true,"status":"MEASURED","mm":1450,"age_ms":95,"ok":true,"reason":"NONE"},
  "owner":"module","ui_clients":1,"module":{"connected":true,"ceiling_sensor":true,"ip":"192.168.5.23","name":"hve-cam"},
- "provisional":["CEILING_MARGIN_MM","CEILING_STALE_MS","LIFT_MAX_RUN_MS"],"fw":"0.2.0"}
+ "provisional":["CEILING_MARGIN_MM","CEILING_STALE_MS","LIFT_MAX_RUN_PCT"],"fw":"0.2.0"}
 ```
 
 | フィールド | 値 |
