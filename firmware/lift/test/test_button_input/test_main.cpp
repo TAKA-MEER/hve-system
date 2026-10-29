@@ -193,15 +193,21 @@ void test_step_button_takes_over_and_remote_needs_new_press_after_release() {
   }
   TEST_ASSERT_EQUAL_INT(2, rig.ctrl.state().owner_kind);
   TEST_ASSERT_EQUAL(LiftDir::DOWN, rig.hal.motor_dir());
-  // 物理ボタンを離す。UI の同じ press の hold が来続けても動かない
+  // 物理ボタンを押している間に、UI が押し直した（新しい press 8）。無視されるが記録される
+  for (uint32_t i = 0; i < 5; ++i) {
+    rig.ctrl.on_hold(ui(1), remote_hold(8, LiftDir::UP), rig.t);
+    rig.one(kHigh, kLow);
+  }
+  TEST_ASSERT_EQUAL(LiftDir::DOWN, rig.hal.motor_dir());
+  // 物理ボタンを離す。UI の同じ press 8 の hold が来続けても動かない
   for (uint32_t i = 0; i < 20; ++i) {
-    rig.ctrl.on_hold(ui(1), remote_hold(7, LiftDir::UP), rig.t);
+    rig.ctrl.on_hold(ui(1), remote_hold(8, LiftDir::UP), rig.t);
     rig.one(kHigh, kHigh);
     TEST_ASSERT_FALSE(rig.hal.motor_moving());
   }
   TEST_ASSERT_FALSE(rig.ctrl.state().has_owner);
   // 新しい press なら動く
-  rig.ctrl.on_hold(ui(1), remote_hold(8, LiftDir::UP), rig.t);
+  rig.ctrl.on_hold(ui(1), remote_hold(9, LiftDir::UP), rig.t);
   rig.one(kHigh, kHigh);
   TEST_ASSERT_TRUE(rig.hal.motor_moving());
   TEST_ASSERT_EQUAL(LiftDir::UP, rig.hal.motor_dir());
