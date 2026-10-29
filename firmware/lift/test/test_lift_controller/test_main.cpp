@@ -411,6 +411,32 @@ void test_max_run_does_not_count_while_duty_is_zero() {
   assert_reason(StopReason::MAX_RUN, state);
 }
 
+// 向きを替えたら数え直す（release を挟まない）。MAX_RUN で止まったあと、
+// 別の接続が新しい press で下降を送ると（最後の操作が勝つ）、下降で動く
+void test_max_run_then_opposite_direction_from_other_connection_moves() {
+  RunRig rig(1800);
+  rig.run(0, 90100, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, rig.last);
+  rig.run(90200, 90300, ui(2), 2, LiftDir::DOWN, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(rig.hal.motor_dir()));
+  assert_reason(StopReason::NONE, rig.last);
+}
+
+// 上昇で途中まで数えたあと離さずに下降へ切り替えると、下降は下降の距離だけで上限まで動ける
+void test_direction_switch_restarts_count_for_full_limit() {
+  RunRig rig(1800);
+  rig.run(0, 60000, ui(1), 1, LiftDir::UP, 30, 30.0);  // 1 800 000 µm
+  assert_reason(StopReason::NONE, rig.last);
+  rig.run(60100, 60100 + 90000, ui(2), 2, LiftDir::DOWN, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(60100 + 90100, 60100 + 90100, ui(2), 2, LiftDir::DOWN, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
 void test_same_press_after_release_does_not_restart() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -1129,6 +1155,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_max_run_uses_top_mm_as_stroke_through_controller);
   RUN_TEST(test_max_run_does_not_count_while_stopped_by_ceiling_near);
   RUN_TEST(test_max_run_does_not_count_while_duty_is_zero);
+  RUN_TEST(test_max_run_then_opposite_direction_from_other_connection_moves);
+  RUN_TEST(test_direction_switch_restarts_count_for_full_limit);
   RUN_TEST(test_same_press_after_release_does_not_restart);
   RUN_TEST(test_same_press_after_timeout_does_not_restart);
   RUN_TEST(test_same_press_after_close_does_not_restart);

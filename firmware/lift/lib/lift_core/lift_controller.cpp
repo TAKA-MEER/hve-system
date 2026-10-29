@@ -6,7 +6,6 @@
 
 namespace {
 
-
 void copy_name(char* out, size_t out_size, const char* in) {
   if (out_size == 0) {
     return;
