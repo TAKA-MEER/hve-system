@@ -11,7 +11,7 @@ namespace {
 const char* kProvisional[] = {
     "CEILING_MARGIN_MM",
     "CEILING_STALE_MS",
-    "LIFT_MAX_RUN_MS",
+    "LIFT_MAX_RUN_PCT",
 };
 
 const char* dir_name(LiftDir dir) {

@@ -81,8 +81,9 @@ class LiftController {
   bool has_last_module_ceiling_ = false;
   ConnInfo conns_[kMaxConns];
   int ui_clients_ = 0;
-  uint32_t run_ms_;     // 現在の方向について実際にモータを回した時間
-  LiftDir run_dir_;     // run_ms_ を数えている方向（変われば 0 に戻す）
+  uint32_t run_travel_um_;  // 現在の方向について、回していた間に目標の速さで進んだとみなした距離 [µm]
+  int run_speed_mm_s_;      // 直前の step で決めた目標の速さ（回していた間の足し込みに使う。測った速さは使わない）
+  LiftDir run_dir_;     // run_travel_um_ を数えている方向（変われば 0 に戻す）
   bool turning_;        // 直前の step でモータを回していたか
   uint32_t run_at_ms_;  // 積算の起点（直前の step の時刻）
   // 速さの制御（DetailedDesign.md §4.1.2）
