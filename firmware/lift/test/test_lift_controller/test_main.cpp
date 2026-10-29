@@ -391,6 +391,26 @@ void test_max_run_does_not_count_while_stopped_by_ceiling_near() {
   assert_reason(StopReason::MAX_RUN, state);
 }
 
+// 6b. 命令は動かせる（止める理由は無い）が出力が 0 で回っていない間も足さない。
+//     出力の上限を 0 % にすると duty が 0 になる。判定の速さは 30 のままなので、
+//     「回していた間だけ」の条件が無いと、止まっていた 100 秒ぶんが足されてすぐ MAX_RUN になる
+void test_max_run_does_not_count_while_duty_is_zero() {
+  RunRig rig(1800);
+  rig.run(0, 45000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  rig.ctrl.set_motor_max_pct(0);
+  rig.run(45100, 145000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  rig.ctrl.set_motor_max_pct(LIFT_MOTOR_MAX_PCT_DEFAULT);
+  rig.run(145100, 190000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(190100, 190100, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
 void test_same_press_after_release_does_not_restart() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -1108,6 +1128,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_max_run_sums_distance_when_target_speed_changes);
   RUN_TEST(test_max_run_uses_top_mm_as_stroke_through_controller);
   RUN_TEST(test_max_run_does_not_count_while_stopped_by_ceiling_near);
+  RUN_TEST(test_max_run_does_not_count_while_duty_is_zero);
   RUN_TEST(test_same_press_after_release_does_not_restart);
   RUN_TEST(test_same_press_after_timeout_does_not_restart);
   RUN_TEST(test_same_press_after_close_does_not_restart);
