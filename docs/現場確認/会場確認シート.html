@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>実証実験 会場確認シート（昇降・カメラ）</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body {
+    font-family: "Noto Sans CJK JP", "Noto Sans JP", sans-serif;
+    color: #111; font-size: 8.8pt; line-height: 1.45;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page {
+    width: 210mm; height: 297mm; padding: 9mm 12mm 9mm;
+    page-break-after: always; break-after: page;
+    display: flex; flex-direction: column; overflow: hidden; position: relative;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+
+  /* ページ見出し（綴じが外れても順番と記入者が分かるように毎ページ） */
+  .hdr {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    border-bottom: 1.2pt solid #111; padding-bottom: 1.2mm; margin-bottom: 2.5mm;
+    font-size: 7.8pt; flex: none;
+  }
+  .hdr .doc { font-weight: 700; font-size: 8.5pt; }
+  .hdr .meta span.b { min-width: 24mm; }
+  .hdr .pno { font-weight: 700; font-size: 9pt; margin-left: 4mm; }
+
+  h1 { font-size: 17pt; margin: 0.5mm 0 2mm; letter-spacing: 0.05em; }
+  .sub { font-size: 9pt; font-weight: 400; letter-spacing: 0; color: #333; margin-left: 3mm; }
+  h2 {
+    font-size: 11pt; margin: 2.2mm 0 1.4mm; padding: 0.8mm 2mm;
+    background: #e6e6e6; border-left: 3pt solid #111; flex: none;
+  }
+  h2 .hint { font-weight: 400; margin-left: 2mm; }
+  h3 { font-size: 9.2pt; margin: 2mm 0 1mm; }
+
+  .tag {
+    display: inline-block; border: 0.8pt solid #111; border-radius: 1mm;
+    font-size: 7.8pt; line-height: 1.3; padding: 0 1.2mm; margin-right: 1.2mm;
+    vertical-align: 0.4mm; font-weight: 700;
+  }
+  .tag.ask { background: #111; color: #fff; }
+
+  table { width: 100%; border-collapse: collapse; }
+  tr, td, th { break-inside: avoid; page-break-inside: avoid; }
+  td, th { border: 0.6pt solid #555; padding: 1.1mm 1.5mm; vertical-align: top; }
+  th { background: #ececec; font-weight: 700; font-size: 7.8pt; text-align: left; }
+  th.c, td.c { text-align: center; }
+  td.num { width: 7mm; text-align: center; font-weight: 700; }
+  td.q { width: 52mm; font-weight: 700; }
+  td.q .hint { display: block; font-weight: 400; margin-top: 0.4mm; }
+
+  .b { display: inline-block; border-bottom: 0.6pt solid #111; min-width: 18mm; height: 4.4mm; vertical-align: -1.2mm; }
+  .b.s { min-width: 11mm; } .b.m { min-width: 28mm; } .b.l { min-width: 45mm; } .b.xl { min-width: 75mm; }
+  .line { border-bottom: 0.6pt solid #111; height: 6.5mm; }
+  .line.dot { border-bottom: 0.6pt dotted #555; }
+  .hint { font-size: 7.2pt; color: #444; }
+  .opt { white-space: nowrap; margin-right: 2.2mm; }
+  .row { margin: 0.6mm 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; }
+  .box { border: 0.8pt solid #111; padding: 1.8mm 2.2mm; }
+  .box.ref { background: #f3f3f3; }
+  .judge { font-size: 7.2pt; border: 0.6pt solid #555; padding: 0.2mm 1mm; margin-left: 1mm; white-space: nowrap; }
+  .grow { flex: 1 1 auto; }
+  ul.chk { list-style: none; margin: 0; padding: 0; }
+  ul.chk li { margin: 0.5mm 0; }
+  ol.steps { margin: 0.5mm 0 0 4.5mm; padding: 0; }
+  ol.steps li { margin: 0.3mm 0; }
+
+  /* 区間表・写真表など、記入用の行の高さ */
+  .tall td { height: 12.6mm; }
+  .mid td { height: 8.2mm; }
+  .qa td { height: 15.8mm; }
+
+  /* 配電盤カード */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 2.4mm; flex: 1 1 auto; }
+  .card { border: 0.9pt solid #111; padding: 1.4mm 2mm; display: flex; flex-direction: column; justify-content: space-between; break-inside: avoid; }
+  .card .ttl { font-weight: 700; border-bottom: 0.6pt solid #111; padding-bottom: 0.6mm; margin-bottom: 0.6mm; display: flex; justify-content: space-between; }
+  .card .row { margin: 0.25mm 0; font-size: 8.2pt; }
+
+  /* 見取り図 */
+  .grid {
+    flex: none; height: 244mm; border: 0.9pt solid #111;
+    position: relative; overflow: hidden;
+  }
+  .grid svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .grid .corner {
+    position: absolute; top: 2mm; right: 2mm; background: #fff; border: 0.8pt solid #111;
+    padding: 1.2mm 2mm; font-size: 8pt; width: 46mm;
+  }
+  .legend { flex: none; margin-top: 2mm; font-size: 7.8pt; }
+  .legend table td { padding: 0.7mm 1.3mm; }
+
+  /* 公開範囲 */
+  th.pub, td.pub { width: 15.5mm; padding: 1mm 1.2mm; font-size: 7.6pt; line-height: 1.45; }
+  th.pub { text-align: center; font-size: 7.2pt; }
+  td.pub::before { content: "□公 □内\A□関 □否"; white-space: pre; }
+  td.pub.na { text-align: center; color: #888; }
+  td.pub.na::before { content: "—"; }
+  th.ai, td.ai { width: 9mm; padding: 1mm 1mm; font-size: 7.6pt; line-height: 1.45; }
+  th.ai { text-align: center; font-size: 7.2pt; }
+  td.ai::before { content: "□可\A□否"; white-space: pre; }
+  td.ai.na { text-align: center; color: #888; }
+  td.ai.na::before { content: "—"; }
+  .pubi::before { content: "公開範囲　□公 □内 □関 □否　　生成AI　□可 □否"; white-space: nowrap; }
+  .publegend td { width: 16.6%; }
+  .publegend b { font-size: 9pt; }
+
+  /* 側面図（1 ページに 2 つ） */
+  .grid.side { height: 96mm; }
+</style>
+</head>
+<body>
+
+<!-- ============================== p.1 ============================== -->
+<section class="page">
+  <div class="hdr">
+    <div class="doc">実証実験 会場確認シート（昇降・カメラ）</div>
+    <div class="meta">確認日 <span class="b"></span>　記入者 <span class="b"></span><span class="pno">p. 1 / 5</span></div>
+  </div>
+
+  <h1>実証実験 会場確認シート <span class="sub">配電盤上部確認ロボット（昇降・カメラ）の現地確認</span></h1>
+
+  <div class="box" style="margin-bottom:1mm">
+    <b>記号</b>　<span class="tag">測</span>自分たちで測る・見る　<span class="tag ask">聞</span>先方に聞く
+    　<span class="hint">判定の目安：</span><span class="judge">○ 届く・見える</span><span class="judge">△ 余裕が小さい</span><span class="judge">✕ 届かない・見えない</span>
+  </div>
+  <div class="box ref" style="margin-bottom:1mm">
+    <b>移動システムの会場確認シートと一緒に使う。</b>経路・試験場・盤の寸法・無線（3 か所）はそちらで測り、このシートでは<b>昇降機とカメラにだけ効くこと</b>（盤の上部・天井・明るさ・見え方）を聞く・測る。<br>
+    <b>盤 No. は移動システムのシートと同じ番号</b>を使う。重なる項目はそちらの回答を使い、ここでは聞き直さない。
+  </div>
+
+  <h2>公開範囲と生成AIへの入力<span class="hint">各項目の右端の 2 列に印をつける。先方と一緒に決める</span></h2>
+  <table class="publegend">
+    <tr><th colspan="4" class="c">公開範囲（4 区分）</th><th colspan="2" class="c">生成AI（ChatGPT・Claude など）への入力</th></tr>
+    <tr>
+      <td><b>□公</b> 公開可<br><span class="hint">発表・報告書・Web に出してよい</span></td>
+      <td><b>□内</b> 組織内まで<br><span class="hint">学内・社内の報告まで</span></td>
+      <td><b>□関</b> 関係者のみ<br><span class="hint">チームと先方の間だけ</span></td>
+      <td><b>□否</b> 持ち出し不可<br><span class="hint">その場で見るだけ。持ち帰らない</span></td>
+      <td><b>□可</b> 入力してよい</td>
+      <td><b>□否</b> 入力しない</td>
+    </tr>
+    <tr><td colspan="6"><span class="hint">条件つき（社名・人名を伏せる、写真をぼかす など）のときは、その項目の回答欄に条件を書く。盤の上部・天井の写真は設備そのものが写るので、1 枚ずつ決める。</span><br>
+      印のない項目は 公開範囲 <span class="opt">□ 内</span><span class="opt">□ 関</span><span class="opt">□ 否</span>・生成AI <span class="opt">□ 可</span><span class="opt">□ 否</span>として扱う</td></tr>
+  </table>
+
+  <h2>基本情報<span class="hint">移動システムのシートと同じ日・同じ人なら「同上」でよい</span></h2>
+  <table>
+    <tr><th style="width:34mm">項目</th><th>記入</th><th class="pub">公開範囲</th><th class="ai">生成AI</th></tr>
+    <tr><th>確認日・時間</th><td><span class="b s"></span>年<span class="b s"></span>月<span class="b s"></span>日（<span class="b s"></span>）　<span class="b s"></span>:<span class="b s"></span> 〜 <span class="b s"></span>:<span class="b s"></span>　<span class="opt">□ 同上</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>会場名</th><td><div class="line dot" style="height:5mm"></div></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>確認者（こちら）</th><td><div class="line dot" style="height:5mm"></div></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>先方の立会者</th><td>氏名・所属 <span class="b l"></span>　<span class="opt">□ 同上</span></td><td class="pub"></td><td class="ai"></td></tr>
+  </table>
+
+  <div class="two" style="margin-top:1mm;grid-template-columns:0.82fr 1.18fr">
+    <div>
+      <h2>持ち物</h2>
+      <ul class="chk">
+        <li>□ メジャー（5 m 以上）</li>
+        <li>□ レーザー距離計（天井・盤の上の物の高さ）</li>
+        <li>□ 伸縮ポール・自撮り棒（スマホを盤の上部の高さへ上げて撮る）</li>
+        <li>□ スマホ：照度計・傾斜計（水平器）・Wi-Fi のチャネルを調べるアプリ</li>
+        <li>□ カメラ（スマホ可）・予備バッテリー</li>
+        <li>□ 懐中電灯（盤の上部・天井の暗い所を見る）</li>
+        <li>□ クリップボード・筆記具・このシート</li>
+        <li>□ 移動システムの会場確認シート</li>
+      </ul>
+      <h2 style="margin-top:2.5mm">当日の進め方</h2>
+      <ol class="steps">
+        <li>公開範囲と生成AIの扱いを伝える（p.1）</li>
+        <li>先方への聞き取り（p.2）</li>
+        <li>盤を 1 面ずつ測る・側面図を描く（p.3・図 p.5）</li>
+        <li>天井・無線・盤の上部の見え方を調べる（p.4）</li>
+        <li>帰る前に写真リスト（p.4）・宿題（p.5）・空欄・公開範囲と生成AIの印を見直す</li>
+      </ol>
+    </div>
+    <div>
+      <h2>機体の数値（判定の目安）</h2>
+      <table>
+        <tr><th style="width:23mm">機体の高さ</th><td>昇降機を縮めた状態 <span class="b s"></span> cm<br>昇降機を伸ばした最大 <span class="b s"></span> cm <span class="hint">出発前に測って書く</span></td></tr>
+        <tr><th>カメラの高さ</th><td>床から 最も低くて <span class="b s"></span> cm 〜 最も高くて <span class="b s"></span> cm<br><span class="hint">出発前に記入。盤の「確認したい所」の高さと比べる</span></td></tr>
+        <tr><th>上げ下げ</th><td>速さ 約 20〜50 mm/s（調整中）　全行程 約 <span class="b s"></span> 秒</td></tr>
+        <tr><th>カメラ</th><td>画角 約 68°。画面に出す映像は 480p<br>拡大は <b>1.5 倍まで</b>細かさが落ちない（最大 4 倍）<br>細部はボタンで 1280×720 の静止画を 1 枚ずつ取り寄せる</td></tr>
+        <tr><th>向き</th><td>左右（ヨー）は 360° 回し続けられる<br>上下（ピッチ）は水平から 約 ±45°（仮）</td></tr>
+        <tr><th>天井の距離計</th><td>カメラの<b>真上の狭い範囲だけ</b>を超音波で見る<br>約 15 cm より近いと測れず上昇を止める・約 6 m より遠いと「範囲外」<br>天井まで 約 50 cm（仮）で上昇を止める</td></tr>
+        <tr><th>照明・電源</th><td>カメラに<b>照明は付いていない</b><br>昇降機は機体の電池（機体の非常停止で止まる）・カメラはモバイルバッテリ（別に充電）</td></tr>
+        <tr><th>無線</th><td>カメラ・昇降機は <b>2.4 GHz のみ</b>（移動システムと同じ無線 AP）。映像は常に流れる</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== p.2 ============================== -->
+<section class="page">
+  <div class="hdr">
+    <div class="doc">実証実験 会場確認シート（昇降・カメラ）</div>
+    <div class="meta">確認日 <span class="b"></span>　記入者 <span class="b"></span><span class="pno">p. 2 / 5</span></div>
+  </div>
+
+  <h2>最初に先方へ伝えること・お願いすること</h2>
+  <div class="two">
+    <ul class="chk">
+      <li>□ 今日の目的：カメラを盤の上部まで上げて映すために、盤まわりの高さ・天井・明るさを確かめる</li>
+      <li>□ 盤や天井の物には触れない。ポールを差し上げる・近づくときは、その都度許可をもらう</li>
+    </ul>
+    <ul class="chk">
+      <li>□ <b>各項目の公開範囲と生成AIへの入力可否を一緒に決めてもらう</b>（区分は p.1）</li>
+      <li>□ 盤の上部・天井の写真は、撮ってよい範囲を先に確かめる（下の 7）</li>
+    </ul>
+  </div>
+
+  <h2><span class="tag ask">聞</span>A. 盤の上部で確認すること・実施の条件</h2>
+  <table class="qa">
+    <tr><th class="c" style="width:7mm">No</th><th style="width:52mm">聞くこと</th><th>回答</th><th class="pub">公開範囲</th><th class="ai">生成AI</th></tr>
+    <tr><td class="num">1</td><td class="q">盤の上部で何を確認したいか<span class="hint">写真や見本があれば見せてもらう</span></td>
+      <td><span class="opt">□ 配線・ケーブルの取り回し</span><span class="opt">□ 端子・ねじ</span><span class="opt">□ 銘板・ラベルの文字</span><br><span class="opt">□ 表示灯・計器</span><span class="opt">□ ほこり・異物・傷</span><span class="opt">□ その他（<span class="b m"></span>）</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">2</td><td class="q">見分けたい物のうち、いちばん小さい物<span class="hint">例：銘板の文字・端子番号。カメラの拡大で足りるかを決める</span></td>
+      <td>物 <span class="b l"></span>　大きさ 約 <span class="b s"></span> mm<br><span class="opt">□ 文字を読む</span><span class="opt">□ 有る・無いが分かればよい</span><span class="opt">□ 色が分かればよい</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">3</td><td class="q">どの向きから見たいか<span class="hint">カメラを上下に振る範囲を決める</span></td>
+      <td><span class="opt">□ 真上から見下ろす</span><span class="opt">□ 斜め上から</span><span class="opt">□ 横から（上部の側面）</span><br><span class="opt">□ 天板の奥まで（盤面から 約 <span class="b s"></span> cm 奥）</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">4</td><td class="q">確認したい所の高さの範囲（床から）<span class="hint">盤ごとの値は p.3 で測る</span></td>
+      <td>最も低い盤 約 <span class="b s"></span> cm ／ 最も高い盤 約 <span class="b s"></span> cm　<span class="opt">□ 不明</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">5</td><td class="q">1 面で見る範囲</td>
+      <td><span class="opt">□ 天板の全体</span><span class="opt">□ 決まった所だけ（1 面に 約 <span class="b s"></span> か所）</span><br>場所 <span class="b xl"></span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">6</td><td class="q">いまの確認のしかた<span class="hint">ロボットで手間が減るかを比べる基準</span></td>
+      <td><span class="opt">□ 脚立・はしご</span><span class="opt">□ 点検鏡・カメラ付きの棒</span><span class="opt">□ 見ていない</span><span class="opt">□ その他（<span class="b m"></span>）</span><br>1 面あたり 約 <span class="b s"></span> 分・<span class="b s"></span> 人　大変な点 <span class="b m"></span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">7</td><td class="q">盤の上部・天井の写真／映像の扱い<span class="hint">カメラの映像には盤の上部がそのまま写る</span></td>
+      <td>撮影 <span class="opt">□ 可</span><span class="opt">□ 範囲限定（<span class="b m"></span>）</span><span class="opt">□ 不可</span><br>残したいか <span class="opt">□ 画面で見るだけでよい</span><span class="opt">□ 盤ごとに静止画を残す</span><span class="opt">□ 動画も残す</span><br>先方へ渡すか <span class="opt">□ 不要</span><span class="opt">□ 渡す（形式 <span class="b m"></span>）</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">8</td><td class="q">盤の上・天井まわりで、触れてはいけない物・近づけてはいけない物<span class="hint">図 p.5 に ✕</span></td>
+      <td><span class="opt">□ スプリンクラー</span><span class="opt">□ 火災感知器</span><span class="opt">□ 照明</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ ケーブルラック</span><br><span class="opt">□ その他（<span class="b m"></span>）</span>　離す距離の決まり <span class="b s"></span> cm　<span class="opt">□ 決まりなし</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">9</td><td class="q">カメラを上げている間の周りの人</td>
+      <td>盤の前・周りから人を離せるか <span class="opt">□ できる</span><span class="opt">□ 条件付（<span class="b m"></span>）</span><span class="opt">□ できない</span><br>上げている間に近くを人・台車が通るか <span class="opt">□ 通らない</span><span class="opt">□ 通る</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">10</td><td class="q">照明の持ち込み<span class="hint">カメラに照明は無い</span></td>
+      <td>盤の上部に照明を当ててよいか <span class="opt">□ 可</span><span class="opt">□ 条件付（<span class="b m"></span>）</span><span class="opt">□ 不可</span><br>試験中の場内の照明 <span class="opt">□ 変わらない</span><span class="opt">□ 時間帯で変わる</span><span class="opt">□ 消す時間がある</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="num">11</td><td class="q">1 面にかけてよい時間<span class="hint">カメラを上げて見て、下げ終わるまで</span></td>
+      <td>約 <span class="b s"></span> 分まで　<span class="opt">□ 決まりなし</span>　<span class="opt">□ 不明</span></td><td class="pub"></td><td class="ai"></td></tr>
+  </table>
+
+  <h3>その他のご要望・ご懸念<span class="hint" style="font-weight:400;margin-left:2mm">公開できない内容は行末に「否」、生成AIに入れない内容は「AI否」と書く</span></h3>
+  <div class="grow" style="display:flex;flex-direction:column;justify-content:space-evenly">
+    <div class="line dot"></div><div class="line dot"></div>
+  </div>
+</section>
+
+<!-- ============================== p.3 ============================== -->
+<section class="page">
+  <div class="hdr">
+    <div class="doc">実証実験 会場確認シート（昇降・カメラ）</div>
+    <div class="meta">確認日 <span class="b"></span>　記入者 <span class="b"></span><span class="pno">p. 3 / 5</span></div>
+  </div>
+
+  <h2><span class="tag">測</span>B. 盤の上部（1 面ずつ）<span class="hint">高さはすべて床から。機体が盤前に止まる位置に立って測る</span></h2>
+  <div class="hint" style="margin-bottom:1.6mm;flex:none">盤 No.・名前は移動システムのシート（D. 配電盤）と同じにする。盤の寸法・盤前の空きはそちらに書く。<br>
+    ○ の目安：確認したい所までカメラが届き（p.1 のカメラの最も高い高さ以下）、そのとき真上の天井・障害物まで 約 50 cm（仮）以上ある。</div>
+  <div class="cards">
+    <div class="card"><div class="ttl"><span>盤 No.<span class="b s"></span> 名前 <span class="b m"></span></span><span>写真 <span class="b s"></span></span></div>
+      <div class="row">確認したい所 <span class="b s"></span> cm（天板 <span class="b s"></span> cm）<span class="judge">○ △ ✕</span></div>
+      <div class="row">天板 奥行 <span class="b s"></span> × 幅 <span class="b s"></span> cm</div>
+      <div class="row">天板の上 <span class="opt">□ 平ら</span><span class="opt">□ 換気口・ファン</span><span class="opt">□ 機器・突起</span></div>
+      <div class="row">盤の上で最も低い物 <span class="b s"></span> cm</div>
+      <div class="row"><span class="opt">□ ケーブルラック</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ 照明</span><span class="opt">□ なし</span></div>
+      <div class="row">停止位置の真上の天井 <span class="b s"></span> cm</div>
+      <div class="row">天井 <span class="opt">□ 平ら</span><span class="opt">□ 梁・配管が真上</span><span class="opt">□ 格子・天井なし</span></div>
+      <div class="row">明るさ <span class="b s"></span> lx　逆光・映り込み <span class="opt">□ なし</span><span class="opt">□ あり</span></div>
+      <div class="row">盤前の床の傾き <span class="b s"></span> °</div>
+      <div class="row" style="border-top:0.6pt dotted #555;padding-top:0.6mm;font-size:7.8pt"><b class="pubi"></b></div>
+    </div>
+    <div class="card"><div class="ttl"><span>盤 No.<span class="b s"></span> 名前 <span class="b m"></span></span><span>写真 <span class="b s"></span></span></div>
+      <div class="row">確認したい所 <span class="b s"></span> cm（天板 <span class="b s"></span> cm）<span class="judge">○ △ ✕</span></div>
+      <div class="row">天板 奥行 <span class="b s"></span> × 幅 <span class="b s"></span> cm</div>
+      <div class="row">天板の上 <span class="opt">□ 平ら</span><span class="opt">□ 換気口・ファン</span><span class="opt">□ 機器・突起</span></div>
+      <div class="row">盤の上で最も低い物 <span class="b s"></span> cm</div>
+      <div class="row"><span class="opt">□ ケーブルラック</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ 照明</span><span class="opt">□ なし</span></div>
+      <div class="row">停止位置の真上の天井 <span class="b s"></span> cm</div>
+      <div class="row">天井 <span class="opt">□ 平ら</span><span class="opt">□ 梁・配管が真上</span><span class="opt">□ 格子・天井なし</span></div>
+      <div class="row">明るさ <span class="b s"></span> lx　逆光・映り込み <span class="opt">□ なし</span><span class="opt">□ あり</span></div>
+      <div class="row">盤前の床の傾き <span class="b s"></span> °</div>
+      <div class="row" style="border-top:0.6pt dotted #555;padding-top:0.6mm;font-size:7.8pt"><b class="pubi"></b></div>
+    </div>
+    <div class="card"><div class="ttl"><span>盤 No.<span class="b s"></span> 名前 <span class="b m"></span></span><span>写真 <span class="b s"></span></span></div>
+      <div class="row">確認したい所 <span class="b s"></span> cm（天板 <span class="b s"></span> cm）<span class="judge">○ △ ✕</span></div>
+      <div class="row">天板 奥行 <span class="b s"></span> × 幅 <span class="b s"></span> cm</div>
+      <div class="row">天板の上 <span class="opt">□ 平ら</span><span class="opt">□ 換気口・ファン</span><span class="opt">□ 機器・突起</span></div>
+      <div class="row">盤の上で最も低い物 <span class="b s"></span> cm</div>
+      <div class="row"><span class="opt">□ ケーブルラック</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ 照明</span><span class="opt">□ なし</span></div>
+      <div class="row">停止位置の真上の天井 <span class="b s"></span> cm</div>
+      <div class="row">天井 <span class="opt">□ 平ら</span><span class="opt">□ 梁・配管が真上</span><span class="opt">□ 格子・天井なし</span></div>
+      <div class="row">明るさ <span class="b s"></span> lx　逆光・映り込み <span class="opt">□ なし</span><span class="opt">□ あり</span></div>
+      <div class="row">盤前の床の傾き <span class="b s"></span> °</div>
+      <div class="row" style="border-top:0.6pt dotted #555;padding-top:0.6mm;font-size:7.8pt"><b class="pubi"></b></div>
+    </div>
+    <div class="card"><div class="ttl"><span>盤 No.<span class="b s"></span> 名前 <span class="b m"></span></span><span>写真 <span class="b s"></span></span></div>
+      <div class="row">確認したい所 <span class="b s"></span> cm（天板 <span class="b s"></span> cm）<span class="judge">○ △ ✕</span></div>
+      <div class="row">天板 奥行 <span class="b s"></span> × 幅 <span class="b s"></span> cm</div>
+      <div class="row">天板の上 <span class="opt">□ 平ら</span><span class="opt">□ 換気口・ファン</span><span class="opt">□ 機器・突起</span></div>
+      <div class="row">盤の上で最も低い物 <span class="b s"></span> cm</div>
+      <div class="row"><span class="opt">□ ケーブルラック</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ 照明</span><span class="opt">□ なし</span></div>
+      <div class="row">停止位置の真上の天井 <span class="b s"></span> cm</div>
+      <div class="row">天井 <span class="opt">□ 平ら</span><span class="opt">□ 梁・配管が真上</span><span class="opt">□ 格子・天井なし</span></div>
+      <div class="row">明るさ <span class="b s"></span> lx　逆光・映り込み <span class="opt">□ なし</span><span class="opt">□ あり</span></div>
+      <div class="row">盤前の床の傾き <span class="b s"></span> °</div>
+      <div class="row" style="border-top:0.6pt dotted #555;padding-top:0.6mm;font-size:7.8pt"><b class="pubi"></b></div>
+    </div>
+    <div class="card"><div class="ttl"><span>盤 No.<span class="b s"></span> 名前 <span class="b m"></span></span><span>写真 <span class="b s"></span></span></div>
+      <div class="row">確認したい所 <span class="b s"></span> cm（天板 <span class="b s"></span> cm）<span class="judge">○ △ ✕</span></div>
+      <div class="row">天板 奥行 <span class="b s"></span> × 幅 <span class="b s"></span> cm</div>
+      <div class="row">天板の上 <span class="opt">□ 平ら</span><span class="opt">□ 換気口・ファン</span><span class="opt">□ 機器・突起</span></div>
+      <div class="row">盤の上で最も低い物 <span class="b s"></span> cm</div>
+      <div class="row"><span class="opt">□ ケーブルラック</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ 照明</span><span class="opt">□ なし</span></div>
+      <div class="row">停止位置の真上の天井 <span class="b s"></span> cm</div>
+      <div class="row">天井 <span class="opt">□ 平ら</span><span class="opt">□ 梁・配管が真上</span><span class="opt">□ 格子・天井なし</span></div>
+      <div class="row">明るさ <span class="b s"></span> lx　逆光・映り込み <span class="opt">□ なし</span><span class="opt">□ あり</span></div>
+      <div class="row">盤前の床の傾き <span class="b s"></span> °</div>
+      <div class="row" style="border-top:0.6pt dotted #555;padding-top:0.6mm;font-size:7.8pt"><b class="pubi"></b></div>
+    </div>
+    <div class="card"><div class="ttl"><span>盤 No.<span class="b s"></span> 名前 <span class="b m"></span></span><span>写真 <span class="b s"></span></span></div>
+      <div class="row">確認したい所 <span class="b s"></span> cm（天板 <span class="b s"></span> cm）<span class="judge">○ △ ✕</span></div>
+      <div class="row">天板 奥行 <span class="b s"></span> × 幅 <span class="b s"></span> cm</div>
+      <div class="row">天板の上 <span class="opt">□ 平ら</span><span class="opt">□ 換気口・ファン</span><span class="opt">□ 機器・突起</span></div>
+      <div class="row">盤の上で最も低い物 <span class="b s"></span> cm</div>
+      <div class="row"><span class="opt">□ ケーブルラック</span><span class="opt">□ 配管・ダクト</span><span class="opt">□ 照明</span><span class="opt">□ なし</span></div>
+      <div class="row">停止位置の真上の天井 <span class="b s"></span> cm</div>
+      <div class="row">天井 <span class="opt">□ 平ら</span><span class="opt">□ 梁・配管が真上</span><span class="opt">□ 格子・天井なし</span></div>
+      <div class="row">明るさ <span class="b s"></span> lx　逆光・映り込み <span class="opt">□ なし</span><span class="opt">□ あり</span></div>
+      <div class="row">盤前の床の傾き <span class="b s"></span> °</div>
+      <div class="row" style="border-top:0.6pt dotted #555;padding-top:0.6mm;font-size:7.8pt"><b class="pubi"></b></div>
+    </div>
+  </div>
+  <div class="hint" style="margin-top:1.2mm;flex:none">「確認したい所」＝カメラで見たい物の高さ。「天板」＝盤のいちばん上の面。明るさは照度計アプリを天板に置いて測る。7 面以上はこのページをもう 1 枚使う。</div>
+</section>
+
+<!-- ============================== p.4 ============================== -->
+<section class="page">
+  <div class="hdr">
+    <div class="doc">実証実験 会場確認シート（昇降・カメラ）</div>
+    <div class="meta">確認日 <span class="b"></span>　記入者 <span class="b"></span><span class="pno">p. 4 / 5</span></div>
+  </div>
+
+  <h2><span class="tag">測</span>C. 天井と頭上<span class="hint">天井の距離計（超音波）は、柔らかい面・細い物・斜めの面が苦手</span></h2>
+  <table>
+    <tr><th style="width:34mm">項目</th><th>記入</th><th class="pub">公開範囲</th><th class="ai">生成AI</th></tr>
+    <tr><th>試験場の天井の高さ</th><td>最も低い所 <span class="b s"></span> m（場所 <span class="b m"></span>）・最も高い所 <span class="b s"></span> m</td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>天井の仕上げ</th><td><span class="opt">□ コンクリート・板（平ら）</span><span class="opt">□ 吸音板</span><span class="opt">□ 格子・グリッド</span><br><span class="opt">□ 天井なし（梁・配管が見える）</span><span class="opt">□ 布・ネット</span><span class="opt">□ その他（<span class="b m"></span>）</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>天井から下がっている物</th><td><span class="opt">□ 照明</span><span class="opt">□ ダクト・配管</span><span class="opt">□ 吊り表示</span><span class="opt">□ ケーブルラック</span><span class="opt">□ なし</span><br>最も低い所 床から <span class="b s"></span> cm（場所 <span class="b m"></span>）</td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>カメラを上げる所の上にある細い物</th><td>ワイヤー・細い配管・スプリンクラーの頭 <span class="opt">□ ない</span><span class="opt">□ ある（盤 No.<span class="b s"></span>）</span><br><span class="hint">距離計は真上の一部しか見ないので、細い物には気づかないことがある</span></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><th>経路の頭上で最も低い所</th><td>移動システムのシート（B. 経路）の値を写す <span class="b s"></span> cm　<span class="judge">p.1 の縮めた高さより高いか</span><br><span class="hint">昇降機は縮めて走る。上げたまま走ると引っかかる</span></td><td class="pub"></td><td class="ai"></td></tr>
+  </table>
+
+  <h2><span class="tag">測</span>D. 無線（2.4 GHz・盤の前で）<span class="hint">3 か所の調べは移動システムのシート（E. 無線）。ここでは盤の前でスマホを頭の上に掲げて調べる</span></h2>
+  <table class="mid">
+    <tr>
+      <th style="width:24mm" rowspan="2">測った場所</th>
+      <th class="c" colspan="4">2.4 GHz の数</th>
+      <th style="width:18mm" rowspan="2">最も強い電波<br>dBm</th>
+      <th rowspan="2">メモ</th>
+      <th class="pub" rowspan="2">公開範囲</th><th class="ai" rowspan="2">生成AI</th>
+    </tr>
+    <tr>
+      <th class="c" style="width:13mm">ch 1 付近</th><th class="c" style="width:13mm">ch 6 付近</th><th class="c" style="width:13mm">ch 11 付近</th><th class="c" style="width:11mm">合計</th>
+    </tr>
+    <tr><td>盤 No.</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td>盤 No.</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td>盤 No.</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="pub"></td><td class="ai"></td></tr>
+  </table>
+  <div class="hint" style="margin-top:0.6mm">カメラの映像は常に 2.4 GHz の ch 1 に流れる。盤の前（＝カメラが上がる所）で ch 1 が混んでいるかを特に見る。</div>
+
+  <h2><span class="tag">測</span>E. 盤の上部の見え方（スマホで代わりに試す）<span class="hint">停止位置から、スマホを伸縮ポールで確認したい所の少し上へ上げて撮る</span></h2>
+  <table class="mid">
+    <tr><th style="width:15mm">盤 No.</th><th style="width:20mm">上げた高さ<br>cm</th><th>見えたか</th><th style="width:20mm">見下ろす角度<br>約 °</th><th style="width:30mm">暗さ・映り込み</th><th style="width:13mm">写真 No.</th><th class="pub">公開範囲</th><th class="ai">生成AI</th></tr>
+    <tr><td></td><td></td><td><span class="opt">□ 見えた</span><span class="opt">□ 一部</span><span class="opt">□ 見えない</span></td><td></td><td></td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td></td><td></td><td><span class="opt">□ 見えた</span><span class="opt">□ 一部</span><span class="opt">□ 見えない</span></td><td></td><td></td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td></td><td></td><td><span class="opt">□ 見えた</span><span class="opt">□ 一部</span><span class="opt">□ 見えない</span></td><td></td><td></td><td></td><td class="pub"></td><td class="ai"></td></tr>
+  </table>
+  <div class="hint" style="margin-top:0.6mm">スマホの画角はカメラ（約 68°）と違うので目安。見下ろす角度が 45° を超えるなら書き留める（カメラの上下の振りは 約 ±45°）。</div>
+
+  <h2><span class="tag">測</span>F. 写真・動画<span class="hint">写った物ごとに公開範囲と生成AIへの入力可否を決める</span></h2>
+  <table>
+    <tr><th style="width:7mm" class="c">済</th><th>撮るもの</th><th style="width:16mm">写真 No.</th><th class="pub">公開範囲</th><th class="ai">生成AI</th><th style="width:7mm" class="c">済</th><th>撮るもの</th><th style="width:16mm">写真 No.</th><th class="pub">公開範囲</th><th class="ai">生成AI</th></tr>
+    <tr><td class="c">□</td><td>盤の上部（真上・斜め上から）</td><td></td><td class="pub"></td><td class="ai"></td><td class="c">□</td><td>停止位置から見上げた天井</td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="c">□</td><td>天板の上の物・換気口</td><td></td><td class="pub"></td><td class="ai"></td><td class="c">□</td><td>天井の仕上げ（近接）</td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="c">□</td><td>盤の上の障害物</td><td></td><td class="pub"></td><td class="ai"></td><td class="c">□</td><td>天井から下がっている物</td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="c">□</td><td>見分けたい物の近接（A-2）</td><td></td><td class="pub"></td><td class="ai"></td><td class="c">□</td><td>照度計・傾斜計アプリ</td><td></td><td class="pub"></td><td class="ai"></td></tr>
+    <tr><td class="c">□</td><td>盤の上部の暗い所・逆光</td><td></td><td class="pub"></td><td class="ai"></td><td class="c">□</td><td>Wi-Fi アプリ（盤の前）</td><td></td><td class="pub"></td><td class="ai"></td></tr>
+  </table>
+  <div class="hint" style="margin-top:0.6mm">撮影の可否は p.2 の 7 を先に確かめる。</div>
+
+</section>
+
+<!-- ============================== p.5 ============================== -->
+<section class="page">
+  <div class="hdr">
+    <div class="doc">実証実験 会場確認シート（昇降・カメラ）</div>
+    <div class="meta">確認日 <span class="b"></span>　記入者 <span class="b"></span><span class="pno">p. 5 / 5</span></div>
+  </div>
+  <h2>側面図 1：盤 No.<span class="b s"></span>（盤を横から見た図）<span class="hint">盤・確認したい所・障害物・天井・機体の停止位置と、床からの高さを書き込む</span></h2>
+  <div class="grid side">
+    <svg aria-hidden="true" viewBox="0 0 186 96" preserveAspectRatio="none"><defs><pattern id="g1m" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="#9a9a9a" stroke-width="0.12"/></pattern><pattern id="g1M" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#g1m)"/><path d="M25 0H0V25" fill="none" stroke="#4a4a4a" stroke-width="0.25"/></pattern></defs><rect width="186" height="96" fill="url(#g1M)"/><line x1="0" y1="89" x2="186" y2="89" stroke="#111" stroke-width="0.6"/><text x="2" y="93.6" font-size="3.4" fill="#111">床（高さ 0）</text></svg>
+    <div class="corner">縮尺　1 マス ＝ <span class="b s"></span> cm<div style="margin-top:1.2mm;border-top:0.6pt dotted #555;padding-top:0.8mm">この図の公開範囲<br>□公 □内 □関 □否<br>生成AI　□可 □否</div></div>
+  </div>
+  <h2>側面図 2：盤 No.<span class="b s"></span>（盤を横から見た図）<span class="hint">形の違う盤だけ描く。足りなければこのページをもう 1 枚使う</span></h2>
+  <div class="grid side">
+    <svg aria-hidden="true" viewBox="0 0 186 96" preserveAspectRatio="none"><defs><pattern id="g2m" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="#9a9a9a" stroke-width="0.12"/></pattern><pattern id="g2M" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#g2m)"/><path d="M25 0H0V25" fill="none" stroke="#4a4a4a" stroke-width="0.25"/></pattern></defs><rect width="186" height="96" fill="url(#g2M)"/><line x1="0" y1="89" x2="186" y2="89" stroke="#111" stroke-width="0.6"/><text x="2" y="93.6" font-size="3.4" fill="#111">床（高さ 0）</text></svg>
+    <div class="corner">縮尺　1 マス ＝ <span class="b s"></span> cm<div style="margin-top:1.2mm;border-top:0.6pt dotted #555;padding-top:0.8mm">この図の公開範囲<br>□公 □内 □関 □否<br>生成AI　□可 □否</div></div>
+  </div>
+  <div class="legend">
+    <table>
+      <tr><td><b>盤</b> 盤（横から）</td><td><b>◎</b> 確認したい所</td><td><b>障</b> ラック・配管・照明</td><td><b>天</b> 天井（仕上げも）</td><td><b>機</b> 機体の停止位置</td></tr>
+      <tr><td><b>↕</b>＋数字 床からの高さ cm</td><td><b>↔</b>＋数字 盤面からの距離 cm</td><td><b>細</b> 細い物（ワイヤー等）</td><td><b>✕</b> 触れてはいけない物</td><td><b>Ｐ</b>＋矢印 写真</td></tr>
+    </table>
+  </div>
+  <h2>G. その場で気づいたこと・持ち帰る宿題<span class="hint">公開できない内容は行末に「否」、生成AIに入れない内容は「AI否」と書く</span></h2>
+  <div class="grow" style="display:flex;flex-direction:column;justify-content:space-evenly">
+    <div class="line dot"></div><div class="line dot"></div><div class="line dot"></div>
+  </div>
+</section>
+
+</body>
+</html>

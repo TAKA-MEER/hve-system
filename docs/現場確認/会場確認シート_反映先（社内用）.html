@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>会場確認シート（昇降・カメラ） 反映先（社内用）</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body {
+    font-family: "Noto Sans CJK JP", "Noto Sans JP", sans-serif;
+    color: #111; font-size: 8.8pt; line-height: 1.45;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page {
+    width: 210mm; height: 297mm; padding: 9mm 12mm 9mm;
+    page-break-after: always; break-after: page;
+    display: flex; flex-direction: column; overflow: hidden; position: relative;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+
+  /* ページ見出し（綴じが外れても順番と記入者が分かるように毎ページ） */
+  .hdr {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    border-bottom: 1.2pt solid #111; padding-bottom: 1.2mm; margin-bottom: 2.5mm;
+    font-size: 7.8pt; flex: none;
+  }
+  .hdr .doc { font-weight: 700; font-size: 8.5pt; }
+
+  h2 {
+    font-size: 11pt; margin: 2.2mm 0 1.4mm; padding: 0.8mm 2mm;
+    background: #e6e6e6; border-left: 3pt solid #111; flex: none;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  tr, td, th { break-inside: avoid; page-break-inside: avoid; }
+  td, th { border: 0.6pt solid #555; padding: 1.1mm 1.5mm; vertical-align: top; }
+  th { background: #ececec; font-weight: 700; font-size: 7.8pt; text-align: left; }
+  .hint { font-size: 7.2pt; color: #444; }
+</style>
+</head>
+<body>
+<!-- ============================== 社内用 ============================== -->
+<section class="page">
+  <div class="hdr">
+    <div class="doc">実証実験 会場確認シート（昇降・カメラ） — 別紙（社内用・先方に渡さない）</div>
+    <div class="meta">持ち帰ってから使う</div>
+  </div>
+  <h2>持ち帰ったら：記入した値の反映先</h2>
+  <table>
+    <tr><th style="width:44mm">記入した欄</th><th>決まること</th><th style="width:48mm">反映先</th></tr>
+    <tr><td>A-1 何を確認したいか<br>A-2 いちばん小さい物</td><td>480p の映像・1.5 倍までの拡大・720p の静止画で足りるか。足りなければ切り出し元・常に流す画質（帯域）・720p をそのまま流す手段を見直す</td><td>Spec-ui §1.5・§1.5.1<br>Spec-open H-V10・H-U9・H-V11</td></tr>
+    <tr><td>A-3 見る向き<br>E 見下ろす角度</td><td>ピッチの可動範囲と細かさ（いま UnitV2 側 ±45°・UNO 側 ±60° の仮）</td><td>Spec-open H-V5・H-X5<br><code>PITCH_MIN_DEG</code>・<code>PITCH_MAX_DEG</code></td></tr>
+    <tr><td>A-4 高さの範囲<br>B 確認したい所・天板</td><td>盤上部の高さの範囲。昇降のストロークで届くか・全行程の所要時間</td><td>Spec-open H-V1・H-V3</td></tr>
+    <tr><td>A-5 1 面で見る範囲<br>B 天板の奥行・E 見え方<br>図 機体の停止位置</td><td>盤前に止まる位置・向きの許容差（ヨー・ピッチで直せるぶん緩める）。<b>th-system の O-a1 と、移動システムのシート D「カメラ側が望む停止位置」への答え</b>（文書で伝える。信号ではない）</td><td>Spec-open H-V2<br>（th-system Spec-open O-a1）</td></tr>
+    <tr><td>A-6 いまの確認のしかた<br>A-11 1 面にかけてよい時間</td><td>本システムの目標の比較の基準・昇降の速さの初期値と上限</td><td>Spec-open H-G1・H-V3<br><code>LIFT_SPEED_ABS_MAX_MM_S</code></td></tr>
+    <tr><td>A-7 写真・映像の扱い</td><td>静止画の保存・一覧・盤との紐付けまで作るか</td><td>Spec.md §1・Spec-open H-S2</td></tr>
+    <tr><td>A-8 触れてはいけない物<br>B 盤の上で最も低い物・天井<br>C 下がっている物</td><td>天井で止める余裕（いま仮 500 mm）・上端の閾値</td><td>Spec-open H-V8<br><code>CEILING_MARGIN_MM</code></td></tr>
+    <tr><td>B 天井の形・C 天井の仕上げ<br>C 上にある細い物</td><td>超音波の苦手をどう補うか（周知で足りるか）</td><td>Spec-safety §3 H-X6</td></tr>
+    <tr><td>A-9 周りの人</td><td>接触 0・意図しない挙動 0 を本システムにも課すか</td><td>Spec-open H-G1</td></tr>
+    <tr><td>A-10 照明の持ち込み<br>B 明るさ・逆光</td><td>照明が要るか（部品の手配）</td><td>Spec-open H-S4</td></tr>
+    <tr><td>B 盤前の床の傾き</td><td>最も高くしたときに倒れないか</td><td>Spec-open H-V4</td></tr>
+    <tr><td>D 無線（盤の前）<br>移動システムのシート E</td><td>映像の上限・th-system と同時に動かして確かめる条件</td><td>Spec-open H-A8</td></tr>
+    <tr><td>C 経路の頭上で最も低い所<br>（移動システムのシート B）</td><td>昇降機を縮めた状態で通れるか。上げたまま走れる既知のリスクの重さ</td><td>Spec.md §4（HD-1 の帰結）</td></tr>
+    <tr><td>移動システムのシート A-13・C<br>（コンセント・PC の置き場）</td><td>カメラのモバイルバッテリを 1 日のどこで充電するか・操作端末を th-system と共用するか</td><td>Spec-open H-V7・H-A9</td></tr>
+  </table>
+  <div class="hint" style="margin-top:1.2mm">盤 No. は移動システムのシートと揃えてあるので、盤の寸法・盤前の空き（向こうの D）と合わせて読む。th-system 側へ伝えることは文書で渡し、th-system のリポジトリはユーザーの指示があるときだけ触る。</div>
+
+  <h2 style="margin-top:4mm">公開範囲・生成AIの印の扱い</h2>
+  <table>
+    <tr><th style="width:44mm">印</th><th>持ち帰ってからの扱い</th></tr>
+    <tr><td>公開範囲「公」</td><td>発表・報告書・公開 HTML に載せてよい。条件（社名を伏せる・写真をぼかす など）が回答欄にあれば必ず守る</td></tr>
+    <tr><td>公開範囲「内」「関」</td><td>外部の発表・公開資料・公開リポジトリに載せない。「関」はチームと先方以外に見せない。<b>このリポジトリの docs/ は GitHub Pages で公開される</b></td></tr>
+    <tr><td>公開範囲「否」</td><td>写真・数値を持ち帰らない。シートにも書かない（書いてしまったら消す）</td></tr>
+    <tr><td>生成AI「否」</td><td>ChatGPT・Claude などへのチャットに貼らない。<b>AI エージェント（Claude Code・codex・opencode）が読むリポジトリ（docs/ など）にも書かない</b>。写真も同じ</td></tr>
+    <tr><td>転記するとき</td><td>試験記録・計画書へ値を写すときは、公開範囲と生成AIの印も一緒に写す</td></tr>
+  </table>
+  <div class="hint" style="margin-top:1.5mm">会場で決まった実機の確認項目は <code>docs/試験項目.md</code> へ。方針が変わるものは先に <code>docs/plan/spec/</code> を直す。</div>
+</section>
+
+</body>
+</html>
