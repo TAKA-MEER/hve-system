@@ -405,3 +405,51 @@ async def test_ui_hello_closes_the_connection(aiohttp_client, tmp_path):
     msg = await ws.receive()
     assert msg.type != WSMsgType.TEXT  # サーバーが接続を閉じる
     await ws.close()
+
+
+def _hold_up(lift: FakeLift, conn: int, now: int, speed: int, press: int = 1) -> None:
+    hold = decode_hold(hold_text(press=press, speed=speed, ceiling=FAR), now)
+    assert hold is not None
+    lift.on_hold(conn, "module", hold, now)
+
+
+def _run(lift: FakeLift, conn: int, start: int, end: int, speed: int) -> str:
+    reason = "NONE"
+    for now in range(start, end + 1, 100):
+        _hold_up(lift, conn, now, speed)
+        reason = lift.step(now)["reason"]
+    return reason
+
+
+def test_max_run_at_30_mm_s_stops_just_after_90_s():
+    """連続駆動の上限は全行程 1800 mm の 150 %（目標の速さで数える。30 mm/s なら 90 秒）。"""
+    lift = FakeLift()
+    conn = module_conn(lift)
+    assert _run(lift, conn, 1000, 1000 + 60000, 30) == "NONE"  # 固定 10 秒なら止まっている
+    assert _run(lift, conn, 1000 + 60100, 1000 + 90000, 30) == "NONE"  # ちょうど上限は動かせる
+    assert _run(lift, conn, 1000 + 90100, 1000 + 90100, 30) == "MAX_RUN"
+
+
+def test_max_run_sums_distance_when_target_speed_changes():
+    """10 mm/s で 60 秒のあと 60 mm/s に上げても、その場では止まらない。"""
+    lift = FakeLift()
+    conn = module_conn(lift)
+    assert _run(lift, conn, 1000, 1000 + 60000, 10) == "NONE"
+    # 601 000 + 6000 × (n) が 2 700 000 を超える最初の 100 ms 刻みは 95 100 ms
+    assert _run(lift, conn, 1000 + 60100, 1000 + 95000, 60) == "NONE"
+    assert _run(lift, conn, 1000 + 95100, 1000 + 95100, 60) == "MAX_RUN"
+
+
+def test_max_run_allows_the_opposite_direction():
+    lift = FakeLift()
+    conn = module_conn(lift)
+    assert _run(lift, conn, 1000, 1000 + 90100, 30) == "MAX_RUN"
+    down = decode_hold(hold_text(press=2, direction="down", speed=30, ceiling=FAR), 1000 + 90200)
+    assert down is not None
+    lift.on_hold(conn, "module", down, 1000 + 90200)
+    assert lift.step(1000 + 90300)["dir"] == "down"
+
+
+def test_provisional_names_max_run_pct():
+    assert "LIFT_MAX_RUN_PCT" in fake.PROVISIONAL
+    assert [n for n in fake.PROVISIONAL if "MAX_RUN" in n] == ["LIFT_MAX_RUN_PCT"]

@@ -25,7 +25,7 @@ LiftDecideInput movable() {
   in.height_ok = true;
   in.height_at_ms = 1000;
   in.top_mm = LIFT_TOP_MM;
-  in.run_ms = 0;
+  in.run_travel_um = 0;
   return in;
 }
 
@@ -223,28 +223,59 @@ void test_bottom_wins_over_max_run() {
   LiftDecideInput in = movable();
   in.dir = LiftDir::DOWN;
   in.bottom_pressed = true;
-  in.run_ms = LIFT_MAX_RUN_MS + 1;
+  in.run_travel_um = lift_max_run_um(LIFT_TOP_MM) + 1;
   assert_decision(in, LiftDir::STOP, 0, StopReason::BOTTOM);
 }
 
 // --- 表 8 連続駆動の上限 ---
 
-void test_max_run_boundary_is_allowed_at_10000ms() {
+// 全行程 1800 mm × 10 × 150 % = 2 700 000 µm（30 mm/s なら 90 秒）
+void test_max_run_limit_is_stroke_times_pct() {
+  TEST_ASSERT_EQUAL_UINT32(2700000u, lift_max_run_um(1800));
+  TEST_ASSERT_EQUAL_UINT32(600000u, lift_max_run_um(400));
+}
+
+void test_max_run_boundary_is_allowed_at_exact_limit() {
   LiftDecideInput in = movable();
-  in.run_ms = LIFT_MAX_RUN_MS;
+  in.run_travel_um = lift_max_run_um(LIFT_TOP_MM);
   assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+}
+
+// top_mm が 0 以上ならそれを全行程にする（1800 を決め打ちにしない）
+void test_max_run_uses_top_mm_as_stroke() {
+  LiftDecideInput in = movable();
+  in.top_mm = 400;
+  in.dir = LiftDir::DOWN;
+  in.run_travel_um = 600000;
+  assert_decision(in, LiftDir::DOWN, 40, StopReason::NONE);
+  in.run_travel_um = 600001;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
+}
+
+// top_mm が -1（未設定）のときは LIFT_STROKE_FALLBACK_MM で判定する
+void test_max_run_top_unset_uses_stroke_fallback() {
+  LiftDecideInput in = movable();
+  in.top_mm = -1;
+  const uint32_t limit = static_cast<uint32_t>(LIFT_STROKE_FALLBACK_MM) * 10u *
+                         static_cast<uint32_t>(LIFT_MAX_RUN_PCT);
+  TEST_ASSERT_EQUAL_UINT32(limit, lift_max_run_um(-1));
+  TEST_ASSERT_EQUAL_UINT32(2850000u, limit);
+  in.run_travel_um = limit;
+  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+  in.run_travel_um = limit + 1;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
 }
 
 void test_run_over_max_run_stops_with_max_run() {
   LiftDecideInput in = movable();
-  in.run_ms = LIFT_MAX_RUN_MS + 1;
+  in.run_travel_um = lift_max_run_um(LIFT_TOP_MM) + 1;
   assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
 }
 
 void test_run_over_max_run_stops_down_too() {
   LiftDecideInput in = movable();
   in.dir = LiftDir::DOWN;
-  in.run_ms = LIFT_MAX_RUN_MS + 1;
+  in.run_travel_um = lift_max_run_um(LIFT_TOP_MM) + 1;
   assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
 }
 
@@ -266,7 +297,7 @@ void test_stalled_stops_down_too() {
 void test_stall_wins_over_moving() {
   LiftDecideInput in = movable();
   in.stalled = true;
-  in.run_ms = 0;
+  in.run_travel_um = 0;
   assert_decision(in, LiftDir::STOP, 0, StopReason::ENCODER_STALL);
 }
 
@@ -274,7 +305,7 @@ void test_max_run_wins_over_stall() {
   // 表の順（#8 が先）に当たることの確認
   LiftDecideInput in = movable();
   in.stalled = true;
-  in.run_ms = LIFT_MAX_RUN_MS + 1;
+  in.run_travel_um = lift_max_run_um(LIFT_TOP_MM) + 1;
   assert_decision(in, LiftDir::STOP, 0, StopReason::MAX_RUN);
 }
 
@@ -369,7 +400,10 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_up_with_bottom_pressed_still_moves);
   RUN_TEST(test_bottom_wins_over_max_run);
 
-  RUN_TEST(test_max_run_boundary_is_allowed_at_10000ms);
+  RUN_TEST(test_max_run_limit_is_stroke_times_pct);
+  RUN_TEST(test_max_run_boundary_is_allowed_at_exact_limit);
+  RUN_TEST(test_max_run_uses_top_mm_as_stroke);
+  RUN_TEST(test_max_run_top_unset_uses_stroke_fallback);
   RUN_TEST(test_run_over_max_run_stops_with_max_run);
   RUN_TEST(test_run_over_max_run_stops_down_too);
 

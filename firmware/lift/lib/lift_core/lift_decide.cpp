@@ -72,10 +72,11 @@ LiftDecideResult lift_decide(const LiftDecideInput& in) {
     return stop_with(StopReason::BOTTOM);
   }
 
-  // 表 8 同じ方向へ LIFT_MAX_RUN_MS 超 連続。
+  // 表 8 同じ方向へ、目標の速さで進んだとみなした距離が
+  // 全行程 × LIFT_MAX_RUN_PCT 超（上限ちょうどは動かせる）。
   // 持ち主が替わっても数え直さない（同じ方向が続く限り数え続ける。
   // 持ち主を交互に替えて上限を逃れられないように）
-  if (in.run_ms > LIFT_MAX_RUN_MS) {
+  if (in.run_travel_um > lift_max_run_um(in.top_mm)) {
     return stop_with(StopReason::MAX_RUN);
   }
 

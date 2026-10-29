@@ -19,7 +19,8 @@ constexpr uint32_t HEIGHT_STALE_MS = 600;      // 高さを「読めない」と
 constexpr int LIFT_TOP_MM = 1800;              // 上端の閾値 [mm]（仮。-1 にすると未設定: 判定 #6 をしない・#2a）
 // 上端の検知の有効（W-1 は 2026-10-28 に解いた）。state.top_detect の元で、判定 #4・#6 は常に行う
 constexpr bool LIFT_TOP_DETECT_ENABLED = true;
-constexpr uint32_t LIFT_MAX_RUN_MS = 10000;     // 同じ方向へ動き続けてよい時間の上限（仮値）
+constexpr int LIFT_MAX_RUN_PCT = 150;           // 連続駆動の上限 = 全行程の何 % を進んだとみなしたら止めるか [%]（仮。#4b）
+constexpr int LIFT_STROKE_FALLBACK_MM = 1900;   // LIFT_TOP_MM が未設定（-1）のとき #8 が使う全行程 [mm]（仮。機械の上端の表示 1891 mm）
 constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上限 [%]。% ⇔ PWM の換算の基準（モータ保護の上限ではない）
 constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上限の既定値 [%]（定格 12 V ÷ 電源 24 V。Spec-ui §2.1）
 constexpr int LIFT_MOTOR_MAX_PCT_MIN = 10;      // モータへの出力の上限の下限 [%]（同上。上限は LIFT_DUTY_ABS_MAX_PCT）
@@ -75,8 +76,14 @@ struct LiftDecideInput {
   bool height_ok = false;         // センサの読み値そのものの有効性（鮮度ではない）
   uint32_t height_at_ms = 0;      // その読み値を得た時刻
   int top_mm = LIFT_TOP_MM;       // 上端の閾値。-1 は未設定
-  uint32_t run_ms = 0;            // 現在の方向について実際にモータを回した時間
+  uint32_t run_travel_um = 0;     // 現在の方向について、実際にモータを回した間に目標の速さで進んだとみなした距離 [µm]
 };
+
+// 連続駆動の上限 [µm]（表 8）。全行程は top_mm（0 以上）または LIFT_STROKE_FALLBACK_MM（-1）
+constexpr uint32_t lift_max_run_um(int top_mm) {
+  return static_cast<uint32_t>(top_mm >= 0 ? top_mm : LIFT_STROKE_FALLBACK_MM) * 10u *
+         static_cast<uint32_t>(LIFT_MAX_RUN_PCT);
+}
 
 struct LiftDecideResult {
   LiftDir dir = LiftDir::STOP;

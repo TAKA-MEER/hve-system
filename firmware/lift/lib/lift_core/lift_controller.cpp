@@ -6,10 +6,6 @@
 
 namespace {
 
-// 「LIFT_MAX_RUN_MS を超えた」ことを残すので +1 で頭打ちにする。
-// ちょうど LIFT_MAX_RUN_MS ではまだ動かせる（DetailedDesign.md §4.1 の表 8 は「超」）。
-constexpr uint32_t kRunStopMs = LIFT_MAX_RUN_MS + 1;
-
 void copy_name(char* out, size_t out_size, const char* in) {
   if (out_size == 0) {
     return;
@@ -44,7 +40,8 @@ LiftController::LiftController(LiftHal* hal, int top_mm)
       had_owner_(false),
       conns_(),
       ui_clients_(0),
-      run_ms_(0),
+      run_travel_um_(0),
+      run_speed_mm_s_(0),
       run_dir_(LiftDir::STOP),
       turning_(false),
       run_at_ms_(0),
@@ -199,13 +196,18 @@ LiftState LiftController::step(uint32_t now_ms) {
   // （判定のあとに足すと、止まるまでが 1 周期ぶん延びる）。
   const int32_t elapsed = elapsed_ms(now_ms, run_at_ms_);
   if (turning_ && elapsed > 0) {
-    const uint32_t step_ms = static_cast<uint32_t>(elapsed);
-    run_ms_ = (step_ms > kRunStopMs - run_ms_) ? kRunStopMs : run_ms_ + step_ms;
+    // 直前の step で決めた目標の速さ [mm/s] × 経過 [ms] = µm。測った速さは使わない。
+    // 「上限を超えた」ことを残すので、上限の 1 つ上で頭打ちにする
+    // （ちょうど上限ではまだ動かせる。DetailedDesign.md §4.1 の表 8 は「超」）
+    const uint32_t stop_um = lift_max_run_um(top_mm_) + 1;
+    const uint64_t add_um = static_cast<uint64_t>(run_speed_mm_s_ > 0 ? run_speed_mm_s_ : 0) *
+                            static_cast<uint64_t>(elapsed);
+    run_travel_um_ = (add_um > stop_um - run_travel_um_) ? stop_um : run_travel_um_ + static_cast<uint32_t>(add_um);
   }
   // 停止指令・方向の変化で 0 に戻す。持ち主が替わっても数え直さない（§4.1 #8）
   const LiftDir cmd_dir = has_owner_cmd_ ? owner_cmd_.dir : LiftDir::STOP;
   if (cmd_dir == LiftDir::STOP || cmd_dir != run_dir_) {
-    run_ms_ = 0;
+    run_travel_um_ = 0;
   }
   run_dir_ = cmd_dir;
 
@@ -268,7 +270,7 @@ LiftState LiftController::step(uint32_t now_ms) {
   in.height_ok = hal_->height_ok();
   in.height_at_ms = hal_->height_at_ms();
   in.top_mm = top_mm_;
-  in.run_ms = run_ms_;
+  in.run_travel_um = run_travel_um_;
 
   // 判定の結果をモータへ出す。指令をそのまま流さないこと（§4.1）
   const LiftDecideResult decided = lift_decide(in);
@@ -310,6 +312,7 @@ LiftState LiftController::step(uint32_t now_ms) {
   last_duty_ = duty;
 
   turning_ = moving && duty > 0;
+  run_speed_mm_s_ = decided.speed_mm_s;
   run_at_ms_ = now_ms;
 
   state_.dir = moving ? decided.dir : LiftDir::STOP;

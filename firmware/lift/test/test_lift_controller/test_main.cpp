@@ -64,22 +64,39 @@ void assert_reason(StopReason expected, const LiftState& state) {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(expected), static_cast<int>(state.reason));
 }
 
-// 持ち主の hold を出し直しながら回し続ける（天井は新しいまま）。
-// エンコーダも 20 mm/s で進める（#8a で止まらない・出力が 0 に落ちない速さ）
-void hold_from_to(uint32_t start_ms, uint32_t end_ms, LiftController* ctrl, FakeHal* hal,
-                  const ConnId& conn, int press) {
-  for (uint32_t t = start_ms; t <= end_ms; t += 100) {
-    hal->set_height(500, true, t);
-    hal->set_encoder_count(static_cast<int32_t>(t / 5));
-    ctrl->on_hold(conn, up_hold(press, 40, t), t);
-    ctrl->step(t);
-  }
-}
+// 連続駆動の上限（#4b）の試験用。100 ms ごとに hold を出し直して step し、偽 HAL のエンコーダを
+// 「目標とは別の」速さ enc_mm_s で進める（モータが回っているときだけ。向きは dir に合わせる）。
+// 高さは 500 mm に置く（上端の閾値 TOP に当たらない）。最初に MAX_RUN 以外で止まった時刻を覚える。
+struct RunRig {
+  FakeHal hal;
+  LiftController ctrl;
+  double count_acc = 0.0;
+  LiftState last;
+  explicit RunRig(int top_mm) : ctrl(&hal, top_mm) {}
 
-void hold_until(uint32_t end_ms, LiftController* ctrl, FakeHal* hal, const ConnId& conn,
-                int press) {
-  hold_from_to(0, end_ms, ctrl, hal, conn, press);
-}
+  // t_ms を start..end（含む）で 100 ms 刻み。戻り値は最後の状態。
+  // ceiling_mm はモジュールの天井の距離（モジュールの接続のときだけ使う）
+  LiftState run(uint32_t start_ms, uint32_t end_ms, const ConnId& conn, int press, LiftDir dir,
+                int target_mm_s, double enc_mm_s, int ceiling_mm = 1450) {
+    for (uint32_t t = start_ms; t <= end_ms; t += 100) {
+      if (hal.motor_moving()) {
+        const double um = enc_mm_s * 100.0;  // 100 ms ぶん [µm]
+        count_acc += (dir == LiftDir::UP ? ENC_UP_SIGN : -ENC_UP_SIGN) * um / LIFT_UM_PER_COUNT;
+      }
+      hal.set_encoder_count(static_cast<int32_t>(count_acc));
+      hal.set_height(500, true, t);
+      HoldMsg hold = up_hold(press, target_mm_s, t);
+      hold.dir = dir;
+      hold.ceiling.mm = ceiling_mm;
+      if (conn.kind == ConnKind::UI) {
+        hold.has_ceiling = false;
+      }
+      ctrl.on_hold(conn, hold, t);
+      last = ctrl.step(t);
+    }
+    return last;
+  }
+};
 
 // #8a で止まらない程度にエンコーダを進めながら回すための、100 ms あたりのカウント。
 // 500 ms で LIFT_STALL_MIN_COUNTS 以上になる（切り上げ）。
@@ -272,15 +289,151 @@ void test_owner_close_stops_immediately_with_owner_gone() {
   TEST_ASSERT_FALSE(state.has_owner);
 }
 
+// 持ち主が替わっても数え直さない（同じ方向が続く限り数え続ける。上限を逃れられない）。
+// 30 mm/s・全行程 1800 mm の上限は 90 秒
 void test_owner_change_does_not_reset_max_run() {
-  FakeHal hal;
-  LiftController ctrl(&hal, LIFT_TOP_MM);
-  hold_until(9000, &ctrl, &hal, ui(1), 1);
-  TEST_ASSERT_TRUE(hal.motor_moving());
-  // 持ち主が替わっても同じ方向が続く限り数え続ける（上限を逃れられない）
-  hold_from_to(9100, 11100, &ctrl, &hal, module(2), 9);
-  const LiftState state = ctrl.step(11100);
-  TEST_ASSERT_FALSE(hal.motor_moving());
+  RunRig rig(LIFT_TOP_MM);
+  rig.run(0, 60000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  // 持ち主が替わる。ここで数え直すなら、90 秒を過ぎても止まらない
+  rig.run(60100, 90000, module(2), 9, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(90100, 90100, module(2), 9, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 1. 30 mm/s・top 1800 で上げ続けて、60 秒では止まらず、90 秒を超えたら MAX_RUN
+//    （固定 10 秒なら 10 秒で止まる）
+void test_max_run_30mm_s_full_stroke_stops_just_after_90s() {
+  RunRig rig(1800);
+  rig.run(0, 60000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  rig.run(60100, 90000, ui(1), 1, LiftDir::UP, 30, 30.0);  // ちょうど 90 秒ぶんはまだ動かせる
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(90100, 90100, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 2. 偽 HAL がエンコーダを目標の半分の速さで進めても、止まる時刻は 1 と同じ
+//    （測った速さで数えていない）
+void test_max_run_ignores_measured_speed() {
+  RunRig rig(1800);
+  rig.run(0, 90000, ui(1), 1, LiftDir::UP, 30, 15.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(90100, 90100, ui(1), 1, LiftDir::UP, 30, 15.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 3. 10 mm/s で長く動いたあと 60 mm/s に上げても、その場では止まらない。
+//    止まる時刻は、進んだとみなした距離の合計どおり。
+//    10 mm/s で 60 秒（601 000 µm。最初の 100 ms は回す前）→ 60 mm/s で残りを進む
+//    （経過時間 × いまの目標の速さなら 60 100 ms × 60 mm/s = 3 606 000 µm で、上げた途端に止まる）
+void test_max_run_sums_distance_when_target_speed_changes() {
+  RunRig rig(1800);
+  rig.run(0, 60000, ui(1), 1, LiftDir::UP, 10, 10.0);
+  assert_reason(StopReason::NONE, rig.last);
+  // 上げた直後の step は直前の目標（10）で足すので 601 000 µm。止まらない
+  rig.run(60100, 60100, ui(1), 1, LiftDir::UP, 60, 60.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  // 601 000 + 60 × (t - 60 100) が 2 700 000 を超える最初の 100 ms 刻みは t = 95 100
+  rig.run(60200, 95000, ui(1), 1, LiftDir::UP, 60, 60.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(95100, 95100, ui(1), 1, LiftDir::UP, 60, 60.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 4. top_mm 400 で作り、100 mm/s で下降し続けると 6 秒を超えて MAX_RUN
+//    （全行程を 1800 や 1900 で数えると止まらない。上昇だと高さ 400 の TOP が先に当たるので下降）
+void test_max_run_uses_top_mm_as_stroke_through_controller() {
+  RunRig rig(400);
+  rig.ctrl.set_motor_max_pct(LIFT_DUTY_ABS_MAX_PCT);
+  rig.run(0, 6000, ui(1), 1, LiftDir::DOWN, 100, 100.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(6100, 6100, ui(1), 1, LiftDir::DOWN, 100, 100.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 6. 上昇を CEILING_NEAR で止めている間は足さない（回していないので）。
+//    30 mm/s で 45 秒回し、天井が近くて 100 秒止まり、天井が離れたら残りの 45 秒で止まる
+void test_max_run_does_not_count_while_stopped_by_ceiling_near() {
+  RunRig rig(1800);
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(2), hello_with_sensor(true)));
+  rig.run(0, 45000, module(2), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  // 天井が近い（CEILING_MARGIN_MM 以下）。止まったまま 100 秒
+  const LiftState near_state = rig.run(45100, 145000, module(2), 1, LiftDir::UP, 30, 30.0, 300);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, near_state);
+  // 天井が離れた。止まっていた間を数えていれば、すぐ MAX_RUN になる
+  rig.run(145100, 145100, module(2), 1, LiftDir::UP, 30, 30.0);
+  assert_reason(StopReason::NONE, rig.last);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  // 回した距離は 45 秒 + 再開後。再開後の 45 秒ぶん（合計 90 秒）までは動かせる
+  rig.run(145200, 190000, module(2), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(190100, 190200, module(2), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 6b. 命令は動かせる（止める理由は無い）が出力が 0 で回っていない間も足さない。
+//     出力の上限を 0 % にすると duty が 0 になる。判定の速さは 30 のままなので、
+//     「回していた間だけ」の条件が無いと、止まっていた 100 秒ぶんが足されてすぐ MAX_RUN になる
+void test_max_run_does_not_count_while_duty_is_zero() {
+  RunRig rig(1800);
+  rig.run(0, 45000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  rig.ctrl.set_motor_max_pct(0);
+  rig.run(45100, 145000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  rig.ctrl.set_motor_max_pct(LIFT_MOTOR_MAX_PCT_DEFAULT);
+  rig.run(145100, 190000, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(190100, 190100, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, state);
+}
+
+// 向きを替えたら数え直す（release を挟まない）。MAX_RUN で止まったあと、
+// 別の接続が新しい press で下降を送ると（最後の操作が勝つ）、下降で動く
+void test_max_run_then_opposite_direction_from_other_connection_moves() {
+  RunRig rig(1800);
+  rig.run(0, 90100, ui(1), 1, LiftDir::UP, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::MAX_RUN, rig.last);
+  rig.run(90200, 90300, ui(2), 2, LiftDir::DOWN, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(rig.hal.motor_dir()));
+  assert_reason(StopReason::NONE, rig.last);
+}
+
+// 上昇で途中まで数えたあと離さずに下降へ切り替えると、下降は下降の距離だけで上限まで動ける
+void test_direction_switch_restarts_count_for_full_limit() {
+  RunRig rig(1800);
+  rig.run(0, 60000, ui(1), 1, LiftDir::UP, 30, 30.0);  // 1 800 000 µm
+  assert_reason(StopReason::NONE, rig.last);
+  rig.run(60100, 60100 + 90000, ui(2), 2, LiftDir::DOWN, 30, 30.0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.last);
+  const LiftState state = rig.run(60100 + 90100, 60100 + 90100, ui(2), 2, LiftDir::DOWN, 30, 30.0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
   assert_reason(StopReason::MAX_RUN, state);
 }
 
@@ -996,6 +1149,14 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_old_press_from_non_owner_does_not_steal);
   RUN_TEST(test_owner_close_stops_immediately_with_owner_gone);
   RUN_TEST(test_owner_change_does_not_reset_max_run);
+  RUN_TEST(test_max_run_30mm_s_full_stroke_stops_just_after_90s);
+  RUN_TEST(test_max_run_ignores_measured_speed);
+  RUN_TEST(test_max_run_sums_distance_when_target_speed_changes);
+  RUN_TEST(test_max_run_uses_top_mm_as_stroke_through_controller);
+  RUN_TEST(test_max_run_does_not_count_while_stopped_by_ceiling_near);
+  RUN_TEST(test_max_run_does_not_count_while_duty_is_zero);
+  RUN_TEST(test_max_run_then_opposite_direction_from_other_connection_moves);
+  RUN_TEST(test_direction_switch_restarts_count_for_full_limit);
   RUN_TEST(test_same_press_after_release_does_not_restart);
   RUN_TEST(test_same_press_after_timeout_does_not_restart);
   RUN_TEST(test_same_press_after_close_does_not_restart);
