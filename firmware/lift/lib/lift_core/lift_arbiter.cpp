@@ -29,6 +29,15 @@ bool LiftArbiter::on_hold(const ConnId& conn, int press, uint32_t now_ms) {
   if (seen == nullptr) {
     return false;
   }
+  if (has_owner_ && owner_.kind == ConnKind::BUTTON && conn.kind != ConnKind::BUTTON) {
+    // 物理ボタンが押されている間は、遠隔の hold は新しい press でも受け付けない（§3.3 ★）。
+    // ただし press は「前に見た」に記録する。物理ボタンを離したあと、押し続けていた遠隔の
+    // 同じ press の hold で持ち主にならないようにする
+    if (press > seen->last_press) {
+      seen->last_press = press;
+    }
+    return false;
+  }
   if (press < seen->last_press) {
     // 持ち主でない接続の古い press（取って代わられた側が押し続けているだけ）。
     // 持ち主が空のときも、前に見た press 以下では持ち主になれない

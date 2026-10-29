@@ -292,7 +292,7 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
     obj["ceiling"] = nullptr;
   }
   if (state.has_owner) {
-    obj["owner"] = state.owner_kind == 1 ? "module" : "ui";
+    obj["owner"] = state.owner_kind == 1 ? "module" : state.owner_kind == 2 ? "button" : "ui";
   } else {
     obj["owner"] = nullptr;
   }
@@ -394,6 +394,9 @@ bool state_decode(const char* text, LiftState* out) {
     } else if (std::strcmp(owner, "module") == 0) {
       out->has_owner = true;
       out->owner_kind = 1;
+    } else if (std::strcmp(owner, "button") == 0) {
+      out->has_owner = true;
+      out->owner_kind = 2;
     } else {
       return false;
     }

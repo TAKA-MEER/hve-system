@@ -51,7 +51,7 @@ struct LiftState {
   StopReason ceiling_reason = StopReason::CEILING_STALE;
   // 持ち主（いなければ has_owner が偽。種類は lift_arbiter.h の ConnKind）
   bool has_owner = false;
-  uint8_t owner_kind = 0;  // 0 = UI（画面）・1 = MODULE（上部モジュール）
+  uint8_t owner_kind = 0;  // 0 = UI（画面）・1 = MODULE（上部モジュール）・2 = BUTTON（物理ボタン）
   int ui_clients = 0;      // /ws/ui に繋いでいる画面の数
   // 上部モジュールの接続
   bool module_connected = false;

@@ -7,10 +7,12 @@
 
 #include "lift_decide.h"  // LIFT_CMD_TIMEOUT_MS・elapsed_ms
 
-// 接続の種類（DetailedDesign.md §3.1）。/ws/ui = 画面・/ws/module = 上部モジュール。
+// 接続の種類（DetailedDesign.md §3.1）。/ws/ui = 画面・/ws/module = 上部モジュール・
+// BUTTON = 昇降部の点検用の物理ボタン（接続ではない。§4.1.3）。
 enum class ConnKind : uint8_t {
   UI = 0,
   MODULE = 1,
+  BUTTON = 2,
 };
 
 // 接続の識別子（DetailedDesign-names.md §1）。id は WS の接続ごとの番号。

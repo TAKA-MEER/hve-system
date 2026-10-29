@@ -248,6 +248,20 @@ void test_state_encode_contains_v2_fields() {
   TEST_ASSERT_EQUAL_INT(35, back.cmd_age_ms);
 }
 
+void test_state_owner_button_round_trips() {
+  LiftState state;
+  state.has_owner = true;
+  state.owner_kind = 2;
+  char json[1024];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner\":\"button\""));
+
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_TRUE(back.has_owner);
+  TEST_ASSERT_EQUAL_INT(2, back.owner_kind);
+}
+
 void test_state_encode_writes_nulls_when_no_owner_or_module() {
   LiftState state;
   char json[1024];
@@ -324,6 +338,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_decode_broken_release_is_dropped);
 
   RUN_TEST(test_state_encode_contains_v2_fields);
+  RUN_TEST(test_state_owner_button_round_trips);
   RUN_TEST(test_state_encode_writes_nulls_when_no_owner_or_module);
   RUN_TEST(test_state_encode_reports_every_stop_reason);
   RUN_TEST(test_state_encode_reports_zero_when_buffer_is_short);
