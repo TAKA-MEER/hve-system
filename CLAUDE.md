@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## このリポジトリは何か
 
 **th-system の走行部に載せる昇降機と、その上部カメラの制御システム。**
-th-system（`../th-system`）の完全設計書が「範囲外（別担当）」としている
+th-system（`../th-system`）の仕様書が「範囲外（別担当）」としている
 **カメラ昇降のピッチ・ヨー・高さ**を担当する（th-system `Spec.md` §1・`Spec-onsite.md` §7.1）。
 
 **2026-09-29 時点で、PC だけでできる実装（昇降部の判定と ESP32 の配線・カメラ部の制御・映像・画面・ラズパイの実物の層）は済み。実機での確認はまだ**（[ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1・[docs/試験項目.md](docs/試験項目.md)）。開発体制は th-system と同じにしてある

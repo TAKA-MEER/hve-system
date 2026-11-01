@@ -1,6 +1,6 @@
 # 詳細設計書 — 昇降・カメラシステム（v2）
 
-[完全設計書](../spec/Spec.md) を実装できる形に落とす。読み方は [README.md](README.md)。旧版は [archive/v1/detailed/](../archive/v1/detailed/DetailedDesign.md)。
+[仕様書](../spec/Spec.md) を実装できる形に落とす。読み方は [README.md](README.md)。旧版は [archive/v1/detailed/](../archive/v1/detailed/DetailedDesign.md)。
 
 **2026-10-06 初版。**ユーザーから詳細設計を任された。**spec に無い振る舞いは勝手に決めていない**
 ——決める必要があったものは [-open.md](DetailedDesign-open.md) §1 に**提案**として置き、2026-10-06 にすべて採用された。

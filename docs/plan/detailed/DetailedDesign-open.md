@@ -29,9 +29,9 @@
 | **`D-8`** | UnitV2 で確かめること | **2026-10-06・07 に確かめた**（UART の電圧・ピンの並び・UNO との双方向も。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。再起動後に `th-rpi-ap` へ繋がらないことがある（`P-13`） |
 | **`D-9`** | モバイルバッテリの型（出力の数・各出力の電流・容量） | [-hardware.md](DetailedDesign-hardware.md) §3。MG996R の拘束電流をモータ側の出力でまかなえること |
 
-## 3. 完全設計書からの申し送り
+## 3. 仕様書からの申し送り
 
-| 完全設計書の ID | 詳細設計で要ること |
+| 仕様書の ID | 詳細設計で要ること |
 | --- | --- |
 | `H-X9`（`W-1`） | **2026-10-15 にエンコーダの高さに決まった。**`WP-LIFT-05`（エンコーダ）のあと `WP-LIFT-07` で `LIFT_TOP_DETECT_ENABLED` を戻し、`WAIVER(demo): W-1` を消して台帳を閉じる |
 | spec #4d・速さの制御 | `WP-LIFT-06`。`LIFT_SPEED_*`・`LIFT_FF_*`・`LIFT_STALL_*` を `WP-MEAS-01` で合わせる |
