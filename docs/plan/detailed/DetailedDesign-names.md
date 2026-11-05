@@ -124,6 +124,10 @@
 | `MAX_RUN` | 昇降部 | 連続駆動の上限 |
 | **`ENCODER_STALL`** | 昇降部 | モータへ出力しているのにエンコーダが回らない・逆に回る（spec #4d） |
 | `OUT_OF_RANGE` | 昇降部（天井の理由のみ。**停止理由ではない**） | 天井の距離計に反射が返らない。上昇は許す |
+| **`ARRIVED`** | 昇降部（`goto`） | 目標の高さに着いた（`WP-LIFT-14`。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2） |
+| **`PREEMPTED`** | 昇降部（`goto.reason` だけ） | 取って代わられた（別の操作元が新しく押し始めた）。`state.reason` には出ない（`WP-LIFT-14`） |
+| **`TARGET_RANGE`** | 昇降部（`goto`） | `goto` の目標が 0 未満、または上端の閾値より上（`WP-LIFT-14`） |
+| **`ARM_LINK`** / **`ARM_CONFIRM`** / **`DRUM_LAG`** | 昇降部 | 測定機構の #4e・#4f・#4g（spec [Spec-safety.md](../spec/Spec-safety.md) §2）。**名前だけ取っておく。実装はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから** |
 | `HOLD_TIMEOUT` | カメラモジュール | 画面からの操作が途絶えた |
 | `LINK_LOST` | カメラモジュール | 昇降部と繋がっていない |
 | **`IO_LOST`** | カメラモジュール | Arduino から行が来ない（ヨー・ピッチが動かない・天井が読めない） |
@@ -133,6 +137,16 @@
 
 種類 `t` は昇降部の WS で `hello` / `hold` / `release` / `state`、カメラモジュールの WS で旧版と同じ `hold` / `release` / `zoom` / `state`。
 UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesign-protocol.md) が正。
+
+**上部モジュールの複数対応（2026-11-05。fk-system・ss-system が確かめ済み。`WP-LIFT-13`・`-14`・`WP-LIFTUI-03`・`WP-CAM-10`）で足すもの**。フィールドは [-protocol-modules.md](DetailedDesign-protocol-modules.md) が正:
+
+| 名前 | 中身 |
+| --- | --- |
+| 昇降部の WS の `t` | **`ceiling`**（距離計を持つ上部モジュールが止まっている間も送る）・**`goto`**（目標の高さへの移動）を足す |
+| `hello` のフィールド | **`role`**（`control` / `observe`）・**`operator`**（`human` / `auto`）・**`busy_label`** を足す。`name` を接続どうしの見分けに使う |
+| 上部モジュールの名前 | **`hve-cam`**（カメラモジュール）・**`fk`**（fk-system）・**`ss`**（ss-system） |
+| `state` のフィールド | **`owner_name`**・**`owner_operator`**・**`homed`**・**`modules`**（今の `module` を置き換える）・**`goto`**・**`arm`**・`ceiling.from` を足す。`owner` に `arm` を足す（名前だけ） |
+| **`LiftHal::homed`** | 原点を取ったか（`EncoderHeight` から。`state.homed` の元。`WP-LIFT-13`） |
 
 `POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
 偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
@@ -168,6 +182,8 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`LIFT_WS_UI_PATH`** / **`LIFT_WS_MODULE_PATH`** | `config.h` | `/ws/ui` / `/ws/module` | [-protocol.md](DetailedDesign-protocol.md) §1（v1 の `LIFT_WS_PATH` は廃止） |
 | **`LIFT_NVS_NAMESPACE`** | `config.h` | `hve_lift_mm`（`WP-LIFT-06` で `hve_lift` から替える。% で保存した値を mm/s と読まないため） | [-protocol.md](DetailedDesign-protocol.md) §3 |
 | **`LIFT_UI_CLIENTS_MAX`** | `config.h` | 4 | **仮**（ESP32 のメモリ。超えた接続は閉じる） |
+| **`LIFT_MODULE_MAX_CONN`** | `config.h` | 6 | **仮**（2026-11-05。`/ws/module` の接続の上限。**超えた新しい接続をその場で閉じる**。ライブラリの `cleanupClients()` に古い接続を閉じさせない。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.3。`WP-LIFT-13`） |
+| **`LIFT_GOTO_TOL_MM`** | `lift_decide.h` | 10 | **仮**（spec `H-M6`。目標の高さに「着いた」とみなす幅。`WP-LIFT-14`） |
 | `LIFT_STATE_TEXT_MAX` | `config.h` | 640 | **仮**（v2 の `state` は 500 バイト前後） |
 | `LIFT_MDNS_NAME` / `LIFT_HTTP_PORT` | `config.h` | `hve-lift` / 80 | 旧版 |
 | ピン・PWM の定数 | `config.h` | 旧版のまま | 旧版 §5 |
@@ -202,6 +218,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`lift_mdns_name`** / **`lift_port`** | `hve-lift` / 80 | 同・[-protocol.md](DetailedDesign-protocol.md) §1 |
 | **`LIFT_WS_MODULE_PATH`** | `camera/hve_camera/lift_link.py` の定数 | `/ws/module`。**`params.toml` に置かない**（[DetailedDesign.md](DetailedDesign.md) §3.1。書き間違えて `/ws/ui` に繋ぐと天井の守りが外れる） |
 | **`module_name`** / **`module_ceiling_sensor`** | `hve-cam` / `true` | [DetailedDesign.md](DetailedDesign.md) §3.1（**常に `true`。センサの調子から計算しない**） |
+| **`MODULE_ROLE`** / **`MODULE_OPERATOR`** | `camera/hve_camera/lift_link.py` の定数 | `control` / `human`（2026-11-05。`hello` に載せる。**`params.toml` に置かない**: カメラモジュールの昇降の命令はいつも人の操作の中継なので。`WP-CAM-10`） |
 | **`io_device`** / **`io_baud`** | `/dev/ttyS1` / 115200 | M5 文書（[-hardware.md](DetailedDesign-hardware.md) §2.1）。`io_baud` は Arduino の `IO_BAUD` と揃える |
 | **`io_cmd_period_ms`** | 50 | **仮** |
 | **`io_lost_ms`** | 600 | **仮**（Arduino から行が来ないと `IO_LOST` にするまで） |

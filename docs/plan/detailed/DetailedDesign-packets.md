@@ -58,11 +58,18 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-12` | 5 | **点検用の物理ボタン**（2026-10-29 ユーザー決定。本番のファームで組み立て用と同じスイッチを読み、安全の判定を通して動かす。押している間だけ遠隔より優先。`ButtonInput`・`button_step`・`ConnKind::BUTTON`・`owner: button`・両方の画面の表示） | LIFT-11 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-09` | 5 | **高さの換算を機構の設計値にする**（`LIFT_UM_PER_COUNT` 100 → 26・`LIFT_STALL_MIN_COUNTS` を mm から決め直す・試験の換算）。2026-10-25 | LIFT-05・LIFT-06 | 不要（実機の確認は管理担当） |
 | `WP-LIFT-07` | 5 | **上端の検知を戻す**（`LIFT_TOP_DETECT_ENABLED` を `true`・`WAIVER(demo): W-1` を消す・台帳を閉じる） | LIFT-05 の実機確認 | 要（昇降部） |
+| `WP-LIFT-13` | 6 | **上部モジュールの複数対応（接続・名乗り・天井・`state`）**（2026-11-05。fk-system・ss-system が繋ぐ。`hello` の `role`・`operator`・`busy_label`・同じ名前の置き換え・`observe`・`ceiling`・距離計を持たない上部モジュールの天井・`modules` ほか・`LIFT_MODULE_MAX_CONN`） | LIFT-12 | 不要（実機の確認は管理担当） |
+| `WP-LIFT-14` | 6 | **目標の高さへの移動（`goto`）**（spec §2.1。`ARRIVED`・`PREEMPTED`・`TARGET_RANGE`・`state.goto`・`LIFT_GOTO_TOL_MM`） | LIFT-13 | 不要（実機の確認は管理担当） |
+| `WP-LIFTUI-03` | 6 | 昇降部の画面・偽の昇降部・`lift_probe` を複数の上部モジュールに（`modules`・`owner_name`・`busy_label`・「腕が出ています」・名乗り・`goto`） | LIFT-13（取り決め） | 不要 |
+| `WP-CAM-10` | 6 | カメラモジュール（アプリ・画面・偽の昇降部）を複数の上部モジュールに（`hello` の `role`・`operator`・止まっている間の `ceiling`・`owner_name` で自分を見分ける・持ち主の表示） | LIFT-13（取り決め） | 不要（偽物のモード） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
 
 **`WP-LIFT-08` と `WP-CAM-07`**: 設定 API の `motor_max_pct` は必須なので、片方だけ新しいと `PUT` が `400` になる。**2 つ揃えてから実機に入れる。**`docs/使い方.md` の設定の節は `WP-LIFT-08` が書き、`WP-CAM-07` はカメラモジュールの画面の欄だけ足す（LIFT-08 のマージ後に始める）。
+
+**段階 6（2026-11-05。上部モジュールの複数対応。[-protocol-modules.md](DetailedDesign-protocol-modules.md)）**: `WP-LIFTUI-03` と `WP-CAM-10` は取り決めが書いてあるので `WP-LIFT-13` と並べて進められる。**ただし `state` の `module` → `modules` は互換が無く、カメラモジュールは `owner_name` で自分を見分けるようになるので、`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10` の 3 つ揃えてから実機に入れる。**`WP-LIFT-14` は `WP-LIFT-13` のあと（`goto` を受けない昇降部は `goto` を知らない `t` として捨てるだけなので、あとから入れてよい）。
+**揃うまで、fk-system・ss-system は今の昇降部へ繋いで上昇させない**（今のファームは、距離計を持たない接続の上昇に天井を使わない。fk・ss に伝え済み）。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -282,6 +289,80 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol.md](DetailedDesign-protocol.md) §3・§4、spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.1
 - 作るもの: `camera/hve_camera/settings.py`（`motor_max_pct` の検証 10〜100 の整数）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の欄と添え書き）・**`docs/使い方.md`**
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `motor_max_pct` を送らない／検証が 101 を通す／`GET` が `motor_max_pct` を落とす → 赤
+
+### `WP-LIFT-13` 上部モジュールの複数対応（接続・名乗り・天井・`state`）
+
+- 読む節: spec [Spec-module.md](../spec/Spec-module.md) §1〜§4（§3 の測定機構の行を含む）・[Spec-safety.md](../spec/Spec-safety.md) §2 #3〜#4c、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §0〜§5（**§2.2 の `goto` は `WP-LIFT-14`**）、[DetailedDesign.md](DetailedDesign.md) §3.1〜§3.3、[-names.md](DetailedDesign-names.md) §4 の「上部モジュールの複数対応」の表と §5.1 の `LIFT_MODULE_MAX_CONN`・`LIFT_STATE_TEXT_MAX`
+- 作るもの:
+  - `cmd_codec`: `HelloMsg` に `role`・`operator`・`busy_label`（欠けている・知らない値の扱いは -protocol-modules §1.1。`name` は形に合わなければ名前無し）。`decode_ceiling`（`t: "ceiling"`）。`state_encode`・`state_decode` に `owner_name`・`owner_operator`・`homed`・`modules`（配列）・`ceiling.from`・`arm`（**中身はすべて `null`**。-protocol-modules §3）。**`module` は消す**
+  - `lift_controller`: 接続ごとに `role`・`operator`・`busy_label` を持つ。`on_hello` は、**同じ名前の別の接続があれば、その接続番号を返して呼び出し側に閉じさせる**（名前無しは置き換えない）。`observe` の接続の `hold`・`release` は捨てる。**距離計を持つ接続ごとに、最後の天井の値（`hold`・`ceiling` のどちらから来たものでも）と受け取った時刻を持つ。**持ち主が**距離計を持たない上部モジュール**のときは、その値を `ceiling_check` に渡す（2 台以上なら近い方。無ければ `MISSING` で `CEILING_STALE`）。昇降部の画面・物理ボタンは今のまま使わない。`kMaxConns` を `LIFT_UI_CLIENTS_MAX`・`LIFT_MODULE_MAX_CONN` と物理ボタンが入る数にする
+  - `LiftHal::homed`（`hal.h`・偽の HAL・`hal_esp32` は `EncoderHeight` から）
+  - `src/main.cpp`: `/ws/module` の接続が `LIFT_MODULE_MAX_CONN` を超えたら**新しい方をその場で閉じる**。`ws_module.cleanupClients()` に**古い接続を閉じさせない**（上限より大きい値を渡すなど。消えた接続の後始末は続ける）。`on_hello` が返した古い接続を閉じる。`ceiling` を振り分ける。`state` が大きくなるので `LIFT_STATE_TEXT_MAX` を測って直し、[-names.md](DetailedDesign-names.md) の値も直す
+  - `lift_core_version` を上げる
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL を通した試験で縛る。純関数の試験だけで済ませない）
+  1. ※ 距離計を持たない上部モジュールの上昇に天井を使わない（今の作りに戻す）。カメラモジュールが `ceiling` で `MEASURED` 300 mm を送っている間に、`fk` の上昇が止まらない
+  2. ※ カメラモジュールが繋がっていない（または値が `CEILING_STALE_MS` より古い）のに、`fk` の上昇を許す
+  3. ※ カメラモジュールの値の古さに、受け取ってからの経過を足さない
+  4. ※ 止まっている間に届いた `ceiling` を使わず、`hold` に載った値だけ使う
+  5. ※ `observe` の接続の `hold` で動く
+  6. ※ `role` の知らない値を `control` とみなす
+  7. ※ 同じ名前で繋ぎ直しても古い接続を閉じない／名前無しどうしを置き換える
+  8. ※ 2 度目の `hello` で `role`・`ceiling_sensor` が変わる
+  9. ※ `fk` が持ち主のとき、`owner_name` が `fk` にならない・`owner_operator` が `auto` にならない
+  10. ※ `operator` が欠けた `hello` を `auto` とみなす
+  11. `arm.attached` に `false` を出す（`null` でない）
+- **実機で管理担当が確かめる**（`WP-LIFTUI-03` の `lift_probe` と `WP-CAM-10` が揃ってから）: カメラモジュールと `lift_probe` 2 本（`fk`・`ss` を名乗る）で繋ぎ、`fk` の上昇がカメラモジュールの天井で止まる／カメラモジュールの電源を落とすと `fk` の上昇が `CEILING_STALE` で止まる／同じ名前で繋ぎ直すと古い方が閉じる／上限を超えた接続が閉じられ、カメラモジュールは切れない／`state` の `modules` に繋いだものが並ぶ
+
+### `WP-LIFT-14` 目標の高さへの移動（`goto`）
+
+- 読む節: spec [Spec-module.md](../spec/Spec-module.md) §2・§2.1・§4、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2・§3 の `goto`・§3.1、[DetailedDesign.md](DetailedDesign.md) §3.3、[-names.md](DetailedDesign-names.md) の `LIFT_GOTO_TOL_MM`・`ARRIVED`・`PREEMPTED`・`TARGET_RANGE`
+- 作るもの:
+  - `cmd_codec`: `decode_goto`。`state` の `goto`（`by`・`press`・`target_mm`・`status`・`reason`）
+  - `lift_arbiter`: `goto` も `hold` と同じ `press` の規則で持ち主を決める。持ち主が替わったことを `lift_controller` が知れるようにする
+  - `lift_controller`: 目標といまの高さから向きを決め、`LIFT_GOTO_TOL_MM` 以内で止めて `ARRIVED`。**着いたあと同じ `press` の `goto` は無視する**。高さが読めない → `HEIGHT_UNKNOWN`、目標が範囲の外 → `TARGET_RANGE` で受け付けない。取って代わられた → `PREEMPTED`。ほかの止め方（安全の判定・命令の途切れ・`release`・接続が閉じた）は、その止めた理由で `NOT_ARRIVED`。速さは `goto` の `speed`
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL〈エンコーダの数を進める〉を通した試験で縛る）
+  1. ※ 着いたあと、同じ `press` の `goto` で動き出す
+  2. ※ 原点の前（高さが読めない）の `goto` を受け付ける
+  3. ※ 目標が上端の閾値より上でも受け付ける
+  4. ※ 取って代わられたとき `NOT_ARRIVED` にしない・理由が `PREEMPTED` でない
+  5. ※ `goto` の上昇に天井の判定が効かない（`fk` の `goto` がカメラモジュールの天井で止まらない）
+  6. ※ `goto` が途切れても止まらない（`LIFT_CMD_TIMEOUT_MS`）
+  7. ※ 目標より下にいるのに下降する（向きの取り違え）
+  8. `goto.by`・`press` が送り手と合わない
+- **実機で管理担当が確かめる**: `lift_probe` で `goto` 1000 mm → 着いて `ARRIVED`／途中で昇降部の画面から押すと `PREEMPTED`／電源を入れ直した直後は `HEIGHT_UNKNOWN`
+
+### `WP-LIFTUI-03` 昇降部の画面・偽の昇降部・`lift_probe` を複数の上部モジュールに
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.2・§1.6、[Spec-module.md](../spec/Spec-module.md) §1〜§4、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1〜§4
+- 作るもの:
+  - 昇降部の画面 `firmware/lift/web/app.js`: `modules` の一覧（名前・IP・人か自動か）。持ち主の表示は `owner_name` と `busy_label`（`fk` なら「測定操作中」）で出し、**`owner == "module"` を「上部モジュール」と決め打ちしない**。`arm.out` が `true` のとき「腕が出ています」（`null`・`false` では出さない）。純関数の試験
+  - 偽の昇降部 `tools/fake_lift_server.py`: 複数の接続・`hello` の新しい欄・同じ名前の置き換え・`observe`・`ceiling`・距離計を持たない上部モジュールの天井（`WP-LIFT-13` と同じ判定）・`goto`・`state` の新しい欄（`arm` は `null`）
+  - `tools/lift_probe.py`: `--name`・`--role`・`--operator`・`--no-ceiling-sensor`・`--busy-label` で名乗れる。`goto` を送れる
+  - **`docs/使い方.md`** の昇降部の画面の節（繋がっている上部モジュールの一覧・持ち主の表示）
+- 受け入れ: `.venv/bin/python -m pytest tools/tests`・`node firmware/lift/web/tests/web.test.js` が成功。**次の変異がそれぞれ赤になる**
+  1. 画面が `busy_label` でなく `owner_name` だけを出す（`busy_label` があるとき）
+  2. 画面が `owner_name` を見ずに「上部モジュール」と出す
+  3. 画面が `modules` を 1 つしか出さない
+  4. 画面が `arm.out` の `null` で「腕が出ています」を出す
+  5. 偽の昇降部が、距離計を持たない上部モジュールの上昇に天井を使わない
+  6. `lift_probe` の名乗りが `hello` に載らない
+
+### `WP-CAM-10` カメラモジュールを複数の上部モジュールに
+
+- 読む節: [-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.1・§2.3・§3・§4・§5、[DetailedDesign.md](DetailedDesign.md) §3.1・§3.2、[-names.md](DetailedDesign-names.md) の `MODULE_ROLE`・`MODULE_OPERATOR`・`module_name`
+- 作るもの:
+  - `camera/hve_camera/lift_link.py`: `hello` に `role: "control"`・`operator: "human"`（定数）。**止まっている間も `lift_cmd_period_ms` ごとに `ceiling` を送る**（中身は `hold` に載せるものと同じ。古さの扱いも同じ）
+  - `camera/hve_camera/control.py`: **自分が持ち主かを `owner == "module"` でなく `owner_name == module_name` で見る**（`fk`・`ss` が動かしている間に、昇降部の天井の判定を自分のものと取り違えない）
+  - 画面 `camera/web/app.js`: 持ち主の表示を `owner_name`・`busy_label` で出す（`hve-cam` のときは今の「カメラモジュール」）。`arm.out` が `true` のとき「腕が出ています」。純関数の試験
+  - 偽の昇降部 `camera/hve_camera/hw/fake_lift.py`: `state` の新しい形（`modules` など）と `ceiling` を受ける
+  - **`docs/使い方.md`** のカメラモジュールの画面の節（持ち主の表示）
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests`・`node --test camera/web/tests/web.test.js` が成功。**次の変異がそれぞれ赤になる**
+  1. 止まっている間に `ceiling` を送らない
+  2. `ceiling` の古さを送らない・読めない値を `MEASURED` で送る
+  3. 自分が持ち主かを `owner == "module"` のままで見る（`fk` が持ち主のとき、カメラモジュールの画面に昇降部の天井の判定が出る）
+  4. `hello` に `operator` を載せない・`auto` を載せる
+  5. 画面が `fk` の `busy_label` を出さない
+- **実機で管理担当が確かめる**（`WP-LIFT-13`・`WP-LIFTUI-03` と揃えて）: カメラモジュールが止まっている間も、昇降部の `state.ceiling.from` が `hve-cam` で古くならない／`lift_probe`（`fk`）が動かしている間、カメラモジュールの画面に「測定操作中」と出て、天井の判定は自分のものとして出ない
 
 ### `WP-LIFT-12` 点検用の物理ボタン
 

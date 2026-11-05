@@ -1,11 +1,11 @@
 # 通信 — 上部モジュールの複数対応（案）
 
 [DetailedDesign-protocol.md](DetailedDesign-protocol.md) §2（昇降部の WS）を、spec の 2026-11-01 以降の決まりに合わせて広げる案。
-**状態: 案（2026-11-05）。fk-system は確かめ済み（§6。同日）、ss-system の確認待ち。実装はまだ。**いまの実物は [-protocol.md](DetailedDesign-protocol.md) §2.1・§2.2 のまま（上部モジュールは 1 台の前提）。
+**状態: 2026-11-05 に fk-system・ss-system が確かめ済み（§6）。作業パケットは `WP-LIFT-13`・`WP-LIFT-14`・`WP-LIFTUI-03`・`WP-CAM-10`（[-packets.md](DetailedDesign-packets.md)）。新しい名前は [-names.md](DetailedDesign-names.md) へ移した。実装はまだ。**いまの実物は [-protocol.md](DetailedDesign-protocol.md) §2.1・§2.2 のまま（上部モジュールは 1 台の前提）。
 
 - 口の名前と形は本システムが書き、fk-system・ss-system が確かめる（spec [Spec-module.md](../spec/Spec-module.md) §1。2026-11-05 ユーザー決定）。
 - 入力は spec [Spec-module.md](../spec/Spec-module.md) §1〜§5（複数の上部モジュール・状態を読むだけの接続・目標の高さへの移動・どの上部モジュールが操作しているか・測定機構）と [Spec-safety.md](../spec/Spec-safety.md) §2。
-- 確かめが済んだら作業パケットに切り（[ImplementationPlan.md](../ImplementationPlan.md) §6）、新しい名前を [-names.md](DetailedDesign-names.md) へ移す。**それまで、ここの名前で実装しない。**
+- 進め方は [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 8。**実装は作業パケットのブリーフに沿って行う**（この文書の名前は [-names.md](DetailedDesign-names.md) にもある）。
 
 ---
 
@@ -128,7 +128,7 @@
 | **`goto`** | 最後の `goto`。`by`（送った接続の `name`）・`press`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason`（止めた理由。§3.1）。次の `goto` まで残す。起動してから無ければ `null` |
 | **`arm`** | 測定機構（spec §3・§5）。`attached`（コネクタを検知しているか）・`link`（アームの制御器と通信できて、腕の角度が古くないか）・`confirm`（コネクタの確認待ち。`null` / `DETACHED` / `ATTACHED`）・`out`（腕が格納位置にないか）・`drum`（ドラムの状態）。**名前だけ決め、`link`・`out`・`drum` の中身はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから。**分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**`attached: false` は「付いていないと検知した」ときだけ**で、コネクタの検知を作るまでは `attached` も `null`。`out: false` も「格納位置にあると知らされた」ときだけ。fk-system は `attached: false` を「付いていない」と読んで機体を動かし、`null` は「腕の状態が読めない」として動かさない |
 
-### 3.1 足す止めた理由（[-names.md](DetailedDesign-names.md) §3 に移す候補）
+### 3.1 足す止めた理由（[-names.md](DetailedDesign-names.md) §3 に移した）
 
 | 名前 | 意味 |
 | --- | --- |
@@ -175,7 +175,9 @@
 
 ## 6. fk-system に確かめてほしいこと
 
-**2026-11-05 に fk-system が確かめた: 7 点とも案のとおり。**fk は `name: "fk"`・`operator: "auto"`・`busy_label`「測定操作中」を名乗り、100 ms ごとに送り、`state` が 500 ms 来なければ「読めない」とみなして繋ぎ直す（その間は th-system にも動く指示を出さない）。下端まで下げるのを待つ上限（暫定 60 s）は fk 側にも持つ。`role: observe` は fk には要らない（作ることに異論なし）。あわせて受けた頼みで、`arm` の欄は分からないとき `null` にした（§3）。ss-system の分（名前 `ss` など）は ss-system に確かめる。
+**2026-11-05 に fk-system が確かめた: 7 点とも案のとおり。**fk は `name: "fk"`・`operator: "auto"`・`busy_label`「測定操作中」を名乗り、100 ms ごとに送り、`state` が 500 ms 来なければ「読めない」とみなして繋ぎ直す（その間は th-system にも動く指示を出さない）。下端まで下げるのを待つ上限（暫定 60 s）は fk 側にも持つ。`role: observe` は fk には要らない（作ることに異論なし）。あわせて受けた頼みで、`arm` の欄は分からないとき `null` にした（§3）。
+
+**2026-11-05 に ss-system も確かめた（ss のユーザーの承認）: 案のとおり。**ss は `name: "ss"`・`role: "control"`・`operator: "auto"`・`ceiling_sensor: false`・`busy_label`「画像認識で操作中」を名乗る。主に `goto` を使い（始める前に `state` の高さを読んで戻す先にする）、止めるときは送るのをやめて `release` する。人の割り込み（`goto.status` が `PREEMPTED`、または `owner_operator` が `human`）を見たら、すぐ止まり、戻さずに手を離す。命令は 100 ms ごと、`state` が 600 ms 来なければ繋ぎ直す。昇降部の口にほかに要るものは無い（`height`・`homed`・`owner_name`・`owner_operator`・`goto`・`ceiling` で足りる）。
 
 1. 名前 `fk`・`ss` でよいか（ss の分は ss-system にも確かめる）。
 2. `operator`・`busy_label` の形（hve の画面が名前を決め打ちしないため）。
