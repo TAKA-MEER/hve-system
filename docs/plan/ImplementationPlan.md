@@ -263,7 +263,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | 6i | ~~`WP-LIFT-12`~~（`7d87f17`。点検用の物理ボタン。組み立て用と同じスイッチを本番のファームで読み、安全の判定を通す。押している間だけ遠隔より優先。2026-10-29 ユーザー決定） | 実機確認待ち |
 | 7 | `WP-MEAS-01`〜`05`（`WP-MEAS-01` で `LIFT_UM_PER_COUNT`・速さの係数・`LIFT_TOP_MM` も決める） | 未着手 |
 | 8 | **上部モジュールの複数対応**（fk-system・ss-system が繋ぐ口。spec 2026-11-01 以降の [Spec-module.md](spec/Spec-module.md) §1〜§5。設計は [detailed/DetailedDesign-protocol-modules.md](detailed/DetailedDesign-protocol-modules.md)。2026-11-05 に fk・ss が確かめ済み）: `WP-LIFT-13` → `WP-LIFT-14` ／ `WP-LIFTUI-03` ／ `WP-CAM-10`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 6）。**LIFT-13・LIFTUI-03・CAM-10 の 3 つ揃えてから実機に入れる**（`state` の `module` → `modules` に互換が無い）。揃うまで fk・ss は今の昇降部で上昇させない（伝え済み） | 未着手（パケット済み） |
-| 8a | **カメラモジュールが ss-system に開く口**（ヨー・ピッチの操作・静止画の要求。spec [Spec-module.md](spec/Spec-module.md) §1。2026-11-05 ユーザー決定で hve が書き ss が確かめる）。**行 8 のあとに案を書く**。向き・角度の欄は名前だけ決め、`H-A11`・`H-V14` が決まるまで `null` | 未着手 |
+| 8a | **カメラモジュールが ss-system に開く口**（ヨー・ピッチの操作・静止画の要求。spec [Spec-module.md](spec/Spec-module.md) §1。2026-11-05 ユーザー決定で hve が書き ss が確かめる）。**行 8 のあとに案を書く**。ピッチは目標角を渡し、カメラモジュールが再起動したことも読めるようにする（`H-V14`。2026-11-05 ss の決定）。ヨーの向きの欄は名前だけ決め、`H-A11` が決まるまで `null` | 未着手 |
 | 随時 | 組み立て用ファーム（`env:esp32dev_manual`。スイッチで回すだけ・台帳 `W-2`。メカ担当向け）。**実機確認はまだ**。組み立てが終わったら本番を書き戻して `W-2` を閉じる | 実装あり（実機確認待ち） |
 | いつでも | 先方・機構側に聞く値（`H-V1`・`H-V2`）／目標 `H-G1` | 未着手 |
 
