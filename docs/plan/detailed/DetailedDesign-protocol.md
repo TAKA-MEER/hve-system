@@ -26,6 +26,8 @@
 
 すべて UTF-8 の JSON テキスト 1 フレーム 1 メッセージ。`t` で種類を区別する。
 
+**上部モジュールが 1 台の前提の、いまの実物の形。**複数の上部モジュール（fk-system・ss-system）・状態を読むだけの接続・目標の高さへの移動・測定機構を足す案は [-protocol-modules.md](DetailedDesign-protocol-modules.md)（2026-11-05。fk-system の確認待ち）。
+
 ### 2.1 画面・上部モジュール → 昇降部
 
 ```json

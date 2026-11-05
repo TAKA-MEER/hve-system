@@ -62,6 +62,8 @@ spec [Spec-safety.md](../spec/Spec-safety.md) §2・[Spec-module.md](../spec/Spe
 
 ### 3.1 命令の出どころは「接続」で決める
 
+**下の表の「`ceiling_sensor: false` なら天井を使わない」は、spec の 2026-11-01 の決まり（`H-X11` を改めた）と食い違っている。**距離計を持たない上部モジュール（fk-system・ss-system）の上昇は、距離計を持つ上部モジュールの値で判定する。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.4 の案（2026-11-05。fk-system の確認待ち）で置き換える。
+
 | 接続 | 出どころ | 天井の距離 |
 | --- | --- | --- |
 | `/ws/ui` | 昇降部の画面（単体での操作） | **使わない**（spec #4c） |

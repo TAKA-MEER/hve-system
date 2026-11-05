@@ -262,6 +262,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | 6h | ~~`WP-LIFT-11`~~（`92947f6`。連続駆動の上限を、上端の閾値と目標の速さから都度求める。2026-10-29 ユーザー決定。固定 10 秒では 30 mm/s で 300 mm しか進めなかった） | 実機確認待ち |
 | 6i | ~~`WP-LIFT-12`~~（`7d87f17`。点検用の物理ボタン。組み立て用と同じスイッチを本番のファームで読み、安全の判定を通す。押している間だけ遠隔より優先。2026-10-29 ユーザー決定） | 実機確認待ち |
 | 7 | `WP-MEAS-01`〜`05`（`WP-MEAS-01` で `LIFT_UM_PER_COUNT`・速さの係数・`LIFT_TOP_MM` も決める） | 未着手 |
+| 8 | **上部モジュールの複数対応**（fk-system・ss-system が繋ぐ口。spec 2026-11-01 以降の [Spec-module.md](spec/Spec-module.md) §1〜§5）。案は [detailed/DetailedDesign-protocol-modules.md](detailed/DetailedDesign-protocol-modules.md)（2026-11-05）。**fk-system の確かめが済んだら作業パケットに切る**（昇降部のファーム・昇降部の画面・カメラモジュールを一緒に直す。案の §5） | 案（fk の確認待ち） |
 | 随時 | 組み立て用ファーム（`env:esp32dev_manual`。スイッチで回すだけ・台帳 `W-2`。メカ担当向け）。**実機確認はまだ**。組み立てが終わったら本番を書き戻して `W-2` を閉じる | 実装あり（実機確認待ち） |
 | いつでも | 先方・機構側に聞く値（`H-V1`・`H-V2`）／目標 `H-G1` | 未着手 |
 
