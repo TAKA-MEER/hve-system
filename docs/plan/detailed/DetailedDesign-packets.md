@@ -295,7 +295,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: spec [Spec-module.md](../spec/Spec-module.md) §1〜§4（§3 の測定機構の行を含む）・[Spec-safety.md](../spec/Spec-safety.md) §2 #3〜#4c、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §0〜§5（**§2.2 の `goto` は `WP-LIFT-14`**）、[DetailedDesign.md](DetailedDesign.md) §3.1〜§3.3、[-names.md](DetailedDesign-names.md) §4 の「上部モジュールの複数対応」の表と §5.1 の `LIFT_MODULE_MAX_CONN`・`LIFT_STATE_TEXT_MAX`
 - 作るもの:
   - `cmd_codec`: `HelloMsg` に `role`・`operator`・`busy_label`（欠けている・知らない値の扱いは -protocol-modules §1.1。`name` は形に合わなければ名前無し）。`decode_ceiling`（`t: "ceiling"`）。`state_encode`・`state_decode` に `owner_name`・`owner_operator`・`homed`・`modules`（配列）・`ceiling.from`・`arm`（**中身はすべて `null`**。-protocol-modules §3）。**`module` は消す**
-  - `lift_controller`: 接続ごとに `role`・`operator`・`busy_label` を持つ。`on_hello` は、**同じ名前の別の接続があれば、その接続番号を返して呼び出し側に閉じさせる**（名前無しは置き換えない）。`observe` の接続の `hold`・`release` は捨てる。**距離計を持つ接続ごとに、最後の天井の値（`hold`・`ceiling` のどちらから来たものでも）と受け取った時刻を持つ。**持ち主が**距離計を持たない上部モジュール**のときは、その値を `ceiling_check` に渡す（2 台以上なら近い方。無ければ `MISSING` で `CEILING_STALE`）。昇降部の画面・物理ボタンは今のまま使わない。`kMaxConns` を `LIFT_UI_CLIENTS_MAX`・`LIFT_MODULE_MAX_CONN` と物理ボタンが入る数にする
+  - `lift_controller`: 接続ごとに `role`・`operator`・`busy_label` を持つ。`on_hello` は、**同じ名前の別の接続があれば、その接続番号を返して呼び出し側に閉じさせる**（名前無しは置き換えない）。`observe` の接続の `hold`・`release` は捨てる。**天井の値の出どころになる接続（`hello` で `ceiling_sensor: true` を明示した `control` の接続だけ。-protocol-modules §2.3）ごとに、最後の天井の値（`hold`・`ceiling` のどちらから来たものでも）と受け取った時刻を持つ。**持ち主が**距離計を持たない上部モジュール**のときは、その値を `ceiling_check` に渡す（2 台以上なら近い方。無ければ `MISSING` で `CEILING_STALE`）。`busy_label` は UTF-8 で 48 バイトを超えたら無しとして扱い、切り詰めない（-protocol-modules §1.1）。昇降部の画面・物理ボタンは今のまま使わない。`kMaxConns` を `LIFT_UI_CLIENTS_MAX`・`LIFT_MODULE_MAX_CONN` と物理ボタンが入る数にする
   - `LiftHal::homed`（`hal.h`・偽の HAL・`hal_esp32` は `EncoderHeight` から）
   - `src/main.cpp`: `/ws/module` の接続が `LIFT_MODULE_MAX_CONN` を超えたら**新しい方をその場で閉じる**。`ws_module.cleanupClients()` に**古い接続を閉じさせない**（上限より大きい値を渡すなど。消えた接続の後始末は続ける）。`on_hello` が返した古い接続を閉じる。`ceiling` を振り分ける。`state` が大きくなるので `LIFT_STATE_TEXT_MAX` を測って直し、[-names.md](DetailedDesign-names.md) の値も直す
   - `lift_core_version` を上げる
@@ -311,6 +311,9 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   9. ※ `fk` が持ち主のとき、`owner_name` が `fk` にならない・`owner_operator` が `auto` にならない
   10. ※ `operator` が欠けた `hello` を `auto` とみなす
   11. `arm.attached` に `false` を出す（`null` でない）
+  12. ※ `hello` を送っていない接続（または `ceiling_sensor` が欠けた `hello` の接続）の `ceiling`（`NO_ECHO`）で、カメラモジュールが繋がっていないのに `fk` の上昇を許す
+  13. ※ `observe` の接続・`ceiling_sensor: false` の接続の `ceiling` を、`fk` の判定に使う
+  14. `busy_label` を 48 バイトで切り詰める（`a` と日本語 16 文字〈49 バイト〉の `busy_label` で、切ると文字の途中で切れ、`state` に壊れた UTF-8 が載る。無しとして扱えば緑）
 - **実機で管理担当が確かめる**（`WP-LIFTUI-03` の `lift_probe` と `WP-CAM-10` が揃ってから）: カメラモジュールと `lift_probe` 2 本（`fk`・`ss` を名乗る）で繋ぎ、`fk` の上昇がカメラモジュールの天井で止まる／カメラモジュールの電源を落とすと `fk` の上昇が `CEILING_STALE` で止まる／同じ名前で繋ぎ直すと古い方が閉じる／上限を超えた接続が閉じられ、カメラモジュールは切れない／`state` の `modules` に繋いだものが並ぶ
 
 ### `WP-LIFT-14` 目標の高さへの移動（`goto`）
