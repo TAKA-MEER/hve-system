@@ -38,7 +38,7 @@
 | `H-V12` | `ENC_PPR` は 360 で確定・`LIFT_UM_PER_COUNT` は設計値 26（2026-10-25。`WP-LIFT-09` で反映）。残りは `WP-MEAS-01` で全行程を測って直すことと、巻き太りのずれ（2026-10-27 に約 300 mm から 2 層目に乗り、500 mm で −13 mm と実測。[hardware](DetailedDesign-hardware.md) §1.1） |
 | `H-V8` | 実測（`WP-MEAS-01`・`-04`）で -names.md §5 の仮値を置き換える |
 | `H-A8` | `WP-MEAS-03` |
-| `H-M3`（2026-11-01 に改めた）・spec [Spec-module.md](../spec/Spec-module.md) §1〜§5 | 複数の上部モジュール・状態を読むだけの接続・目標の高さへの移動・どの上部モジュールが操作しているか・測定機構・距離計を持たない上部モジュールの天井。**案は [-protocol-modules.md](DetailedDesign-protocol-modules.md)（2026-11-05。fk-system の確認待ち）**。確かめが済んだら作業パケットに切る |
+| `H-M3`（2026-11-01 に改めた）・spec [Spec-module.md](../spec/Spec-module.md) §1〜§5 | 複数の上部モジュール・状態を読むだけの接続・目標の高さへの移動・どの上部モジュールが操作しているか・測定機構・距離計を持たない上部モジュールの天井。**案は [-protocol-modules.md](DetailedDesign-protocol-modules.md)（2026-11-05。fk-system は確かめ済み・ss-system の確認待ち）**。確かめが済んだら作業パケットに切る |
 | `H-V6` | `WP-MEAS-02`（UnitV2 で。spec では「簡単な動作確認で問題なし」） |
 | `H-V5`・`H-X5` | MG996R のピッチの可動域（`pitch_*_deg`・`PITCH_*_DEG`） |
 

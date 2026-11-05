@@ -27,7 +27,7 @@
 | **[DetailedDesign.md](DetailedDesign.md)** | **本体。**設計方針・全体構成・安全の取り決めの落とし方・部分ごとの設計・段階 | 初版 |
 | [DetailedDesign-names.md](DetailedDesign-names.md) | **名前辞書・仮値の一覧。**この文書に無い名前を実装で作ってはいけない | 初版 |
 | [DetailedDesign-protocol.md](DetailedDesign-protocol.md) | 通信・周期・メッセージ・設定 API・UART | 初版 |
-| [DetailedDesign-protocol-modules.md](DetailedDesign-protocol-modules.md) | 上部モジュールの複数対応（fk-system・ss-system が繋ぐ口） | **案**（2026-11-05。fk-system の確認待ち） |
+| [DetailedDesign-protocol-modules.md](DetailedDesign-protocol-modules.md) | 上部モジュールの複数対応（fk-system・ss-system が繋ぐ口） | **案**（2026-11-05。fk-system は確かめ済み・ss-system の確認待ち） |
 | [DetailedDesign-hardware.md](DetailedDesign-hardware.md) | 機器・ピン（多くが仮）・電源・**UnitV2 で要確認のこと** | 初版 |
 | [DetailedDesign-packets.md](DetailedDesign-packets.md) | **作業パケットと受け入れ条件** | 初版 |
 | [DetailedDesign-open.md](DetailedDesign-open.md) | **ユーザー判断待ちの提案**・未確定・申し送り・レビュー指摘管理表 | 初版 |

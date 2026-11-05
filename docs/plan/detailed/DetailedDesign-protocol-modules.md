@@ -1,7 +1,7 @@
 # 通信 — 上部モジュールの複数対応（案）
 
 [DetailedDesign-protocol.md](DetailedDesign-protocol.md) §2（昇降部の WS）を、spec の 2026-11-01 以降の決まりに合わせて広げる案。
-**状態: 案（2026-11-05。fk-system の確認待ち）。実装はまだ。**いまの実物は [-protocol.md](DetailedDesign-protocol.md) §2.1・§2.2 のまま（上部モジュールは 1 台の前提）。
+**状態: 案（2026-11-05）。fk-system は確かめ済み（§6。同日）、ss-system の確認待ち。実装はまだ。**いまの実物は [-protocol.md](DetailedDesign-protocol.md) §2.1・§2.2 のまま（上部モジュールは 1 台の前提）。
 
 - 口の名前と形は本システムが書き、fk-system・ss-system が確かめる（spec [Spec-module.md](../spec/Spec-module.md) §1。2026-11-05 ユーザー決定）。
 - 入力は spec [Spec-module.md](../spec/Spec-module.md) §1〜§5（複数の上部モジュール・状態を読むだけの接続・目標の高さへの移動・どの上部モジュールが操作しているか・測定機構）と [Spec-safety.md](../spec/Spec-safety.md) §2。
@@ -114,7 +114,7 @@
  "modules":[{"name":"hve-cam","role":"control","operator":"human","ceiling_sensor":true,"busy_label":null,"ip":"192.168.5.23","fw":"0.2.0"},
             {"name":"fk","role":"control","operator":"auto","ceiling_sensor":false,"busy_label":"測定操作中","ip":"192.168.5.10","fw":"0.1.0"}],
  "goto":{"by":"fk","press":21,"target_mm":1200,"status":"MOVING","reason":"NONE"},
- "arm":{"attached":false,"link":null,"confirm":null,"out":null,"drum":null}}
+ "arm":{"attached":null,"link":null,"confirm":null,"out":null,"drum":null}}
 ```
 
 | フィールド | 値 |
@@ -126,7 +126,7 @@
 | `ceiling.from` | 判定に使った天井の値を送ってきた上部モジュールの `name`（spec §3「どの上部モジュールから来たか」） |
 | **`modules`** | 繋がっている接続の一覧（`observe` を含む）。**今の `module`（1 つ）を置き換える** |
 | **`goto`** | 最後の `goto`。`by`（送った接続の `name`）・`press`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason`（止めた理由。§3.1）。次の `goto` まで残す。起動してから無ければ `null` |
-| **`arm`** | 測定機構（spec §3・§5）。`attached`（コネクタを検知しているか）・`link`（アームの制御器と通信できて、腕の角度が古くないか）・`confirm`（コネクタの確認待ち。`null` / `DETACHED` / `ATTACHED`）・`out`（腕が格納位置にないか）・`drum`（ドラムの状態）。**名前だけ決め、`link`・`out`・`drum` の中身はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから。**それまでは `attached: false` で、ほかは `null` |
+| **`arm`** | 測定機構（spec §3・§5）。`attached`（コネクタを検知しているか）・`link`（アームの制御器と通信できて、腕の角度が古くないか）・`confirm`（コネクタの確認待ち。`null` / `DETACHED` / `ATTACHED`）・`out`（腕が格納位置にないか）・`drum`（ドラムの状態）。**名前だけ決め、`link`・`out`・`drum` の中身はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから。**分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**`attached: false` は「付いていないと検知した」ときだけ**で、コネクタの検知を作るまでは `attached` も `null`。`out: false` も「格納位置にあると知らされた」ときだけ。fk-system は `attached: false` を「付いていない」と読んで機体を動かし、`null` は「腕の状態が読めない」として動かさない |
 
 ### 3.1 足す止めた理由（[-names.md](DetailedDesign-names.md) §3 に移す候補）
 
@@ -174,6 +174,8 @@
 | `cleanupClients()` | 超えたら古い方を閉じる | §1.3 |
 
 ## 6. fk-system に確かめてほしいこと
+
+**2026-11-05 に fk-system が確かめた: 7 点とも案のとおり。**fk は `name: "fk"`・`operator: "auto"`・`busy_label`「測定操作中」を名乗り、100 ms ごとに送り、`state` が 500 ms 来なければ「読めない」とみなして繋ぎ直す（その間は th-system にも動く指示を出さない）。下端まで下げるのを待つ上限（暫定 60 s）は fk 側にも持つ。`role: observe` は fk には要らない（作ることに異論なし）。あわせて受けた頼みで、`arm` の欄は分からないとき `null` にした（§3）。ss-system の分（名前 `ss` など）は ss-system に確かめる。
 
 1. 名前 `fk`・`ss` でよいか（ss の分は ss-system にも確かめる）。
 2. `operator`・`busy_label` の形（hve の画面が名前を決め打ちしないため）。
