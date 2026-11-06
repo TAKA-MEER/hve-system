@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 
+import aiohttp
 import pytest
 
 _PROBE_PATH = pathlib.Path(__file__).resolve().parents[1] / "lift_probe.py"
@@ -34,7 +35,8 @@ PERIOD = lift_probe.lift_probe_period_ms
 def test_initial_state_is_stopped_with_near_ceiling():
     """起動直後は止まっていて、天井は近すぎ（上昇しない側）のこと。"""
     state = initial_state()
-    assert state == {"dir": "stop", "speed_mm_s": 40, "press": 0, "ceiling_near": True}
+    assert state == {"dir": "stop", "speed_mm_s": 40, "press": 0, "ceiling_near": True,
+                     "goto_mm": 1000}
 
 
 # --- キーの解釈 ---------------------------------------------------------
@@ -50,6 +52,9 @@ def test_initial_state_is_stopped_with_near_ceiling():
         ("+", "speed_up"),
         ("=", "speed_up"),
         ("-", "speed_down"),
+        ("g", "goto"),
+        ("]", "goto_up"),
+        ("[", "goto_down"),
         ("x", "toggle_sending"),
         ("q", "quit"),
     ],
@@ -109,6 +114,73 @@ def test_build_hello_claims_a_sensor_once():
     hello = build_hello()
     assert hello["t"] == "hello"
     assert hello["ceiling_sensor"] is True
+    assert (hello["name"], hello["role"], hello["operator"]) == ("lift-probe", "control", "human")
+    assert "busy_label" not in hello
+
+
+def test_build_hello_carries_the_given_identity():
+    """名乗りが `hello` に載る（protocol-modules §1.1）。"""
+    hello = build_hello("fk", "control", "auto", False, "測定操作中")
+    assert hello == {"t": "hello", "name": "fk", "role": "control", "operator": "auto",
+                     "ceiling_sensor": False, "busy_label": "測定操作中",
+                     "fw": lift_probe.lift_probe_fw}
+    assert build_hello("v", "observe")["role"] == "observe"
+
+
+def test_hello_from_args_reads_every_identity_option():
+    args = parse_args(["ws://x/ws/module", "--name", "ss", "--role", "control",
+                       "--operator", "auto", "--no-ceiling-sensor",
+                       "--busy-label", "画像認識で操作中"])
+    hello = lift_probe.hello_from_args(args)
+    assert (hello["name"], hello["operator"], hello["ceiling_sensor"], hello["busy_label"]) == (
+        "ss", "auto", False, "画像認識で操作中")
+    default = lift_probe.hello_from_args(parse_args(["ws://x/ws/module"]))
+    assert default == build_hello()
+
+
+def test_bad_identity_options_are_refused():
+    for bad in (["--name", "Bad Name"], ["--name", "x" * 17], ["--name", ""],
+                ["--role", "admin"], ["--operator", "robot"],
+                ["--busy-label", ""], ["--busy-label", "あ" * 17]):
+        with pytest.raises(SystemExit):
+            parse_args(["ws://x/ws/module", *bad])
+
+
+def test_sensorless_hold_and_goto_carry_no_ceiling():
+    state = apply_action(initial_state(), "up")
+    assert "ceiling" not in lift_probe.build_hold(state, ceiling_sensor=False)
+    goto_state = apply_action(initial_state(), "goto")
+    assert "ceiling" not in lift_probe.build_goto(goto_state, ceiling_sensor=False)
+    assert "ceiling" in lift_probe.build_goto(goto_state)
+
+
+def test_goto_message_and_press():
+    state = apply_action(initial_state(), "goto")
+    assert state["press"] == 1 and state["dir"] == "goto"
+    assert apply_action(state, "goto")["press"] == 1  # 続けても増えない
+    goto = lift_probe.build_goto(state)
+    assert goto["t"] == "goto" and goto["press"] == 1 and goto["target_mm"] == 1000
+    assert goto["speed"] == 40 and goto["ceiling"]["status"] == "TOO_NEAR"
+    assert lift_probe.command_message(state)["t"] == "goto"
+    moved = apply_action(apply_action(state, "goto_up"), "goto_up")
+    assert moved["goto_mm"] == 1200 and moved["press"] == 1
+    assert apply_action(moved, "up")["press"] == 2  # goto から up は押し直し
+    assert apply_action(initial_state(goto_mm=50), "goto_down")["goto_mm"] == 0
+
+
+def test_stopped_probe_sends_no_command_but_a_sensor_probe_sends_ceiling():
+    stopped = initial_state()
+    assert lift_probe.command_message(stopped) is None
+    ceiling = lift_probe.build_ceiling(apply_action(stopped, "toggle_ceiling"))
+    assert ceiling == {"t": "ceiling", "status": "MEASURED", "mm": lift_probe.lift_probe_far_mm,
+                       "age_ms": 50}
+
+
+def test_probe_apply_releases_a_goto():
+    probe = lift_probe.Probe("ws://x", initial_state(), True, 100)
+    assert probe.apply("goto")["t"] == "goto"
+    assert probe.apply("stop") == {"t": "release", "press": 1}
+    assert probe.apply("stop") is None
 
 
 def test_build_hold_carries_press_dir_speed_and_ceiling():
@@ -159,13 +231,19 @@ def test_format_state_is_one_line_and_shows_the_numbers():
             "top_detect": False,
             "ceiling": {"status": "MEASURED", "reason": "NONE"},
             "owner": "module",
+            "owner_name": "fk",
+            "owner_operator": "auto",
+            "modules": [{"name": "hve-cam"}, {"name": "fk"}],
+            "goto": {"status": "MOVING"},
+            "arm": {"out": None},
             "ui_clients": 1,
             "cmd_age_ms": 12,
             "fw": "test",
         }
     )
     assert "\n" not in line
-    for want in ("seq=3", "dir=up", "duty=40", "speed=40", "speed_meas=39", "height_mm=1234", "owner=module"):
+    for want in ("seq=3", "dir=up", "duty=40", "speed=40", "speed_meas=39", "height_mm=1234", "owner=module/fk/auto",
+                 "modules=hve-cam,fk", "goto=MOVING"):
         assert want in line
 
 
@@ -184,3 +262,51 @@ def test_default_period_is_the_documented_one():
 def test_stop_sending_flag():
     assert parse_args(["ws://x/ws/module"]).stop_sending is False
     assert parse_args(["ws://x/ws/module", "--stop-sending"]).stop_sending is True
+
+
+# --- 偽の昇降部へ実際に繋ぐ（名乗りが hello に載って届く・天井を貸す）---
+
+
+async def _states(ws, pred, tries=40):
+    import json as _json
+
+    for _ in range(tries):
+        msg = await ws.receive()
+        if msg.type != aiohttp.WSMsgType.TEXT:
+            break
+        state = _json.loads(msg.data)
+        if pred(state):
+            return state
+    raise AssertionError("条件に合う state が来ない")
+
+
+async def test_probe_identity_reaches_the_lift_and_sensor_probe_lends_its_ceiling(
+        aiohttp_client, tmp_path):
+    import asyncio
+
+    import sys as _sys
+    _sys.path.insert(0, str(_PROBE_PATH.parent))
+    import fake_lift_server as fake
+
+    client = await aiohttp_client(fake.make_app(tmp_path, fake.FakeLift()))
+    far = initial_state()
+    far = apply_action(far, "toggle_ceiling")  # 遠い
+    cam = lift_probe.Probe("x", far, True, 20, build_hello("hve-cam", "control", "human", True))
+    fk = lift_probe.Probe("x", apply_action(far, "up"), True, 20,
+                          build_hello("fk", "control", "auto", False, "測定操作中"))
+    ws_cam = await client.ws_connect("/ws/module")
+    ws_fk = await client.ws_connect("/ws/module")
+    tasks = [asyncio.create_task(cam.send_loop(ws_cam)), asyncio.create_task(fk.send_loop(ws_fk))]
+    try:
+        state = await _states(ws_fk, lambda s: s.get("owner_name") == "fk" and s.get("dir") == "up")
+    finally:
+        cam.quitting = fk.quitting = True
+        for task in tasks:
+            task.cancel()
+    names = {m["name"]: m for m in state["modules"]}
+    assert names["fk"]["operator"] == "auto" and names["fk"]["busy_label"] == "測定操作中"
+    assert names["fk"]["ceiling_sensor"] is False
+    assert names["hve-cam"]["operator"] == "human"
+    assert state["owner_operator"] == "auto" and state["ceiling"]["from"] == "hve-cam"
+    await ws_cam.close()
+    await ws_fk.close()
