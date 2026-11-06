@@ -48,7 +48,8 @@ bool validate_lift_settings(const LiftSettings& settings) {
   return axis_ok(settings.up) && axis_ok(settings.down);
 }
 
-bool lift_settings_from_json(const char* text, LiftSettings* out) {
+bool lift_settings_from_json(const char* text, LiftSettings* out,
+                             bool ceiling_standalone_if_missing) {
   *out = LiftSettings();
   if (text == nullptr) {
     return false;
@@ -71,6 +72,15 @@ bool lift_settings_from_json(const char* text, LiftSettings* out) {
     return false;
   }
   parsed.motor_max_pct = obj["motor_max_pct"].as<int>();
+  // ceiling_standalone は欠けていてもよい（古い形・古いカメラモジュールからの PUT）。
+  // あるのに真偽値でなければ誤り
+  if (!obj["ceiling_standalone"].is<JsonVariantConst>()) {
+    parsed.ceiling_standalone = ceiling_standalone_if_missing;
+  } else if (obj["ceiling_standalone"].is<bool>()) {
+    parsed.ceiling_standalone = obj["ceiling_standalone"].as<bool>();
+  } else {
+    return false;
+  }
   if (!validate_lift_settings(parsed)) {
     return false;
   }
@@ -87,9 +97,28 @@ size_t lift_settings_to_json(const LiftSettings& settings, char* out, size_t out
   write_axis(obj, "lift_up", settings.up);
   write_axis(obj, "lift_down", settings.down);
   obj["motor_max_pct"] = settings.motor_max_pct;
+  obj["ceiling_standalone"] = settings.ceiling_standalone;
   const size_t needed = measureJson(doc);
   if (needed >= out_size) {
     return 0;
   }
   return serializeJson(doc, out, out_size);
+}
+
+bool lift_settings_from_put(const char* text, const LiftSettings& current, LiftSettings* out) {
+  return lift_settings_from_json(text, out, current.ceiling_standalone);
+}
+
+LiftSettings lift_settings_from_saved(const char* saved, bool* using_defaults) {
+  LiftSettings parsed;
+  if (saved != nullptr && saved[0] != '\0' && lift_settings_from_json(saved, &parsed)) {
+    if (using_defaults != nullptr) {
+      *using_defaults = false;
+    }
+    return parsed;
+  }
+  if (using_defaults != nullptr) {
+    *using_defaults = true;
+  }
+  return LiftSettings();
 }
