@@ -127,10 +127,13 @@ class FakeEsp32:
             "lift_down": {"min": 10, "max": 60, "init": 30},
             "motor_max_pct": 50,
             "ceiling_standalone": True,
+            "ceiling_margin_mm": 500,
         }
         #: `False` にすると `WP-CAM-11` より前の昇降部のふり（`ceiling_standalone` を持たない・
         #: 送られても保存しない。試験は `lift_settings` からも消す）
         self.supports_ceiling_standalone = True
+        #: `False` にすると `WP-CAM-12` より前の昇降部のふり（`ceiling_margin_mm` を持たない）
+        self.supports_ceiling_margin = True
         #: `PUT` で受け取った本文（何を昇降部へ送ったかを見る）
         self.put_bodies: list[dict[str, Any]] = []
         #: `True` にすると `PUT /api/settings` を `400` で返す（中継の変異 5 用）
@@ -249,6 +252,12 @@ class FakeEsp32:
             if not isinstance(data["ceiling_standalone"], bool):
                 return web.json_response({"errors": ["ceiling_standalone: 真偽値でない"]}, status=400)
             self.lift_settings["ceiling_standalone"] = data["ceiling_standalone"]
+        if self.supports_ceiling_margin and "ceiling_margin_mm" in data:
+            margin = data["ceiling_margin_mm"]
+            if (not isinstance(margin, int) or isinstance(margin, bool)
+                    or not 150 <= margin <= 3000):
+                return web.json_response({"errors": ["ceiling_margin_mm: 範囲外"]}, status=400)
+            self.lift_settings["ceiling_margin_mm"] = margin
         return web.json_response({"settings": self.lift_settings, "using_defaults": False})
 
     async def _send_states(self) -> None:

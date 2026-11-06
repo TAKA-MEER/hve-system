@@ -72,6 +72,15 @@ def test_ceiling_standalone_is_optional_and_boolean():
         assert any("ceiling_standalone" in e for e in errors), bad
 
 
+def test_ceiling_margin_mm_is_optional_and_an_integer_in_range():
+    """`ceiling_margin_mm` は無くてもよい。あれば 150〜3000 の整数（真偽値・小数・文字列は不可）。"""
+    for value in (150, 500, 3000):
+        assert validate_settings({**FULL_DEFAULTS, "ceiling_margin_mm": value}, PARAMS) == []
+    for bad in (149, 3001, 0, -1, 500.5, "500", True, False, None, [], {}):
+        errors = validate_settings({**FULL_DEFAULTS, "ceiling_margin_mm": bad}, PARAMS)
+        assert any("ceiling_margin_mm" in e for e in errors), bad
+
+
 def test_the_defaults_in_the_code_are_the_protocol_examples():
     """実装の既定値が protocol §3 の例の値と食い違わない。"""
     assert settings_mod._DEFAULT_SETTINGS == PROTOCOL_DEFAULTS

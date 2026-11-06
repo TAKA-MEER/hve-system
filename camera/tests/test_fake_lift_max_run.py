@@ -59,3 +59,20 @@ async def test_provisional_names_max_run_pct() -> None:
     provisional = lift.latest_state()["provisional"]
     assert "LIFT_MAX_RUN_PCT" in provisional
     assert [n for n in provisional if "MAX_RUN" in n] == ["LIFT_MAX_RUN_PCT"]
+
+
+async def test_ceiling_verdict_uses_the_margin_setting() -> None:
+    """天井の判定は固定の 500 ではなく設定 `ceiling_margin_mm` を使う（以下・超えるの境）。"""
+    clock = ManualClock(1000.0)
+    lift = FakeLift(clock)
+    for margin, mm, expected in ((500, 500, "CEILING_NEAR"), (500, 501, "NONE"),
+                                 (1500, 1500, "CEILING_NEAR"), (1500, 1501, "NONE"),
+                                 (150, 200, "NONE")):
+        lift.set_ceiling_margin_mm(margin)
+        await lift.send_hold(direction="up", speed=30, press=1, ceiling_status="MEASURED",
+                             ceiling_mm=mm, ceiling_age_ms=0)
+        clock.advance(100)
+        lift._step(clock.now_ms)
+        assert lift.latest_state()["ceiling"]["reason"] == expected, (margin, mm)
+        assert (lift.latest_state()["reason"] == "CEILING_NEAR") == (expected == "CEILING_NEAR")
+    assert "CEILING_MARGIN_MM" not in lift.latest_state()["provisional"]
