@@ -9,6 +9,8 @@
 // 2. 押し始めごとに press が 1 増える（増やさなければ古い hold と区別できない）
 // 3. 押したままページを閉じると、向こう側から見て止まる（OWNER_GONE）
 // 4. 設定で不正値（下限 > 上限）を入れると PUT を出さず、サーバーの値も変わらない
+// 5. 上部モジュールが名乗った busy_label が「持ち主」に出る・繋がっているものが一覧に並ぶ・
+//    arm.out が true のときだけ「腕が出ています」が出る（render の呼び出し側を縛る）
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -252,6 +254,54 @@ test('4 下限 > 上限は保存されない（PUT を出さない・サーバ�
     body: JSON.stringify({...before.settings, lift_up: {min: 70, max: 60, init: 30}}),
   });
   assert.equal(forced.status, 400, 'サーバーが 400 を返す');
+});
+
+/* --- 5. 名乗り・一覧・腕の表示 ------------------------------------------------ */
+test('5 持ち主に busy_label・一覧に繋いだ全部・腕は true のときだけ', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, arm: {out: null}});
+  const open = (hello, hold) => new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://${new URL(BASE).host}/ws/module`);
+    ws.addEventListener('error', reject);
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify(hello));
+      if (hold) {
+        const msg = JSON.stringify({t: 'hold', press: 1, dir: 'stop', speed: 40});
+        ws.send(msg);
+        ws.timer = setInterval(() => ws.send(msg), 100);
+      }
+      resolve(ws);
+    });
+  });
+  const sockets = [
+    await open({t: 'hello', name: 'hve-cam', role: 'control', operator: 'human', ceiling_sensor: true}),
+    await open({t: 'hello', name: 'ss', role: 'control', operator: 'auto', ceiling_sensor: false,
+      busy_label: '画像認識で操作中'}, true),
+    await open({t: 'hello', name: 'viewer', role: 'observe', operator: 'auto', ceiling_sensor: false}),
+  ];
+  const {page, errors, cleanup} = await openScreen(browser);
+  const text = (id) => page.evaluate((i) => document.getElementById(i).textContent, id);
+  try {
+    await page.waitForFunction(() => document.getElementById('stOwner').textContent === '画像認識で操作中',
+      null, {timeout: 3000});
+    const list = await text('stModule');
+    for (const want of ['hve-cam', 'ss', 'viewer', '127.0.0.1', '自動', '人', '状態のみ']) {
+      assert.ok(list.includes(want), `一覧に ${want} が無い（${list}）`);
+    }
+    assert.match(await text('bClients'), /上部 3/, '上の帯の上部モジュールの数');
+    // arm.out が null の間は出ない。false でも出ない。true で出る
+    assert.equal(await page.locator('#armNote.show').count(), 0, 'null で腕が出ています');
+    await postFake({arm: {out: false}});
+    await page.waitForTimeout(3 * STATE_MS);
+    assert.equal(await page.locator('#armNote.show').count(), 0, 'false で腕が出ています');
+    await postFake({arm: {out: true}});
+    await page.waitForFunction(() => document.getElementById('armNote').textContent === '腕が出ています',
+      null, {timeout: 3000});
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    for (const ws of sockets) { clearInterval(ws.timer); ws.close(); }
+    await postFake({arm: {out: null}});
+    await cleanup();
+  }
 });
 
 (async () => {

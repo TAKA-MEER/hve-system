@@ -453,3 +453,415 @@ def test_max_run_allows_the_opposite_direction():
 def test_provisional_names_max_run_pct():
     assert "LIFT_MAX_RUN_PCT" in fake.PROVISIONAL
     assert [n for n in fake.PROVISIONAL if "MAX_RUN" in n] == ["LIFT_MAX_RUN_PCT"]
+
+
+# --- 複数の上部モジュール（protocol-modules §1〜§4。WP-LIFTUI-03）---
+
+
+def hello_of(name=None, role=None, operator=None, sensor=None, busy=None) -> dict:
+    body: dict = {"t": "hello"}
+    for key, value in (("name", name), ("role", role), ("operator", operator),
+                       ("ceiling_sensor", sensor), ("busy_label", busy)):
+        if value is not None:
+            body[key] = value
+    return body
+
+
+def named_conn(lift: FakeLift, **hello) -> int:
+    conn = lift.add_conn("module", "192.168.5.9")
+    assert lift.on_hello(conn, "module", hello_of(**hello))
+    return conn
+
+
+def go(lift: FakeLift, conn: int, now: int, press=1, direction="up", speed=40, ceiling=None):
+    hold = decode_hold(hold_text(press=press, direction=direction, speed=speed, ceiling=ceiling), now)
+    assert hold is not None
+    lift.on_hold(conn, "module", hold, now)
+
+
+def test_decode_hello_reads_the_new_fields():
+    ok, info = fake.decode_hello(hello_of("fk", "control", "auto", False, "測定操作中"))
+    assert ok
+    assert (info["name"], info["role"], info["operator"], info["busy_label"]) == (
+        "fk", "control", "auto", "測定操作中")
+    assert info["has_sensor"] is False and info["explicit_sensor"] is False
+
+
+def test_decode_hello_defaults_lean_to_the_safe_side():
+    _ok, info = fake.decode_hello({"t": "hello"})
+    assert (info["role"], info["operator"], info["has_sensor"]) == ("control", "human", True)
+    assert info["explicit_sensor"] is False  # 名乗っていない天井は他の接続に貸さない
+    _ok, info = fake.decode_hello(hello_of(role="admin", operator="robot", name="Bad Name"))
+    assert info["role"] == "observe" and info["operator"] == "human" and info["name"] == ""
+
+
+def test_busy_label_over_48_bytes_or_empty_is_dropped_not_truncated():
+    assert fake.decode_hello(hello_of(busy="あ" * 16))[1]["busy_label"] == "あ" * 16  # 48 バイト
+    assert fake.decode_hello(hello_of(busy="あ" * 17))[1]["busy_label"] is None
+    assert fake.decode_hello(hello_of(busy=""))[1]["busy_label"] is None
+
+
+def test_state_lists_all_modules_and_names_the_owner():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", operator="human", sensor=True)
+    fk = named_conn(lift, name="fk", operator="auto", sensor=False, busy="測定操作中")
+    state = lift.step(1000)
+    assert [m["name"] for m in state["modules"]] == ["hve-cam", "fk"]
+    assert state["modules"][1]["busy_label"] == "測定操作中"
+    assert state["modules"][1]["ip"] == "192.168.5.9"
+    assert "module" not in state
+    assert state["arm"] == {"attached": None, "link": None, "confirm": None,
+                            "out": None, "drum": None}
+    go(lift, cam, 1000, ceiling=FAR)
+    state = lift.step(1050)
+    assert (state["owner"], state["owner_name"], state["owner_operator"]) == (
+        "module", "hve-cam", "human")
+    go(lift, fk, 1100, ceiling=None)
+    state = lift.step(1150)
+    assert (state["owner_name"], state["owner_operator"]) == ("fk", "auto")
+
+
+def test_same_name_replaces_the_old_connection_and_stops_the_owner():
+    lift = FakeLift()
+    old = named_conn(lift, name="hve-cam", sensor=True)
+    go(lift, old, 1000, ceiling=FAR)
+    assert lift.step(1050)["dir"] == "up"
+    named_conn(lift, name="hve-cam", sensor=True)
+    assert lift.replaced == [old]
+    state = lift.step(1100)
+    assert state["reason"] == "OWNER_GONE" and state["dir"] == "stop"
+    assert [m["name"] for m in state["modules"]] == ["hve-cam"]
+
+
+def test_anonymous_connections_are_not_replaced():
+    lift = FakeLift()
+    named_conn(lift)
+    named_conn(lift)
+    assert lift.replaced == []
+    assert len(lift.step(1000)["modules"]) == 2
+
+
+def test_second_hello_cannot_change_role_or_name():
+    lift = FakeLift()
+    conn = named_conn(lift, name="fk", role="control", sensor=False)
+    lift.on_hello(conn, "module", hello_of(name="other", role="observe", sensor=True))
+    state = lift.step(1000)
+    assert state["modules"][0]["name"] == "fk" and state["modules"][0]["role"] == "control"
+
+
+def test_observe_connection_cannot_command():
+    lift = FakeLift()
+    conn = named_conn(lift, name="viewer", role="observe", sensor=True)
+    go(lift, conn, 1000, ceiling=FAR)
+    assert lift.step(1050)["dir"] == "stop"
+    lift.on_goto(conn, "module", fake.decode_goto(
+        {"t": "goto", "press": 2, "target_mm": 1000, "speed": 40, "ceiling": FAR}, 1100), 1100)
+    state = lift.step(1150)
+    assert state["dir"] == "stop" and state["goto"] is None
+    assert state["modules"][0]["role"] == "observe"  # 一覧には出る
+
+
+# --- 距離計を持たない上部モジュールの天井（§2.3・§2.4）---
+
+
+def test_module_without_sensor_cannot_go_up_when_no_source_is_connected():
+    lift = FakeLift()
+    fk = named_conn(lift, name="fk", operator="auto", sensor=False)
+    go(lift, fk, 1000)
+    state = lift.step(1050)
+    assert state["dir"] == "stop" and state["reason"] == "CEILING_STALE"
+
+
+def test_module_without_sensor_uses_the_sensor_modules_ceiling():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    fk = named_conn(lift, name="fk", operator="auto", sensor=False)
+    lift.on_ceiling(cam, dict(FAR), 1000)
+    go(lift, fk, 1000)
+    state = lift.step(1050)
+    assert state["dir"] == "up"
+    assert state["ceiling"]["from"] == "hve-cam" and state["ceiling"]["used"] is True
+    lift.on_ceiling(cam, dict(NEAR), 1100)
+    go(lift, fk, 1100)
+    state = lift.step(1150)
+    assert state["dir"] == "stop" and state["reason"] == "CEILING_NEAR"
+    # 下降は天井で止めない
+    go(lift, fk, 1200, press=2, direction="down")
+    assert lift.step(1250)["dir"] == "down"
+
+
+def test_module_without_sensor_stops_when_the_sensor_value_goes_stale():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    fk = named_conn(lift, name="fk", sensor=False)
+    lift.on_ceiling(cam, dict(FAR), 1000)
+    go(lift, fk, 1000)
+    assert lift.step(1050)["dir"] == "up"
+    go(lift, fk, 1000 + fake.CEILING_STALE_MS + 100)
+    state = lift.step(1000 + fake.CEILING_STALE_MS + 150)
+    assert state["reason"] == "CEILING_STALE" and state["dir"] == "stop"
+
+
+def test_read_error_from_the_source_stops_the_other_module():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    fk = named_conn(lift, name="fk", sensor=False)
+    lift.on_ceiling(cam, {"status": "READ_ERROR", "age_ms": 10}, 1000)
+    go(lift, fk, 1000)
+    assert lift.step(1050)["reason"] == "CEILING_STALE"
+
+
+def test_unnamed_sensor_claim_is_not_a_ceiling_source():
+    """`hello` を送らない・`ceiling_sensor` を明示しない・observe の接続の値は貸さない。"""
+    lift = FakeLift()
+    fk = named_conn(lift, name="fk", sensor=False)
+    silent = lift.add_conn("module")  # hello 無し
+    implicit = named_conn(lift, name="implicit")  # ceiling_sensor が欠けている
+    viewer = named_conn(lift, name="viewer", role="observe", sensor=True)
+    for conn in (silent, implicit, viewer):
+        lift.on_ceiling(conn, dict(FAR), 1000)
+    go(lift, fk, 1000)
+    assert lift.step(1050)["reason"] == "CEILING_STALE"
+
+
+def test_ceiling_from_a_module_that_says_no_sensor_is_discarded():
+    lift = FakeLift()
+    liar = named_conn(lift, name="liar", sensor=False)
+    fk = named_conn(lift, name="fk", sensor=False)
+    lift.on_ceiling(liar, dict(FAR), 1000)
+    go(lift, fk, 1000)
+    assert lift.step(1050)["reason"] == "CEILING_STALE"
+
+
+def test_ceiling_carried_by_hold_also_updates_the_source():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    fk = named_conn(lift, name="fk", sensor=False)
+    go(lift, cam, 1000, ceiling=FAR)
+    lift.on_release(cam, 1)
+    go(lift, fk, 1050)
+    assert lift.step(1100)["dir"] == "up"
+
+
+def test_nearest_of_two_sources_is_used():
+    lift = FakeLift()
+    a = named_conn(lift, name="cam-a", sensor=True)
+    b = named_conn(lift, name="cam-b", sensor=True)
+    fk = named_conn(lift, name="fk", sensor=False)
+    lift.on_ceiling(a, dict(FAR), 1000)
+    lift.on_ceiling(b, dict(NEAR), 1000)
+    go(lift, fk, 1000)
+    assert lift.step(1050)["reason"] == "CEILING_NEAR"
+
+
+def test_ui_still_does_not_use_the_ceiling_in_this_packet():
+    """画面の単体の操作は今のまま天井を使わない（§2.5 は WP-LIFTUI-04）。"""
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, dict(NEAR), 1000)
+    ui = lift.add_conn("ui")
+    lift.on_hold(ui, "ui", decode_hold(hold_text(), 1000), 1000)
+    assert lift.step(1050)["dir"] == "up"
+
+
+# --- goto（§2.2）---
+
+
+def goto_msg(press=1, target=900, speed=40, ceiling=None):
+    body = {"t": "goto", "press": press, "target_mm": target, "speed": speed}
+    if ceiling is not None:
+        body["ceiling"] = ceiling
+    return body
+
+
+def send_goto(lift, conn, now, **kw):
+    goto = fake.decode_goto(goto_msg(**kw), now)
+    assert goto is not None
+    lift.on_goto(conn, "module", goto, now)
+
+
+def test_goto_moves_to_the_target_and_arrives_without_restarting():
+    lift = FakeLift()
+    lift.height_mm = 800
+    ss = named_conn(lift, name="ss", operator="auto", sensor=True)
+    lift.step(1000)
+    now = 1000
+    send_goto(lift, ss, now, target=830, ceiling=FAR)
+    state = lift.step(now + 50)
+    assert state["dir"] == "up" and state["goto"]["status"] == "MOVING"
+    assert state["goto"]["by"] == "ss" and state["goto"]["target_mm"] == 830
+    for _ in range(40):
+        now += 100
+        send_goto(lift, ss, now, target=830, ceiling=FAR)
+        state = lift.step(now)
+        if state["goto"]["status"] == "ARRIVED":
+            break
+    assert state["goto"]["status"] == "ARRIVED" and state["goto"]["reason"] == "NONE"
+    assert state["dir"] == "stop" and state["reason"] == "ARRIVED"
+    assert abs(state["height_mm"] - 830) <= fake.LIFT_GOTO_TOL_MM
+    # 同じ press の goto では動き出さない。新しい press なら動く
+    send_goto(lift, ss, now + 100, target=1200, ceiling=FAR)
+    assert lift.step(now + 150)["dir"] == "stop"
+    send_goto(lift, ss, now + 200, press=2, target=1200, ceiling=FAR)
+    assert lift.step(now + 250)["dir"] == "up"
+
+
+def test_goto_goes_down_to_a_lower_target():
+    lift = FakeLift()
+    lift.height_mm = 800
+    ss = named_conn(lift, name="ss", sensor=True)
+    send_goto(lift, ss, 1000, target=500, ceiling=FAR)
+    assert lift.step(1050)["dir"] == "down"
+
+
+def test_goto_refuses_unknown_height_and_out_of_range_targets():
+    lift = FakeLift()
+    ss = named_conn(lift, name="ss", sensor=True)
+    send_goto(lift, ss, 1000, target=-5, ceiling=FAR)
+    state = lift.step(1050)
+    assert state["dir"] == "stop" and state["goto"]["status"] == "NOT_ARRIVED"
+    assert state["goto"]["reason"] == "TARGET_RANGE"
+    send_goto(lift, ss, 1100, press=2, target=fake.LIFT_TOP_MM + 1, ceiling=FAR)
+    assert lift.step(1150)["goto"]["reason"] == "TARGET_RANGE"
+    lift.height_ok = False
+    send_goto(lift, ss, 1200, press=3, target=900, ceiling=FAR)
+    state = lift.step(1250)
+    assert state["dir"] == "stop" and state["goto"]["reason"] == "HEIGHT_UNKNOWN"
+
+
+def test_goto_up_obeys_the_ceiling_like_hold():
+    lift = FakeLift()
+    lift.height_mm = 800
+    ss = named_conn(lift, name="ss", sensor=True)
+    send_goto(lift, ss, 1000, target=1200, ceiling=NEAR)
+    state = lift.step(1050)
+    assert state["dir"] == "stop" and state["reason"] == "CEILING_NEAR"
+    assert state["goto"]["status"] == "NOT_ARRIVED" and state["goto"]["reason"] == "CEILING_NEAR"
+
+
+def test_goto_of_a_module_without_sensor_uses_the_source():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    ss = named_conn(lift, name="ss", sensor=False)
+    send_goto(lift, ss, 1000, target=1200)
+    assert lift.step(1050)["reason"] == "CEILING_STALE"
+    lift.on_ceiling(cam, dict(FAR), 1100)
+    send_goto(lift, ss, 1100, target=1200)
+    assert lift.step(1150)["dir"] == "up"
+
+
+def test_goto_is_preempted_by_a_newer_press_from_someone_else():
+    lift = FakeLift()
+    ss = named_conn(lift, name="ss", sensor=True)
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    send_goto(lift, ss, 1000, target=1500, ceiling=FAR)
+    assert lift.step(1050)["goto"]["status"] == "MOVING"
+    go(lift, cam, 1100, ceiling=FAR, direction="down")
+    state = lift.step(1150)
+    assert state["goto"]["status"] == "NOT_ARRIVED" and state["goto"]["reason"] == "PREEMPTED"
+    assert state["owner_name"] == "hve-cam"
+
+
+def test_goto_release_and_timeout_report_not_arrived():
+    lift = FakeLift()
+    ss = named_conn(lift, name="ss", sensor=True)
+    send_goto(lift, ss, 1000, target=1500, ceiling=FAR)
+    lift.step(1050)
+    lift.on_release(ss, 1)
+    state = lift.step(1100)
+    assert state["goto"]["status"] == "NOT_ARRIVED" and state["goto"]["reason"] == "CMD_STOP"
+    send_goto(lift, ss, 1200, press=2, target=1500, ceiling=FAR)
+    lift.step(1250)
+    state = lift.step(1200 + fake.LIFT_CMD_TIMEOUT_MS + 10)
+    assert state["goto"]["reason"] == "CMD_TIMEOUT"
+
+
+def test_goto_with_broken_ceiling_is_kept_and_stops_as_missing():
+    lift = FakeLift()
+    ss = named_conn(lift, name="ss", sensor=True)
+    goto = fake.decode_goto(goto_msg(ceiling={"status": "MEASURED", "age_ms": 5}), 1000)
+    assert goto is not None and goto["has_ceiling"] is False
+    lift.on_goto(ss, "module", goto, 1000)
+    assert lift.step(1050)["reason"] == "CEILING_STALE"
+
+
+def test_decode_goto_drops_unreadable_messages():
+    assert fake.decode_goto({"t": "goto", "press": 1, "speed": 40}, 0) is None
+    assert fake.decode_goto({"t": "goto", "press": 1, "target_mm": "x", "speed": 40}, 0) is None
+    assert fake.decode_goto({"t": "goto", "press": True, "target_mm": 1, "speed": 40}, 0) is None
+
+
+# --- WS の端 ---
+
+
+async def recv_state(ws, pred, tries=30):
+    for _ in range(tries):
+        msg = await ws.receive()
+        if msg.type != WSMsgType.TEXT:
+            return None
+        state = json.loads(msg.data)
+        if pred(state):
+            return state
+    raise AssertionError("条件に合う state が来ない")
+
+
+async def test_ws_ceiling_message_lets_a_sensorless_module_go_up(aiohttp_client, tmp_path):
+    client = await aiohttp_client(fake.make_app(tmp_path, FakeLift()))
+    cam = await client.ws_connect("/ws/module")
+    fk = await client.ws_connect("/ws/module")
+    await cam.send_str(json.dumps(hello_of("hve-cam", "control", "human", True)))
+    await fk.send_str(json.dumps(hello_of("fk", "control", "auto", False, "測定操作中")))
+    await fk.send_str(json.dumps(hold_text(ceiling=None)))
+    state = await recv_state(fk, lambda s: s.get("owner_name") == "fk")
+    assert state["reason"] == "CEILING_STALE"
+    await cam.send_str(json.dumps({"t": "ceiling", **FAR}))
+    await fk.send_str(json.dumps(hold_text(press=2, ceiling=None)))
+    state = await recv_state(fk, lambda s: s.get("dir") == "up")
+    assert state["owner_name"] == "fk" and state["ceiling"]["from"] == "hve-cam"
+    assert [m["name"] for m in state["modules"]] == ["hve-cam", "fk"]
+    await cam.close()
+    await fk.close()
+
+
+async def test_ws_same_name_closes_the_old_connection(aiohttp_client, tmp_path):
+    client = await aiohttp_client(fake.make_app(tmp_path, FakeLift()))
+    old = await client.ws_connect("/ws/module")
+    await old.send_str(json.dumps(hello_of("fk", sensor=False)))
+    await recv_state(old, lambda s: len(s["modules"]) == 1)
+    new = await client.ws_connect("/ws/module")
+    await new.send_str(json.dumps(hello_of("fk", sensor=False)))
+    for _ in range(30):
+        msg = await old.receive()
+        if msg.type != WSMsgType.TEXT:
+            break
+    else:
+        raise AssertionError("古い接続が閉じない")
+    state = await recv_state(new, lambda s: len(s["modules"]) == 1)
+    assert state["modules"][0]["name"] == "fk"
+    await new.close()
+
+
+async def test_ws_over_the_connection_limit_is_closed_without_closing_the_old(aiohttp_client, tmp_path):
+    client = await aiohttp_client(fake.make_app(tmp_path, FakeLift()))
+    first = await client.ws_connect("/ws/module")
+    others = [await client.ws_connect("/ws/module") for _ in range(fake.LIFT_MODULE_MAX_CONN - 1)]
+    extra = await client.ws_connect("/ws/module")
+    msg = await extra.receive()
+    assert msg.type != WSMsgType.TEXT  # 新しい接続が閉じられる
+    state = await recv_state(first, lambda s: len(s["modules"]) == fake.LIFT_MODULE_MAX_CONN)
+    assert state is not None
+    for ws in [first, *others]:
+        await ws.close()
+
+
+async def test_ws_goto_over_websocket(aiohttp_client, tmp_path):
+    lift = FakeLift()
+    lift.height_mm = 800
+    client = await aiohttp_client(fake.make_app(tmp_path, lift))
+    ws = await client.ws_connect("/ws/module")
+    await ws.send_str(json.dumps(hello_of("ss", "control", "auto", True, "画像認識で操作中")))
+    await ws.send_str(json.dumps(goto_msg(target=1200, ceiling=FAR)))
+    state = await recv_state(ws, lambda s: s.get("goto") is not None)
+    assert state["goto"]["by"] == "ss" and state["dir"] == "up"
+    assert state["modules"][0]["busy_label"] == "画像認識で操作中"
+    await ws.close()
