@@ -370,7 +370,9 @@ void test_state_encode_contains_v2_fields() {
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"homed\":true"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"from\":\"hve-cam\""));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"provisional\":["));
-  TEST_ASSERT_NOT_NULL(std::strstr(json, "CEILING_MARGIN_MM"));
+  // CEILING_MARGIN_MM は設定で変えられる値になったので仮値の一覧から外れた（2026-11-06）
+  TEST_ASSERT_NULL(std::strstr(json, "CEILING_MARGIN_MM"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "CEILING_STALE_MS"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "LIFT_MAX_RUN_PCT"));
   const std::string expected_fw = std::string("\"fw\":\"") + lift_core_version() + "\"";
   TEST_ASSERT_NOT_NULL(std::strstr(json, expected_fw.c_str()));

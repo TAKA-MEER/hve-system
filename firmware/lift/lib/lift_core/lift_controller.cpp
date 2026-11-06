@@ -143,7 +143,7 @@ const LiftController::ConnInfo* LiftController::pick_source(uint32_t now_ms,
     if (fresh_only && ceiling_is_stale(info.ceiling, now_ms)) {
       continue;
     }
-    const CeilingVerdict verdict = ceiling_check(info.ceiling, now_ms, true);
+    const CeilingVerdict verdict = ceiling_check(info.ceiling, now_ms, true, ceiling_margin_mm_);
     int key = 0;
     if (verdict.ok) {
       key = info.ceiling.status == CeilingStatus::MEASURED ? info.ceiling.mm : INT_MAX - 1;
@@ -315,9 +315,12 @@ void LiftController::set_motor_max_pct(int pct) {
 
 void LiftController::set_ceiling_standalone(bool enabled) { ceiling_standalone_ = enabled; }
 
+void LiftController::set_ceiling_margin_mm(int mm) { ceiling_margin_mm_ = mm; }
+
 void LiftController::apply_settings(const LiftSettings& settings) {
   set_motor_max_pct(settings.motor_max_pct);
   set_ceiling_standalone(settings.ceiling_standalone);
+  set_ceiling_margin_mm(settings.ceiling_margin_mm);
 }
 
 LiftState LiftController::step(uint32_t now_ms) {
@@ -399,6 +402,7 @@ LiftState LiftController::step(uint32_t now_ms) {
   in.owner_empty_reason = idle_reason_;
   in.dir = cmd_dir;
   in.speed_mm_s = owner_cmd_.speed_mm_s;
+  in.ceiling_margin_mm = ceiling_margin_mm_;
   in.stalled = stalled_;
   // hello が hold のあとに届いても、その時点の値を向き先で使う
   const bool owner_has_sensor = has_owner ? sensor_of(owner.id, owner.kind) : false;
@@ -539,7 +543,8 @@ LiftState LiftController::step(uint32_t now_ms) {
     state_.ceiling_age_ms = age < 0 ? 0u : static_cast<uint32_t>(age);
     if (has_owner_cmd_) {
       const CeilingVerdict verdict = ceiling_check(
-          in.ceiling, now_ms, has_owner ? (owner_has_sensor || uses_source) : false);
+          in.ceiling, now_ms, has_owner ? (owner_has_sensor || uses_source) : false,
+          ceiling_margin_mm_);
       state_.ceiling_ok = verdict.ok;
       state_.ceiling_reason = verdict.reason;
     } else {

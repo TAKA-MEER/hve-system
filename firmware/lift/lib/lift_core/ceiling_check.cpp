@@ -16,7 +16,7 @@ bool ceiling_is_stale(const CeilingReport& report, uint32_t now_ms) {
 }
 
 CeilingVerdict ceiling_check(const CeilingReport& report, uint32_t now_ms,
-                             bool connection_has_sensor) {
+                             bool connection_has_sensor, int margin_mm) {
   // 距離計を持たない接続（/ws/ui・hello で ceiling_sensor: false）の命令には
   // 天井の値を使わない（DetailedDesign.md §3.1・spec #4c）
   if (!connection_has_sensor) {
@@ -35,7 +35,7 @@ CeilingVerdict ceiling_check(const CeilingReport& report, uint32_t now_ms,
 
   switch (report.status) {
     case CeilingStatus::MEASURED:
-      if (report.mm <= CEILING_MARGIN_MM) {
+      if (report.mm <= margin_mm) {
         CeilingVerdict verdict;
         verdict.ok = false;
         verdict.reason = StopReason::CEILING_NEAR;
