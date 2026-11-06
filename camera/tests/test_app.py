@@ -462,6 +462,60 @@ async def test_get_settings_merges_lift_settings(rig: Rig) -> None:
     assert body["settings"]["motor_max_pct"] == 50
 
 
+async def test_get_settings_carries_the_lift_ceiling_standalone(rig: Rig) -> None:
+    """昇降部の `ceiling_standalone` を `GET` に載せる（落とさない）。"""
+    assert rig.client is not None and rig.esp32 is not None
+    for value in (True, False):
+        rig.esp32.lift_settings["ceiling_standalone"] = value
+        body = await (await rig.client.get("/api/settings")).json()
+        assert body["settings"]["ceiling_standalone"] is value
+
+
+async def test_get_settings_works_with_a_lift_that_lacks_ceiling_standalone(rig: Rig) -> None:
+    """このパケットより前の昇降部（`ceiling_standalone` が無い）でも設定画面が開ける。"""
+    assert rig.client is not None and rig.esp32 is not None
+    rig.esp32.supports_ceiling_standalone = False
+    del rig.esp32.lift_settings["ceiling_standalone"]
+    response = await rig.client.get("/api/settings")
+    assert response.status == 200
+    body = await response.json()
+    assert "ceiling_standalone" not in body["settings"]
+    assert body["settings"]["motor_max_pct"] == 50
+
+
+async def test_put_settings_relays_ceiling_standalone_to_the_lift_only(rig: Rig) -> None:
+    """`ceiling_standalone` は昇降部へ中継し、自分のファイルには保存しない。"""
+    assert rig.client is not None and rig.esp32 is not None
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_standalone": False}
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    assert rig.esp32.put_bodies[-1]["ceiling_standalone"] is False, "昇降部へ送る"
+    assert rig.esp32.lift_settings["ceiling_standalone"] is False
+    assert (await response.json())["settings"]["ceiling_standalone"] is False
+    assert "ceiling_standalone" not in Path(f"{SETTINGS_DIR}/settings-test.json").read_text(encoding="utf-8"), "自分では保存しない"
+
+
+async def test_put_settings_without_ceiling_standalone_does_not_send_it(rig: Rig) -> None:
+    """本文に無ければ昇降部へも送らない（昇降部は今の値を保つ。`true` に戻さない）。"""
+    assert rig.client is not None and rig.esp32 is not None
+    rig.esp32.lift_settings["ceiling_standalone"] = False
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50}
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    assert "ceiling_standalone" not in rig.esp32.put_bodies[-1]
+    assert rig.esp32.lift_settings["ceiling_standalone"] is False
+
+
+@pytest.mark.parametrize("value", ["yes", 1, None])
+async def test_put_settings_rejects_a_non_boolean_ceiling_standalone(rig: Rig, value: Any) -> None:
+    assert rig.client is not None and rig.esp32 is not None
+    body = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_standalone": value}
+    response = await rig.client.put("/api/settings", json=body)
+    assert response.status == 400
+    assert any("ceiling_standalone" in e for e in (await response.json())["errors"])
+    assert not rig.esp32.put_bodies, "昇降部へ送らない"
+
+
 async def test_get_settings_is_503_when_the_lift_is_gone(loop) -> None:
     """昇降部に繋がらないときは `503`（protocol §4）。"""
     r = Rig()
@@ -721,6 +775,19 @@ async def test_fake_mode_settings_relay(fake_rig: Rig) -> None:
     assert rig.camera._fake_lift_settings["motor_max_pct"] == 30  # noqa: SLF001
 
 
+async def test_fake_mode_ceiling_standalone_relay(fake_rig: Rig) -> None:
+    """偽物のモードでも `ceiling_standalone` を持つ。欠けた `PUT` は今の値を保つ。"""
+    rig = fake_rig
+    assert rig.client is not None
+    assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_standalone"] is True
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_standalone": False}
+    assert (await rig.client.put("/api/settings", json=good)).status == 200
+    assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_standalone"] is False
+    del good["ceiling_standalone"]
+    assert (await rig.client.put("/api/settings", json=good)).status == 200
+    assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_standalone"] is False
+
+
 async def test_fake_lift_settings_are_validated_like_the_real_ones(fake_rig: Rig) -> None:
     """偽物の昇降部の設定も同じ規則で検証する（101・欠けは 400）。"""
     rig = fake_rig
@@ -795,3 +862,24 @@ async def test_index_is_served_after_wp_ui_01(loop) -> None:
 async def test_state_is_json_serialisable(rig: Rig) -> None:
     state = await rig.pump()
     assert json.loads(json.dumps(state, ensure_ascii=False))["t"] == "state"
+
+
+async def test_fake_mode_screen_owner_and_standalone_follow(fake_rig: Rig) -> None:
+    """偽物のモード: `screen_owner` で持ち主と standalone を作れ、設定を切にすると `SETTING_OFF` に追従する。"""
+    rig = fake_rig
+    assert rig.client is not None
+    lift = rig.camera._fake_lift()  # noqa: SLF001
+    response = await rig.client.post(
+        "/api/fake", json={"screen_owner": {"owner": "ui", "standalone": "NO_SOURCE"}}
+    )
+    assert response.status == 200
+    bad = await rig.client.post("/api/fake", json={"screen_owner": {"owner": "x"}})
+    assert bad.status == 400
+    lift._step(lift._clock())  # noqa: SLF001
+    state = lift.latest_state()
+    assert state["owner"] == "ui" and state["ceiling"]["standalone"] == "NO_SOURCE"
+    await rig.client.post("/api/fake", json={"screen_owner": None})
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_standalone": False}
+    assert (await rig.client.put("/api/settings", json=good)).status == 200
+    lift._step(lift._clock())  # noqa: SLF001
+    assert lift.latest_state()["ceiling"]["standalone"] == "SETTING_OFF"

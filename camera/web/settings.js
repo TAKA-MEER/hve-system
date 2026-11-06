@@ -23,6 +23,10 @@ const SETTING_MOTOR = {
   key: 'motor_max_pct', name: 'モータへの出力の上限', unit: '%',
   abs_low: 10, abs_high: 100, step: 1,
 };
+/* 単体の操作でも天井で止めるか（spec Spec-ui.md §2.2。真偽値。昇降部が持つ）。
+   昇降部が対応していない（GET に無い）ときは欄を無効にし、PUT にも載せない */
+const SETTING_CEILING = {key: 'ceiling_standalone', name: '単体の操作でも天井で止める'};
+const CEILING_UNSUPPORTED_TEXT = '昇降部が対応していません';
 /* 設定画面の添え書き（spec §2.1 の「モータの定格電圧 ÷ 電源電圧」） */
 const MOTOR_NOTE = 'モータの定格電圧 ÷ 電源電圧（12 V のモータを 24 V で回すなら 50）';
 
@@ -92,6 +96,11 @@ function validateSettingsDraft(draft) {
       text: `${SETTING_MOTOR.name}: ${SETTING_MOTOR.abs_low}〜${SETTING_MOTOR.abs_high} ${SETTING_MOTOR.unit} の整数にしてください`,
     });
   }
+  // 単体の操作でも天井で止めるか（無くてもよい。あれば真偽値）
+  const standalone = draft[SETTING_CEILING.key];
+  if (standalone !== undefined && typeof standalone !== 'boolean') {
+    errors.push({key: SETTING_CEILING.key, text: `${SETTING_CEILING.name}: 入り切りにしてください`});
+  }
   return {ok: errors.length === 0, errors};
 }
 
@@ -133,6 +142,18 @@ function provisionalText(names) {
   return `仮値で動作中（実測で確定するまで。ここでは変えられない）: ${body}`;
 }
 
+/* 「単体の操作でも天井で止める」の行。対応していない昇降部では無効にして理由を出す */
+function standaloneRowHtml() {
+  const supported = typeof settings_draft[SETTING_CEILING.key] === 'boolean';
+  const state = supported
+    ? (settings_draft[SETTING_CEILING.key] ? ' checked' : '')
+    : ' disabled';
+  const note = supported ? '' : `（${CEILING_UNSUPPORTED_TEXT}）`;
+  return `<tr data-key="${SETTING_CEILING.key}"><td colspan="5" class="wrapcell stwide">` +
+    `<label><input type="checkbox" data-axis="${SETTING_CEILING.key}"${state}>` +
+    `${SETTING_CEILING.name}${note}</label></td></tr>`;
+}
+
 /* 設定画面を開く。現在の設定を下書きにしてから出す。 */
 function openSettingsOverlay(settings, provisional) {
   settings_draft = {};
@@ -146,6 +167,9 @@ function openSettingsOverlay(settings, provisional) {
   }
   const motorCurrent = (settings || {})[SETTING_MOTOR.key];
   settings_draft[SETTING_MOTOR.key] = motorCurrent === undefined ? '' : motorCurrent;
+  // 昇降部が対応していなければ `undefined` のまま（欄を無効にし、PUT に載せない）
+  const standaloneCurrent = (settings || {})[SETTING_CEILING.key];
+  if (typeof standaloneCurrent === 'boolean') settings_draft[SETTING_CEILING.key] = standaloneCurrent;
 
   const body = document.getElementById('stBody');
   body.innerHTML = SETTING_AXES.map((axis) => {
@@ -160,9 +184,17 @@ function openSettingsOverlay(settings, provisional) {
   }).join('') +
     `<tr data-key="${SETTING_MOTOR.key}"><td class="wrapcell">${SETTING_MOTOR.name}</td>` +
     `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_MOTOR.key}"` +
-    ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>`;
+    ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>` +
+    standaloneRowHtml();
 
   body.querySelectorAll('input').forEach((input) => {
+    if (input.dataset.axis === SETTING_CEILING.key) {
+      input.addEventListener('change', () => {
+        settings_draft[SETTING_CEILING.key] = input.checked;
+        validateSettingsInputs();
+      });
+      return;
+    }
     input.addEventListener('input', () => {
       if (input.dataset.axis === SETTING_MOTOR.key) {
         settings_draft[SETTING_MOTOR.key] = input.value;
@@ -184,20 +216,33 @@ function closeSettingsOverlay() {
   document.getElementById('settings').classList.remove('show');
 }
 
-/* 保存する。検証に通らなければ PUT を送らない。400 のときはサーバーの理由をそのまま出す。 */
-async function saveSettingsOverlay() {
-  if (!validateSettingsInputs()) return;
-
+/**
+ * 下書きから `PUT /api/settings` の本文を作る。
+ * `ceiling_standalone` は昇降部が対応している（下書きが真偽値を持つ）ときだけ載せる
+ * （対応していない昇降部へ送らない。昇降部は無ければ今の値を保つ）。
+ */
+function buildSettingsPayload(draft) {
   const payload = {};
   for (const axis of SETTING_AXES) {
-    const values = settings_draft[axis.key];
+    const values = draft[axis.key];
     payload[axis.key] = {
       min: Number(values.min),
       max: Number(values.max),
       init: Number(values.init),
     };
   }
-  payload[SETTING_MOTOR.key] = Number(settings_draft[SETTING_MOTOR.key]);
+  payload[SETTING_MOTOR.key] = Number(draft[SETTING_MOTOR.key]);
+  if (typeof draft[SETTING_CEILING.key] === 'boolean') {
+    payload[SETTING_CEILING.key] = draft[SETTING_CEILING.key];
+  }
+  return payload;
+}
+
+/* 保存する。検証に通らなければ PUT を送らない。400 のときはサーバーの理由をそのまま出す。 */
+async function saveSettingsOverlay() {
+  if (!validateSettingsInputs()) return;
+
+  const payload = buildSettingsPayload(settings_draft);
 
   const save = document.getElementById('stSave');
   save.disabled = true;
@@ -243,5 +288,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module === 'object' && module !== null) {
-  module.exports = {SETTING_AXES, SETTING_MOTOR, MOTOR_NOTE, validateSettingsDraft, settingsErrorText};
+  module.exports = {SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, MOTOR_NOTE, buildSettingsPayload, validateSettingsDraft, settingsErrorText};
 }

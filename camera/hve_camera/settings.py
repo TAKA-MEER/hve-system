@@ -8,6 +8,8 @@
 - `lift_*` は 0〜`LIFT_SPEED_ABS_MAX_MM_S`（100）[mm/s] の整数・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
 - `motor_max_pct`（`PUT` では必須。10〜100 の整数。真偽値は不可。spec
   [Spec-ui.md](../../docs/plan/spec/Spec-ui.md) §2.1）
+- `ceiling_standalone`（**無くてもよい**。あれば真偽値。単体の操作でも天井で止めるか。spec §2.2。
+  無いのは `WP-CAM-11` より前の呼び出し・昇降部が対応していないとき。昇降部は無ければ今の値を保つ）
 
 **ピッチ・ヨーはここで保存、昇降は昇降部へ中継する**（v2）。
 そのため読み書きは軸を絞れる（`axes`）。`PUT` の検証は 4 軸＋`motor_max_pct` のまま。
@@ -67,6 +69,9 @@ MOTOR_MAX_PCT_DEFAULT = 50
 MOTOR_MAX_PCT_MIN = 10
 MOTOR_MAX_PCT_MAX = 100
 
+#: 単体の操作でも天井で止めるか（真偽値）の項目名（protocol §3。spec Spec-ui §2.2）。
+CEILING_STANDALONE_KEY = "ceiling_standalone"
+
 
 def validate_settings(
     data: Any,
@@ -107,6 +112,7 @@ def validate_settings(
 
     if set(axes) != set(OWN_AXES):
         _check_motor_max_pct(data, errors)
+        _check_ceiling_standalone(data, errors)
 
     return errors
 
@@ -235,6 +241,14 @@ def _check_motor_max_pct(data: Mapping[str, Any], errors: list[str]) -> None:
         errors.append(
             f"{MOTOR_MAX_PCT_KEY}: {MOTOR_MAX_PCT_MIN}〜{MOTOR_MAX_PCT_MAX} の整数にしてください"
         )
+
+
+def _check_ceiling_standalone(data: Mapping[str, Any], errors: list[str]) -> None:
+    """`ceiling_standalone`（真偽値。**無くてもよい**）を見る。0・1・"yes" などは通さない。"""
+    if CEILING_STANDALONE_KEY not in data:
+        return
+    if not isinstance(data[CEILING_STANDALONE_KEY], bool):
+        errors.append(f"{CEILING_STANDALONE_KEY}: 真偽値にしてください")
 
 
 def _unlink_quietly(name: str | os.PathLike[str]) -> None:

@@ -23,6 +23,7 @@ const states = [
   {name: '通常', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}},
   {name: '天井の値なし', fake: {ceiling: {status: 'READ_ERROR'}, height_mm: 1200, arm_out: null, other_owner: null}},
   {name: '設定画面', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true},
+  {name: '設定画面（昇降部が ceiling_standalone に対応していない）', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true, legacy_lift: true},
   {name: '静止画の重ね表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, snapshot: true},
   // 別の上部モジュールが持ち主（長い busy_label）＋腕が出ている（WP-CAM-10）
   {name: '別の上部モジュール操作中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: true, other_owner: {name: 'ss', busy_label: '画像認識で操作中（長い表示の確認）'}}},
@@ -88,6 +89,16 @@ const MEASURE = () => {
     for (const state of states) {
       await setFake(state.fake);
       const page = await browser.newPage({viewport: {width: w, height: h}});
+      if (state.legacy_lift) {
+        // 古い昇降部のふり: GET /api/settings から ceiling_standalone を消す
+        await page.route('**/api/settings', async (route) => {
+          if (route.request().method() !== 'GET') return route.continue();
+          const response = await route.fetch();
+          const body = await response.json();
+          delete body.settings.ceiling_standalone;
+          return route.fulfill({response, json: body});
+        });
+      }
       await page.goto(base + '/');
       // state が来て、表示が落ち着くまで待つ
       await page.waitForFunction(() => document.getElementById('bClients').textContent.trim() !== '端末 —', null, {timeout: 5000});
