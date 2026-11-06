@@ -24,7 +24,7 @@
   着いたあと同じ `press` では動き出さない。安全の判定は `hold` と同じ
 
 `POST /api/fake` は試験用の裏口（names §4）。`height_mm`・`bottom`・
-`height_ok`・`stall` と、持ち主がいないときに表示する天井（`ceiling`）を変えられる。
+`height_ok`・`homed`・`stall`・`arm`（`state.arm` の各欄。null・真偽値・文字列）と、持ち主がいないときに表示する天井（`ceiling`）を変えられる。
 `stall` が真の間は動かそうとすると `ENCODER_STALL` で止まる。
 `height_ok` が偽の間は動いていれば `HEIGHT_UNKNOWN` を出すが止めない（表示だけ）。
 """

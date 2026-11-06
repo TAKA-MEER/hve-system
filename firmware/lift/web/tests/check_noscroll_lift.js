@@ -5,7 +5,7 @@
 //
 // camera/web/tests/check_noscroll_web.js を昇降部の画面向けに作り直したもの。
 // 状態の作り方は POST /api/fake で偽物を操作する。
-// 17 の画面サイズ × 3 状態（通常・下端・設定画面）で、
+// 17 の画面サイズ × 4 状態（通常・下端・設定画面・上部モジュール 3 つと腕）で、
 // ページ・要素のスクロールと中身のはみ出し、操作部品の画面外・カード外・小さすぎを検出する。
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -23,7 +23,36 @@ const states = [
   {name: '通常', fake: {height_mm: 1200, bottom: false, ceiling: {status: 'MEASURED', mm: 2200}}},
   {name: '下端', fake: {height_mm: 0, bottom: true, ceiling: {status: 'MEASURED', mm: 2200}}},
   {name: '設定画面', fake: {height_mm: 1200, bottom: false, ceiling: {status: 'MEASURED', mm: 2200}}, settings: true},
+  // 上部モジュールを 3 つ繋ぎ（一覧が長くなる）、1 つが持ち主として長い busy_label を出し、腕が出ている
+  {name: '上部3つ・腕', fake: {height_mm: 1200, bottom: false, ceiling: {status: 'MEASURED', mm: 2200}, arm: {out: true}},
+    modules: [
+      {hello: {t: 'hello', name: 'hve-cam', role: 'control', operator: 'human', ceiling_sensor: true}},
+      {hello: {t: 'hello', name: 'viewer', role: 'observe', operator: 'auto', ceiling_sensor: false}},
+      {hello: {t: 'hello', name: 'ss', role: 'control', operator: 'auto', ceiling_sensor: false,
+        busy_label: '画像認識で操作中の長い表示'}, owner: true},
+    ]},
 ];
+
+// 上部モジュールとして繋ぐ（画面の持ち主・一覧の表示を出す）。owner は stop の hold を送り続けて持ち主になる
+async function connectModules(modules) {
+  const sockets = [];
+  for (const m of modules) {
+    const ws = new WebSocket(`ws://${new URL(base).host}/ws/module`);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve);
+      ws.addEventListener('error', () => reject(new Error('/ws/module に繋げない')));
+    });
+    ws.send(JSON.stringify(m.hello));
+    if (m.owner) {
+      const hold = JSON.stringify({t: 'hold', press: 1, dir: 'stop', speed: 40});
+      ws.send(hold);
+      const timer = setInterval(() => ws.send(hold), 100);
+      ws.addEventListener('close', () => clearInterval(timer));
+    }
+    sockets.push(ws);
+  }
+  return sockets;
+}
 
 async function setFake(fake) {
   const response = await fetch(`${base}/api/fake`, {
@@ -84,6 +113,7 @@ const MEASURE = () => {
   for (const [w, h] of sizes) {
     for (const state of states) {
       await setFake(state.fake);
+      const sockets = await connectModules(state.modules || []);
       const page = await browser.newPage({viewport: {width: w, height: h}});
       await page.goto(base + '/');
       // state が来て、表示が落ち着くまで待つ
@@ -100,6 +130,7 @@ const MEASURE = () => {
         console.log(`NG ${w}x${h} ${state.name}: ${[...new Set(bad)].join(', ')}`);
       }
       await page.close();
+      for (const ws of sockets) ws.close();
     }
   }
   console.log(`${n - fail}/${n} OK`);
