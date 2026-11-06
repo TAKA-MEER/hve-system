@@ -516,6 +516,60 @@ async def test_put_settings_rejects_a_non_boolean_ceiling_standalone(rig: Rig, v
     assert not rig.esp32.put_bodies, "昇降部へ送らない"
 
 
+async def test_get_settings_carries_the_lift_ceiling_margin_mm(rig: Rig) -> None:
+    """昇降部の `ceiling_margin_mm` を `GET` に載せる（落とさない）。"""
+    assert rig.client is not None and rig.esp32 is not None
+    for value in (500, 1200):
+        rig.esp32.lift_settings["ceiling_margin_mm"] = value
+        body = await (await rig.client.get("/api/settings")).json()
+        assert body["settings"]["ceiling_margin_mm"] == value
+
+
+async def test_get_settings_works_with_a_lift_that_lacks_ceiling_margin_mm(rig: Rig) -> None:
+    """`ceiling_margin_mm` が無い昇降部でも設定画面が開ける（欄は載せない）。"""
+    assert rig.client is not None and rig.esp32 is not None
+    rig.esp32.supports_ceiling_margin = False
+    del rig.esp32.lift_settings["ceiling_margin_mm"]
+    response = await rig.client.get("/api/settings")
+    assert response.status == 200
+    body = await response.json()
+    assert "ceiling_margin_mm" not in body["settings"]
+    assert body["settings"]["ceiling_standalone"] is True
+
+
+async def test_put_settings_relays_ceiling_margin_mm_to_the_lift_only(rig: Rig) -> None:
+    """`ceiling_margin_mm` は昇降部へ中継し、自分のファイルには保存しない。"""
+    assert rig.client is not None and rig.esp32 is not None
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_margin_mm": 800}
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    assert rig.esp32.put_bodies[-1]["ceiling_margin_mm"] == 800, "昇降部へ送る"
+    assert rig.esp32.lift_settings["ceiling_margin_mm"] == 800
+    assert (await response.json())["settings"]["ceiling_margin_mm"] == 800
+    assert "ceiling_margin_mm" not in Path(f"{SETTINGS_DIR}/settings-test.json").read_text(encoding="utf-8"), "自分では保存しない"
+
+
+async def test_put_settings_without_ceiling_margin_mm_does_not_send_it(rig: Rig) -> None:
+    """本文に無ければ昇降部へも送らない（昇降部は今の値を保つ。500 に戻さない）。"""
+    assert rig.client is not None and rig.esp32 is not None
+    rig.esp32.lift_settings["ceiling_margin_mm"] = 900
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50}
+    response = await rig.client.put("/api/settings", json=good)
+    assert response.status == 200
+    assert "ceiling_margin_mm" not in rig.esp32.put_bodies[-1]
+    assert rig.esp32.lift_settings["ceiling_margin_mm"] == 900
+
+
+@pytest.mark.parametrize("value", [149, 3001, 500.5, "500", True, None])
+async def test_put_settings_rejects_a_bad_ceiling_margin_mm(rig: Rig, value: Any) -> None:
+    assert rig.client is not None and rig.esp32 is not None
+    body = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_margin_mm": value}
+    response = await rig.client.put("/api/settings", json=body)
+    assert response.status == 400
+    assert any("ceiling_margin_mm" in e for e in (await response.json())["errors"])
+    assert not rig.esp32.put_bodies, "昇降部へ送らない"
+
+
 async def test_get_settings_is_503_when_the_lift_is_gone(loop) -> None:
     """昇降部に繋がらないときは `503`（protocol §4）。"""
     r = Rig()
@@ -786,6 +840,27 @@ async def test_fake_mode_ceiling_standalone_relay(fake_rig: Rig) -> None:
     del good["ceiling_standalone"]
     assert (await rig.client.put("/api/settings", json=good)).status == 200
     assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_standalone"] is False
+
+
+async def test_fake_mode_ceiling_margin_mm_relay_and_verdict(fake_rig: Rig) -> None:
+    """偽物のモードでも `ceiling_margin_mm` を持ち（既定 500）、欠けた `PUT` は今の値を保ち、判定に効く。"""
+    rig = fake_rig
+    assert rig.client is not None
+    lift = rig.camera._fake_lift()  # noqa: SLF001
+    assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_margin_mm"] == 500
+    await lift.send_ceiling(ceiling_status="MEASURED", ceiling_mm=700, ceiling_age_ms=0)
+    lift._step(lift._clock())  # noqa: SLF001
+    assert lift.latest_state()["ceiling"]["reason"] == "NONE", "700 mm は 500 より遠い"
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_margin_mm": 1000}
+    assert (await rig.client.put("/api/settings", json=good)).status == 200
+    lift._step(lift._clock())  # noqa: SLF001
+    assert lift.latest_state()["ceiling"]["reason"] == "CEILING_NEAR", "設定の値で判定する"
+    del good["ceiling_margin_mm"]
+    assert (await rig.client.put("/api/settings", json=good)).status == 200
+    assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_margin_mm"] == 1000
+    bad = {**good, "ceiling_margin_mm": 149}
+    assert (await rig.client.put("/api/settings", json=bad)).status == 400
+    assert (await (await rig.client.get("/api/settings")).json())["settings"]["ceiling_margin_mm"] == 1000
 
 
 async def test_fake_lift_settings_are_validated_like_the_real_ones(fake_rig: Rig) -> None:

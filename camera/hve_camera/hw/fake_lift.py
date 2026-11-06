@@ -24,22 +24,24 @@ LIFT_TOP_MM = 1800  # 偽物は上端の判定を持たないので、連続駆�
 LIFT_MAX_RUN_PCT = 150  # 連続駆動の上限 = 全行程の何 % か（lift_core の LIFT_MAX_RUN_PCT と同じ）
 LIFT_SPEED_ABS_MAX_MM_S = 100
 LIFT_STATE_PERIOD_MS = 100
-CEILING_MARGIN_MM = 500
+CEILING_MARGIN_MM = 500  # 設定 `ceiling_margin_mm` の既定値（`CEILING_MARGIN_MM_DEFAULT` と同じ）
 CEILING_STALE_MS = 600
 
 Clock = Callable[[], float]
 
 
-def fake_ceiling_verdict(status: str, mm: Optional[int], age_ms: int) -> tuple:
+def fake_ceiling_verdict(
+    status: str, mm: Optional[int], age_ms: int, margin_mm: int = CEILING_MARGIN_MM
+) -> tuple:
     """天井の値 → `(ok, 理由)`。昇降部の `ceiling_check` の真似（§3.2）。
 
     `NO_ECHO`（反射なし）は許し、理由は `OUT_OF_RANGE`。
     """
     if status == "NO_ECHO":
         return True, "OUT_OF_RANGE"
-    if status == "MEASURED" and mm is not None and mm > CEILING_MARGIN_MM and age_ms <= CEILING_STALE_MS:
+    if status == "MEASURED" and mm is not None and mm > margin_mm and age_ms <= CEILING_STALE_MS:
         return True, "NONE"
-    if status == "MEASURED" and mm is not None and mm <= CEILING_MARGIN_MM:
+    if status == "MEASURED" and mm is not None and mm <= margin_mm:
         return False, "CEILING_NEAR"
     if status == "TOO_NEAR":
         return False, "CEILING_NEAR"
@@ -84,6 +86,8 @@ class FakeLift(LiftPort):
         self._standalone_override: Optional[str] = None
         #: 設定 `ceiling_standalone`（偽物の設定を変えたとき `app.py` が入れる）
         self._ceiling_standalone_setting = True
+        #: 設定 `ceiling_margin_mm`（同上。判定の閾値）
+        self._ceiling_margin_mm = CEILING_MARGIN_MM
         #: `arm.out` に出す値（`True`＝腕が出ている・`None`＝分からない）
         self._arm_out: Optional[bool] = None
 
@@ -108,6 +112,10 @@ class FakeLift(LiftPort):
     def set_ceiling_standalone(self, enabled: bool) -> None:
         """設定 `ceiling_standalone`。決め打ちが無ければ、切なら `SETTING_OFF`・入なら `USE` を出す。"""
         self._ceiling_standalone_setting = bool(enabled)
+
+    def set_ceiling_margin_mm(self, margin_mm: int) -> None:
+        """設定 `ceiling_margin_mm`。次の周期から判定の閾値にする。"""
+        self._ceiling_margin_mm = int(margin_mm)
 
     def set_arm_out(self, out: Optional[bool]) -> None:
         self._arm_out = out
@@ -253,6 +261,7 @@ class FakeLift(LiftPort):
                 self._ceiling.get("status", "MISSING"),
                 self._ceiling.get("mm"),
                 int(self._ceiling.get("age_ms", 0)),
+                self._ceiling_margin_mm,
             )
             if not ok:
                 return "stop", 0, reason
@@ -284,6 +293,7 @@ class FakeLift(LiftPort):
             self._ceiling.get("status", "MISSING"),
             self._ceiling.get("mm"),
             int(self._ceiling.get("age_ms", 0)),
+            self._ceiling_margin_mm,
         )
         self._seq += 1
         other = self._other_owner
@@ -355,7 +365,7 @@ class FakeLift(LiftPort):
                 "drum": None,
             },
             "ui_clients": 0,
-            "provisional": ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],
+            "provisional": ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],
             "fw": "fake-0.2.0",
         }
         self._state_at_ms = now

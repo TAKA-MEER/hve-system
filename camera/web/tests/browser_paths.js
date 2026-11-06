@@ -116,7 +116,7 @@ async function openScreen(browser) {
 
 /** 上昇のボタンで押す（pointerdown だけ。離さない） */
 async function pressUp(page) {
-  const box = await page.locator('[data-axis=lift_up]').boundingBox();
+  const box = await page.locator('[data-axis=lift_up]:not(input)').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
 }
@@ -670,6 +670,56 @@ test('14 単体の操作が持ち主で天井を使わないとき、天井の�
     stopKeeping();
     await postFake({screen_owner: null, other_owner: null});
     await putStandalone(true).catch(() => {});
+    await cleanup();
+  }
+});
+
+// 15: 設定画面の「天井の閾値」を保存すると PUT が昇降部（偽物）へ中継され、昇降部の判定が新しい値になる
+//     （WP-CAM-12。画面が送らない・中継しない・判定が固定の 500 のままの変異を、画面から通して縛る）
+test('15 設定画面の天井の閾値を保存すると昇降部へ中継され、判定に効く', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  const stopKeeping = keepCeiling();
+  const watcher = observe();
+  await watcher.opened;
+  const margin = async () => (await (await fetch(`${BASE}/api/settings`)).json()).settings.ceiling_margin_mm;
+  const restore = async () => {
+    const got = await (await fetch(`${BASE}/api/settings`)).json();
+    await fetch(`${BASE}/api/settings`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(Object.assign({}, got.settings, {ceiling_margin_mm: 500})),
+    });
+  };
+  try {
+    await allowUp();
+    assert.equal(await margin(), 500, '前提: 既定は 500');
+    await page.click('#openSettings');
+    await page.waitForSelector('#settings.show');
+    const input = page.locator('#stBody tr[data-key="ceiling_margin_mm"] input');
+    assert.equal(await input.inputValue(), '500', '欄に昇降部の値が出る');
+    // 範囲外は保存できない
+    await input.fill('149');
+    assert.equal(await page.locator('#stSave').isDisabled(), true, '149 は保存できない');
+    await input.fill('3001');
+    assert.equal(await page.locator('#stSave').isDisabled(), true, '3001 は保存できない');
+    // 3000 mm にすると、天井まで 2600 mm でも「近い」で上昇しない
+    await input.fill('3000');
+    assert.equal(await page.locator('#stSave').isDisabled(), false);
+    await page.click('#stSave');
+    await page.waitForSelector('#settings:not(.show)', {state: 'attached', timeout: 3000});
+    assert.equal(await margin(), 3000, '昇降部の値が変わった（中継された）');
+    await pressUp(page);
+    await watcher.waitFor((s) => s.reason === 'CEILING_NEAR', 2000, '設定の値で天井が近いと判定');
+    await page.mouse.up();
+    // 500 に戻すと、同じ 2600 mm で上昇できる
+    await restore();
+    assert.equal(await margin(), 500);
+    await pressUp(page);
+    await watcher.waitFor((s) => s.lift.dir === 'up', 2000, '500 に戻すと上昇できる');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    stopKeeping();
+    watcher.close();
+    await restore().catch(() => {});
     await cleanup();
   }
 });

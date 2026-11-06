@@ -10,6 +10,8 @@
   [Spec-ui.md](../../docs/plan/spec/Spec-ui.md) §2.1）
 - `ceiling_standalone`（**無くてもよい**。あれば真偽値。単体の操作でも天井で止めるか。spec §2.2。
   無いのは `WP-CAM-11` より前の呼び出し・昇降部が対応していないとき。昇降部は無ければ今の値を保つ）
+- `ceiling_margin_mm`（**無くてもよい**。あれば `CEILING_MARGIN_MM_MIN`〜`CEILING_MARGIN_MM_MAX` の整数。
+  天井の閾値。spec §2.3。無いときの扱いは `ceiling_standalone` と同じ）
 
 **ピッチ・ヨーはここで保存、昇降は昇降部へ中継する**（v2）。
 そのため読み書きは軸を絞れる（`axes`）。`PUT` の検証は 4 軸＋`motor_max_pct` のまま。
@@ -72,6 +74,12 @@ MOTOR_MAX_PCT_MAX = 100
 #: 単体の操作でも天井で止めるか（真偽値）の項目名（protocol §3。spec Spec-ui §2.2）。
 CEILING_STANDALONE_KEY = "ceiling_standalone"
 
+#: 天井の閾値 [mm] の項目名・既定値・範囲（protocol §3。spec Spec-ui §2.3。整数のみ）。
+CEILING_MARGIN_MM_KEY = "ceiling_margin_mm"
+CEILING_MARGIN_MM_DEFAULT = 500
+CEILING_MARGIN_MM_MIN = 150
+CEILING_MARGIN_MM_MAX = 3000
+
 
 def validate_settings(
     data: Any,
@@ -113,6 +121,7 @@ def validate_settings(
     if set(axes) != set(OWN_AXES):
         _check_motor_max_pct(data, errors)
         _check_ceiling_standalone(data, errors)
+        _check_ceiling_margin_mm(data, errors)
 
     return errors
 
@@ -249,6 +258,20 @@ def _check_ceiling_standalone(data: Mapping[str, Any], errors: list[str]) -> Non
         return
     if not isinstance(data[CEILING_STANDALONE_KEY], bool):
         errors.append(f"{CEILING_STANDALONE_KEY}: 真偽値にしてください")
+
+
+def _check_ceiling_margin_mm(data: Mapping[str, Any], errors: list[str]) -> None:
+    """`ceiling_margin_mm`（150〜3000 の整数。**無くてもよい**）を見る。真偽値・小数・文字列は通さない。"""
+    if CEILING_MARGIN_MM_KEY not in data:
+        return
+    value = data[CEILING_MARGIN_MM_KEY]
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"{CEILING_MARGIN_MM_KEY}: 整数にしてください")
+        return
+    if not CEILING_MARGIN_MM_MIN <= value <= CEILING_MARGIN_MM_MAX:
+        errors.append(
+            f"{CEILING_MARGIN_MM_KEY}: {CEILING_MARGIN_MM_MIN}〜{CEILING_MARGIN_MM_MAX} mm の整数にしてください"
+        )
 
 
 def _unlink_quietly(name: str | os.PathLike[str]) -> None:
