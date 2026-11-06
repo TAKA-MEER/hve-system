@@ -35,6 +35,16 @@ async function postFake(payload) {
   if (!response.ok) throw new Error(`POST /api/fake が ${response.status}: ${await response.text()}`);
 }
 
+/** 設定の `ceiling_standalone` を替える（昇降部へ中継される。偽物のモードでは偽の昇降設定が変わる） */
+async function putStandalone(value) {
+  const got = await (await fetch(`${BASE}/api/settings`)).json();
+  const body = Object.assign({}, got.settings, {ceiling_standalone: value});
+  const response = await fetch(`${BASE}/api/settings`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`PUT /api/settings が ${response.status}`);
+}
+
 /** 上昇できる状態へそろえる（天井の ok が false のあいだは上昇しない） */
 async function allowUp(height = 1200) {
   await postFake({ceiling: {status: 'MEASURED', mm: 2600}, height_mm: height, bottom: false});
@@ -628,6 +638,38 @@ test('13 静止画は拡大したときだけドラッグでずれ、端を越�
     }
     assert.deepEqual(errors, [], '画面に JavaScript のエラー');
   } finally {
+    await cleanup();
+  }
+});
+
+// 14: 単体の操作（昇降部の画面・物理ボタン）が持ち主で天井を使わないときだけ、天井のバッジに理由が出る
+//     （WP-CAM-11。render の呼び出し側を縛る。純関数の試験では届かない）
+test('14 単体の操作が持ち主で天井を使わないとき、天井のバッジに理由が出る', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  const stopKeeping = keepCeiling();
+  const badge = async () => (await page.locator('#bCeil').innerText()).trim();
+  const waitBadge = (text) => page.waitForFunction(
+    (expected) => document.getElementById('bCeil').textContent.trim() === expected, text, {timeout: 3000});
+  try {
+    await allowUp();
+    await postFake({screen_owner: {owner: 'ui', standalone: 'SETTING_OFF'}});
+    await waitBadge('天井: 使わない（設定が切）');
+    await postFake({screen_owner: {owner: 'button', standalone: 'NO_SOURCE'}});
+    await waitBadge('天井: 使わない（通信なし）');
+    // 使っているとき（USE）は今までの天井の表示のまま
+    await postFake({screen_owner: {owner: 'ui', standalone: 'USE'}});
+    await waitBadge('天井 2600 mm');
+    // 持ち主が上部モジュールのときは、切・通信なしでも出さない
+    //（設定を切にすると偽物の昇降部は SETTING_OFF を出す。持ち主だけ module にする）
+    await putStandalone(false);
+    await postFake({screen_owner: null, other_owner: {name: 'ss', busy_label: '画像認識で操作中'}});
+    await page.waitForTimeout(500);
+    assert.ok(!(await badge()).includes('使わない'), `持ち主が module なのに理由が出た: ${await badge()}`);
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    stopKeeping();
+    await postFake({screen_owner: null, other_owner: null});
+    await putStandalone(true).catch(() => {});
     await cleanup();
   }
 });
