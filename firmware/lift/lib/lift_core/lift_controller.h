@@ -8,6 +8,7 @@
 #include "hal.h"
 #include "lift_arbiter.h"
 #include "lift_decide.h"
+#include "lift_settings.h"
 #include "speed_loop.h"
 
 class LiftController {
@@ -44,6 +45,15 @@ class LiftController {
   // モータへの出力の上限 [%]（Spec-ui §2.1）。tick が SpeedLoop::update に渡す。
   // 動いている最中に変えたら次の周期から効く。範囲外は LIFT_DUTY_ABS_MAX_PCT に丸める
   void set_motor_max_pct(int pct);
+
+  // 単体の操作（昇降部の画面・物理ボタン）でも天井で止めるか（設定 ceiling_standalone。
+  // protocol-modules §2.5）。起動時と PUT /api/settings の成功時に呼ぶ。
+  // 動いている最中に変えたら次の周期から効く。上部モジュールからの命令には効かない
+  void set_ceiling_standalone(bool enabled);
+
+  // 設定をまとめて効かせる（set_motor_max_pct と set_ceiling_standalone）。
+  // main.cpp は起動時と PUT の成功時に、設定の項目を 1 つずつでなくこれを呼ぶ
+  void apply_settings(const LiftSettings& settings);
 
   // 判定して、その結果をモータへ出して、状態を更新する
   LiftState step(uint32_t now_ms);
@@ -93,6 +103,10 @@ class LiftController {
   void remember_ceiling(ConnInfo* info, const CeilingReport& report);
   // 出どころの接続の中で、いちばん厳しい（止める・近い）値を選ぶ。無ければ nullptr
   const ConnInfo* pick_ceiling_source(uint32_t now_ms) const;
+  // 単体の操作で使う出どころ。出どころの接続のうち**新しい**値（ceiling_is_stale でない）の中で
+  // 近い方（止める値 → 近い値）。古いものは無視する。新しい値が 1 つも無ければ nullptr
+  const ConnInfo* pick_fresh_ceiling_source(uint32_t now_ms) const;
+  const ConnInfo* pick_source(uint32_t now_ms, bool fresh_only) const;
   // observe の接続からの命令か（捨てる）
   bool is_observer(int conn_id) const;
 
@@ -117,6 +131,7 @@ class LiftController {
   uint32_t run_at_ms_;  // 積算の起点（直前の step の時刻）
   // 速さの制御（DetailedDesign.md §4.1.2）
   SpeedLoop speed_loop_;
+  bool ceiling_standalone_ = LIFT_CEILING_STANDALONE_DEFAULT;  // set_ceiling_standalone で持たせる
   int motor_max_pct_ = LIFT_MOTOR_MAX_PCT_DEFAULT;  // モータへの出力の上限 [%]。set_motor_max_pct で持たせる
   int last_duty_ = 0;          // 直前にモータへ出したデューティ（#8a の「動かしている」判定用）
   uint32_t loop_at_ms_ = 0;    // SpeedLoop を最後に進めた時刻

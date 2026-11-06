@@ -28,6 +28,13 @@ ConnId module(int id) {
   return conn;
 }
 
+ConnId button(int id) {
+  ConnId conn;
+  conn.id = id;
+  conn.kind = ConnKind::BUTTON;
+  return conn;
+}
+
 HelloMsg hello_with_sensor(bool has_sensor) {
   HelloMsg hello;
   hello.has_sensor = has_sensor;
@@ -1657,16 +1664,337 @@ void test_camera_owner_uses_own_hold_ceiling_and_from() {
   TEST_ASSERT_TRUE(rig.hal.motor_moving());
 }
 
-// 画面・物理ボタンは今のまま天井を使わない（WP-LIFT-15 まで）
-void test_ui_climb_ignores_camera_ceiling() {
+// 設定 ceiling_standalone が false のときは、画面・物理ボタンは天井を使わない（WP-LIFT-12 の
+// 「天井を使わない」を、false の場合の試験に書き換えたもの。WP-LIFT-15）
+void test_ui_and_button_climb_ignore_camera_ceiling_when_setting_is_off() {
   MultiRig rig;
+  rig.ctrl.set_ceiling_standalone(false);
   rig.ctrl.on_hello(module(2), hello_cam());
   rig.ctrl.on_ceiling(module(2), measured(300, 0));
   HoldMsg hold = fk_up(1);
   rig.ctrl.on_hold(ui(1), hold, 0);
-  const LiftState state = rig.ctrl.step(0);
+  LiftState state = rig.ctrl.step(0);
   TEST_ASSERT_TRUE(rig.hal.motor_moving());
   TEST_ASSERT_FALSE(state.ceiling_used);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::SETTING_OFF),
+                        static_cast<int>(state.ceiling_standalone));
+
+  rig.ctrl.on_release(ui(1), 1);
+  rig.ctrl.step(10);
+  rig.ctrl.on_hold(button(9), fk_up(1), 20);
+  rig.hal.set_height(500, true, 20);
+  state = rig.ctrl.step(20);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(2, state.owner_kind);  // button
+  TEST_ASSERT_FALSE(state.ceiling_used);
+}
+
+// --- WP-LIFT-15: 単体の操作でも天井で止める（protocol-modules §2.5）---
+
+struct StandaloneRig : MultiRig {
+  StandaloneRig() { ctrl.on_hello(module(2), hello_cam()); }
+  // 時刻 t に高さを新しくし、conn が press で上昇の hold を送って step する（天井は載せない）
+  LiftState climb(const ConnId& conn, uint32_t t, int press = 1) {
+    hal.set_height(500, true, t);
+    ctrl.on_hold(conn, fk_up(press), t);
+    return ctrl.step(t);
+  }
+};
+
+// 変異 1: 設定が true でカメラモジュールが MEASURED 300 mm を送っている間、ui の上昇が止まらない
+void test_ui_climb_stops_at_camera_ceiling_when_setting_is_on() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  const LiftState state = rig.climb(ui(1), 0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_EQUAL_INT(0, state.owner_kind);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+  TEST_ASSERT_FALSE(state.ceiling_ok);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+  TEST_ASSERT_EQUAL_INT(300, state.ceiling_mm);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::USE),
+                        static_cast<int>(state.ceiling_standalone));
+}
+
+// 変異 2: 同じ条件で物理ボタンの上昇が止まらない
+void test_button_climb_stops_at_camera_ceiling_when_setting_is_on() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  const LiftState state = rig.climb(button(9), 0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_EQUAL_INT(2, state.owner_kind);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+}
+
+void test_standalone_climb_moves_when_camera_ceiling_is_far_and_down_needs_none() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  LiftState state = rig.climb(ui(1), 0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+  TEST_ASSERT_TRUE(state.ceiling_ok);
+  // 下降は天井を見ない
+  rig.ctrl.on_ceiling(module(2), measured(300, 100));
+  rig.hal.set_height(500, true, 100);
+  rig.ctrl.on_hold(ui(1), down_hold(2), 100);
+  state = rig.ctrl.step(100);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(state.dir));
+}
+
+// 変異 3: 設定が false でも天井で止まる
+void test_setting_off_lets_ui_and_button_climb_even_when_ceiling_is_near() {
+  StandaloneRig rig;
+  rig.ctrl.set_ceiling_standalone(false);
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  LiftState state = rig.climb(ui(1), 0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+  rig.ctrl.on_close(1);
+  rig.ctrl.step(10);
+  state = rig.climb(button(9), 20);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+}
+
+// 変異 4: カメラモジュールが繋がっていない・値が古いとき、ui の上昇を CEILING_STALE で止める
+void test_standalone_climb_is_allowed_without_source_or_with_stale_value() {
+  {
+    FakeHal hal;
+    LiftController ctrl(&hal, LIFT_TOP_MM);  // 上部モジュールが 1 つも繋がっていない
+    hal.set_height(500, true, 0);
+    ctrl.on_hold(ui(1), fk_up(1), 0);
+    const LiftState state = ctrl.step(0);
+    TEST_ASSERT_TRUE(hal.motor_moving());
+    assert_reason(StopReason::NONE, state);
+    TEST_ASSERT_FALSE(state.ceiling_used);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                          static_cast<int>(state.ceiling_standalone));
+  }
+  {
+    // 繋がっているが、値が CEILING_STALE_MS（600 ms）より古い（近い値でも使わない）
+    StandaloneRig rig;
+    rig.ctrl.on_ceiling(module(2), measured(300, 0));
+    const LiftState state = rig.climb(ui(1), 601);
+    TEST_ASSERT_TRUE(rig.hal.motor_moving());
+    assert_reason(StopReason::NONE, state);
+    TEST_ASSERT_FALSE(state.ceiling_used);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                          static_cast<int>(state.ceiling_standalone));
+  }
+  {
+    // 送るときの古さ（age_ms）が大きいときも古い
+    StandaloneRig rig;
+    rig.ctrl.on_ceiling(module(2), measured(300, 0, 700));
+    const LiftState state = rig.climb(button(9), 0);
+    TEST_ASSERT_TRUE(rig.hal.motor_moving());
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                          static_cast<int>(state.ceiling_standalone));
+  }
+  {
+    // ちょうど CEILING_STALE_MS までは新しい
+    StandaloneRig rig;
+    rig.ctrl.on_ceiling(module(2), measured(300, 0));
+    const LiftState state = rig.climb(ui(1), 600);
+    TEST_ASSERT_FALSE(rig.hal.motor_moving());
+    assert_reason(StopReason::CEILING_NEAR, state);
+  }
+}
+
+// 変異 5: 上昇の最中に値が古くなっても、前の判定のまま止め続ける（周期ごとに決め直さない）
+void test_standalone_decision_is_remade_every_cycle() {
+  StandaloneRig rig;
+  // 近い値で止まっている。press は同じまま、hold を出し続ける
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  TEST_ASSERT_FALSE(rig.climb(ui(1), 0, 7).dir == LiftDir::UP);
+  TEST_ASSERT_FALSE(rig.climb(ui(1), 300, 7).dir == LiftDir::UP);
+  assert_reason(StopReason::CEILING_NEAR, rig.climb(ui(1), 600, 7));
+  // カメラモジュールが黙って値が古くなる。次の周期から使わず、上昇を許す
+  LiftState state = rig.climb(ui(1), 700, 7);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                        static_cast<int>(state.ceiling_standalone));
+  // 逆に、上昇中に近い値が届いたら次の周期から止める
+  rig.ctrl.on_ceiling(module(2), measured(300, 800));
+  state = rig.climb(ui(1), 800, 7);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+}
+
+// 変異 6: 新しい値が READ_ERROR のとき ui の上昇を許す（通信はできていて距離計が読めない → 止める）
+void test_standalone_climb_stops_with_stale_reason_when_fresh_value_is_read_error() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), ceiling_at(CeilingStatus::READ_ERROR, 0, 0, 0));
+  LiftState state = rig.climb(ui(1), 0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::USE),
+                        static_cast<int>(state.ceiling_standalone));
+  // MISSING（新しいが読めない）も止める
+  rig.ctrl.on_close(1);
+  rig.ctrl.step(10);
+  rig.ctrl.on_ceiling(module(2), ceiling_at(CeilingStatus::MISSING, 0, 0, 20));
+  state = rig.climb(button(9), 20);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+}
+
+void test_standalone_no_echo_and_too_near() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), ceiling_at(CeilingStatus::NO_ECHO, 0, 0, 0));
+  LiftState state = rig.climb(ui(1), 0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StopReason::OUT_OF_RANGE),
+                        static_cast<int>(state.ceiling_reason));
+  rig.ctrl.on_ceiling(module(2), ceiling_at(CeilingStatus::TOO_NEAR, 0, 0, 100));
+  state = rig.climb(ui(1), 100);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+}
+
+// 変異 7: 設定が上部モジュールからの命令に効く（false にすると fk の上昇が天井で止まらない）
+void test_setting_does_not_affect_commands_from_modules() {
+  StandaloneRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.set_ceiling_standalone(false);
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  // 値が古いときは、設定にかかわらず CEILING_STALE で止める（単体の操作と逆）
+  state = rig.fk_step(1000, 2);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+  // 設定が true でも同じ
+  rig.ctrl.set_ceiling_standalone(true);
+  state = rig.fk_step(1100, 3);
+  assert_reason(StopReason::CEILING_STALE, state);
+}
+
+// 変異 11: 出どころが 2 台（古い方・新しい方）のとき、古い方を選ぶ
+void test_standalone_ignores_stale_source_and_uses_fresh_one() {
+  StandaloneRig rig;
+  rig.ctrl.on_hello(module(4), hello_as("hve-cam2", true));
+  // 古い方は近い値・新しい方は遠い値 → 古い方を無視して上昇を許す
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  rig.ctrl.on_ceiling(module(4), measured(1450, 1000));
+  LiftState state = rig.climb(ui(1), 1100);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_EQUAL_STRING("hve-cam2", state.ceiling_from);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::USE),
+                        static_cast<int>(state.ceiling_standalone));
+}
+
+void test_standalone_uses_fresh_near_source_even_if_other_is_stale_and_far() {
+  StandaloneRig rig;
+  rig.ctrl.on_hello(module(4), hello_as("hve-cam2", true));
+  // 古い方は遠い値（または READ_ERROR）・新しい方は MEASURED 300 mm → 新しい方で止める
+  rig.ctrl.on_ceiling(module(2), ceiling_at(CeilingStatus::READ_ERROR, 0, 0, 0));
+  rig.ctrl.on_ceiling(module(4), measured(300, 1000));
+  const LiftState state = rig.climb(button(9), 1100);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_EQUAL_STRING("hve-cam2", state.ceiling_from);
+}
+
+void test_standalone_uses_nearest_of_two_fresh_sources() {
+  StandaloneRig rig;
+  rig.ctrl.on_hello(module(4), hello_as("hve-cam2", true));
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  rig.ctrl.on_ceiling(module(4), measured(300, 0));
+  const LiftState state = rig.climb(ui(1), 100);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_EQUAL_STRING("hve-cam2", state.ceiling_from);
+}
+
+// 変異 10: state.ceiling.standalone（持ち主が誰でも・いなくても毎周期出す）
+void test_state_ceiling_standalone_reports_setting_off_no_source_and_use() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  // 出どころが無い（持ち主もいない）
+  LiftState state = ctrl.step(0);
+  TEST_ASSERT_FALSE(state.has_owner);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                        static_cast<int>(state.ceiling_standalone));
+  // 新しい値が来ると、押す前から USE
+  ctrl.on_hello(module(2), hello_cam());
+  ctrl.on_ceiling(module(2), measured(1450, 10));
+  state = ctrl.step(20);
+  TEST_ASSERT_FALSE(state.has_owner);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::USE),
+                        static_cast<int>(state.ceiling_standalone));
+  // 古くなると NO_SOURCE に戻る
+  state = ctrl.step(700);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                        static_cast<int>(state.ceiling_standalone));
+  // 設定が切なら、出どころの有無に関係なく SETTING_OFF（出どころが無くても NO_SOURCE にならない）
+  ctrl.set_ceiling_standalone(false);
+  state = ctrl.step(710);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::SETTING_OFF),
+                        static_cast<int>(state.ceiling_standalone));
+  ctrl.on_ceiling(module(2), measured(1450, 720));
+  state = ctrl.step(720);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::SETTING_OFF),
+                        static_cast<int>(state.ceiling_standalone));
+  // 持ち主が上部モジュールでも出す
+  ctrl.set_ceiling_standalone(true);
+  ctrl.on_hello(module(3), hello_fk());
+  hal.set_height(500, true, 730);
+  ctrl.on_hold(module(3), fk_up(1), 730);
+  state = ctrl.step(730);
+  TEST_ASSERT_EQUAL_INT(1, state.owner_kind);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::USE),
+                        static_cast<int>(state.ceiling_standalone));
+}
+
+void test_standalone_source_must_be_an_explicit_control_sensor() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  // ceiling_sensor を名乗っていない・observe の接続の値は出どころにならない（§2.3）
+  ctrl.on_hello(module(2), hello_as("watcher", true, ModuleRole::OBSERVE));
+  ctrl.on_ceiling(module(2), measured(300, 0));
+  ctrl.on_hold(ui(1), fk_up(1), 0);
+  const LiftState state = ctrl.step(0);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                        static_cast<int>(state.ceiling_standalone));
+}
+
+// 設定をまとめて効かせる口（main.cpp が起動時と PUT の成功時に呼ぶ）。
+// 変異 12: 起動時に NVS の設定から ceiling_standalone を渡さない
+void test_apply_settings_hands_ceiling_standalone_to_controller() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  LiftSettings settings;
+  settings.ceiling_standalone = false;
+  rig.ctrl.apply_settings(settings);
+  TEST_ASSERT_TRUE(rig.climb(ui(1), 0).dir == LiftDir::UP);
+  rig.ctrl.on_close(1);
+  rig.ctrl.step(10);
+  settings.ceiling_standalone = true;
+  rig.ctrl.apply_settings(settings);
+  assert_reason(StopReason::CEILING_NEAR, rig.climb(ui(1), 20, 2));
+}
+
+// NVS に保存した JSON から読んだ設定が、そのまま LiftController の動きになる（起動時の経路）
+void test_saved_false_makes_ui_climb_ignore_ceiling_after_boot() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  bool using_defaults = true;
+  const char* saved =
+      "{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+      "\"lift_down\":{\"min\":10,\"max\":60,\"init\":30},"
+      "\"motor_max_pct\":50,\"ceiling_standalone\":false}";
+  rig.ctrl.apply_settings(lift_settings_from_saved(saved, &using_defaults));
+  TEST_ASSERT_FALSE(using_defaults);
+  TEST_ASSERT_TRUE(rig.climb(ui(1), 0).dir == LiftDir::UP);
 }
 
 // 接続を何度も繋ぎ直しても hold を受け付け続ける（閉じた接続の番号の欄を使い回す）
@@ -1788,7 +2116,23 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_state_homed_follows_hal);
   RUN_TEST(test_state_ceiling_from_while_idle_follows_ceiling_messages);
   RUN_TEST(test_camera_owner_uses_own_hold_ceiling_and_from);
-  RUN_TEST(test_ui_climb_ignores_camera_ceiling);
+  RUN_TEST(test_ui_and_button_climb_ignore_camera_ceiling_when_setting_is_off);
+  RUN_TEST(test_ui_climb_stops_at_camera_ceiling_when_setting_is_on);
+  RUN_TEST(test_button_climb_stops_at_camera_ceiling_when_setting_is_on);
+  RUN_TEST(test_standalone_climb_moves_when_camera_ceiling_is_far_and_down_needs_none);
+  RUN_TEST(test_setting_off_lets_ui_and_button_climb_even_when_ceiling_is_near);
+  RUN_TEST(test_standalone_climb_is_allowed_without_source_or_with_stale_value);
+  RUN_TEST(test_standalone_decision_is_remade_every_cycle);
+  RUN_TEST(test_standalone_climb_stops_with_stale_reason_when_fresh_value_is_read_error);
+  RUN_TEST(test_standalone_no_echo_and_too_near);
+  RUN_TEST(test_setting_does_not_affect_commands_from_modules);
+  RUN_TEST(test_standalone_ignores_stale_source_and_uses_fresh_one);
+  RUN_TEST(test_standalone_uses_fresh_near_source_even_if_other_is_stale_and_far);
+  RUN_TEST(test_standalone_uses_nearest_of_two_fresh_sources);
+  RUN_TEST(test_state_ceiling_standalone_reports_setting_off_no_source_and_use);
+  RUN_TEST(test_standalone_source_must_be_an_explicit_control_sensor);
+  RUN_TEST(test_apply_settings_hands_ceiling_standalone_to_controller);
+  RUN_TEST(test_saved_false_makes_ui_climb_ignore_ceiling_after_boot);
   RUN_TEST(test_many_reconnects_still_accept_holds);
 
   return UNITY_END();

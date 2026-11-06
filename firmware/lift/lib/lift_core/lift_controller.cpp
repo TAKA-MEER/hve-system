@@ -121,13 +121,26 @@ void LiftController::remember_ceiling(ConnInfo* info, const CeilingReport& repor
 }
 
 const LiftController::ConnInfo* LiftController::pick_ceiling_source(uint32_t now_ms) const {
-  // 厳しい側（止める値 → 近い値）を選ぶ。2 台以上のときの規則は spec H-M5 が未定なので、
-  // 近い方を使う案（protocol-modules §2.4）
+  // 厳しい側（止める値 → 近い値）を選ぶ。古い値も選ぶ（止めるため）。2 台以上のときの規則は
+  // spec H-M5 が未定なので、近い方を使う案（protocol-modules §2.4）
+  return pick_source(now_ms, false);
+}
+
+const LiftController::ConnInfo* LiftController::pick_fresh_ceiling_source(uint32_t now_ms) const {
+  // 単体の操作（§2.5）: 古い値は無視して、新しい値の中で厳しい方を選ぶ
+  return pick_source(now_ms, true);
+}
+
+const LiftController::ConnInfo* LiftController::pick_source(uint32_t now_ms,
+                                                            bool fresh_only) const {
   const ConnInfo* best = nullptr;
   int best_key = INT_MAX;
   for (int i = 0; i < kMaxConns; ++i) {
     const ConnInfo& info = conns_[i];
     if (!is_ceiling_source(info) || !info.has_ceiling) {
+      continue;
+    }
+    if (fresh_only && ceiling_is_stale(info.ceiling, now_ms)) {
       continue;
     }
     const CeilingVerdict verdict = ceiling_check(info.ceiling, now_ms, true);
@@ -300,6 +313,13 @@ void LiftController::set_motor_max_pct(int pct) {
   motor_max_pct_ = pct;
 }
 
+void LiftController::set_ceiling_standalone(bool enabled) { ceiling_standalone_ = enabled; }
+
+void LiftController::apply_settings(const LiftSettings& settings) {
+  set_motor_max_pct(settings.motor_max_pct);
+  set_ceiling_standalone(settings.ceiling_standalone);
+}
+
 LiftState LiftController::step(uint32_t now_ms) {
   arbiter_.tick(now_ms);
   ConnId owner;
@@ -386,9 +406,29 @@ LiftState LiftController::step(uint32_t now_ms) {
   // 値を使う（protocol-modules §2.4）。無い・古いときは MISSING で CEILING_STALE
   const bool borrows_ceiling =
       has_owner && owner.kind == ConnKind::MODULE && !owner_has_sensor;
-  const ConnInfo* ceiling_source =
-      (borrows_ceiling || !has_owner_cmd_) ? pick_ceiling_source(now_ms) : nullptr;
-  if (borrows_ceiling) {
+  // 単体の操作（画面・物理ボタン）の天井（§2.5）。周期ごとに決め直す。
+  // 持ち主が誰でも「いま単体で上げたらどうなるか」を state に出す
+  const ConnInfo* standalone_source = nullptr;
+  if (!ceiling_standalone_) {
+    state_.ceiling_standalone = StandaloneCeiling::SETTING_OFF;
+  } else {
+    standalone_source = pick_fresh_ceiling_source(now_ms);
+    state_.ceiling_standalone =
+        standalone_source != nullptr ? StandaloneCeiling::USE : StandaloneCeiling::NO_SOURCE;
+  }
+  const bool standalone_owner =
+      has_owner && (owner.kind == ConnKind::UI || owner.kind == ConnKind::BUTTON);
+  const bool standalone_use = standalone_owner && standalone_source != nullptr;
+  // 出どころの値で判定している持ち主（距離計を持たない上部モジュール・単体の操作で USE）
+  const bool uses_source = borrows_ceiling || standalone_use;
+  const ConnInfo* ceiling_source = borrows_ceiling ? pick_ceiling_source(now_ms)
+                                   : standalone_use ? standalone_source
+                                   : !has_owner_cmd_ ? pick_ceiling_source(now_ms)
+                                                     : nullptr;
+  if (standalone_use) {
+    in.ceiling = standalone_source->ceiling;
+    in.connection_has_sensor = true;  // READ_ERROR・MISSING は CEILING_STALE で止める
+  } else if (borrows_ceiling) {
     if (ceiling_source != nullptr) {
       in.ceiling = ceiling_source->ceiling;
     } else {
@@ -469,21 +509,21 @@ LiftState LiftController::step(uint32_t now_ms) {
   state_.top_detect = LIFT_TOP_DETECT_ENABLED && top_mm_ >= 0;
   // 天井は持ち主の最後の hold の値。持ち主がいなければ上部モジュールの
   // 最後の hold の値（無ければ null）
-  state_.ceiling_used = has_owner && (owner_has_sensor || borrows_ceiling);
+  state_.ceiling_used = has_owner && (owner_has_sensor || uses_source);
   state_.ceiling_from[0] = '\0';
   const bool show_last = !has_owner_cmd_ && (has_last_module_ceiling_ || ceiling_source != nullptr);
   state_.ceiling_present = has_owner_cmd_ || show_last;
   if (state_.ceiling_present) {
     // 判定に使った値（借りるときは出どころの値）。持ち主がいなければ、出どころの接続の
     // 最新の値（無ければ上部モジュールの最後の hold の値）。古さは増え続ける
-    const CeilingReport& shown = borrows_ceiling ? in.ceiling
+    const CeilingReport& shown = uses_source ? in.ceiling
                                  : has_owner_cmd_ ? owner_cmd_.ceiling
                                  : ceiling_source != nullptr ? ceiling_source->ceiling
                                                              : last_module_ceiling_;
-    if (borrows_ceiling || !has_owner_cmd_) {
+    if (uses_source || !has_owner_cmd_) {
       if (ceiling_source != nullptr) {
         copy_name(state_.ceiling_from, sizeof(state_.ceiling_from), ceiling_source->name);
-      } else if (!borrows_ceiling) {
+      } else if (!uses_source) {
         copy_name(state_.ceiling_from, sizeof(state_.ceiling_from), last_module_name_);
       }
     } else if (owner.kind == ConnKind::MODULE) {
@@ -499,7 +539,7 @@ LiftState LiftController::step(uint32_t now_ms) {
     state_.ceiling_age_ms = age < 0 ? 0u : static_cast<uint32_t>(age);
     if (has_owner_cmd_) {
       const CeilingVerdict verdict = ceiling_check(
-          in.ceiling, now_ms, has_owner ? (owner_has_sensor || borrows_ceiling) : false);
+          in.ceiling, now_ms, has_owner ? (owner_has_sensor || uses_source) : false);
       state_.ceiling_ok = verdict.ok;
       state_.ceiling_reason = verdict.reason;
     } else {

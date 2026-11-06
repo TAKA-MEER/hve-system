@@ -391,31 +391,22 @@ void serve_web(AsyncWebServerRequest* request, const char* path) {
 // --- 設定 API（protocol §3）。検証は lift_settings、保存は NVS ---
 
 void load_settings() {
-  g_settings = LiftSettings();  // 既定値（names.md §5.1）
-  g_using_defaults = true;
+  // NVS の文字列から設定を決める（読めない・検証を通らないときは既定値で動き、using_defaults を
+  // 立てる。motor_max_pct が無い古い形は全体が既定値、ceiling_standalone が無い古い形は
+  // true で読む。protocol §3）。決め方は lift_settings_from_saved（native で試験する）
+  String saved;
   Preferences prefs;
-  if (!prefs.begin(LIFT_NVS_NAMESPACE, true)) {
-    controller.set_motor_max_pct(g_settings.motor_max_pct);
-    return;
+  if (prefs.begin(LIFT_NVS_NAMESPACE, true)) {
+    saved = prefs.getString(kSettingsNvsKey, "");
+    prefs.end();
   }
-  const String saved = prefs.getString(kSettingsNvsKey, "");
-  prefs.end();
-  if (saved.length() == 0) {
-    controller.set_motor_max_pct(g_settings.motor_max_pct);
-    return;
-  }
-  LiftSettings parsed;
-  // 読めない・検証を通らないときは既定値で動き、using_defaults を立てる。
-  // motor_max_pct が無い古い形も検証を通らないので全体が既定値になる（protocol §3）
-  if (lift_settings_from_json(saved.c_str(), &parsed)) {
-    g_settings = parsed;
-    g_using_defaults = false;
-  }
-  controller.set_motor_max_pct(g_settings.motor_max_pct);
+  g_settings = lift_settings_from_saved(saved.c_str(), &g_using_defaults);
+  // 起動時に設定を LiftController へ効かせる（motor_max_pct・ceiling_standalone）
+  controller.apply_settings(g_settings);
 }
 
 bool store_settings(const LiftSettings& settings) {
-  char json[128];
+  char json[192];
   if (lift_settings_to_json(settings, json, sizeof(json)) == 0) {
     return false;
   }
@@ -429,9 +420,9 @@ bool store_settings(const LiftSettings& settings) {
 }
 
 void send_settings(AsyncWebServerRequest* request) {
-  char inner[128];
+  char inner[192];
   lift_settings_to_json(g_settings, inner, sizeof(inner));
-  char body[192];
+  char body[256];
   std::snprintf(body, sizeof(body), "{\"settings\":%s,\"using_defaults\":%s}", inner,
                 g_using_defaults ? "true" : "false");
   request->send(200, "application/json", body);
@@ -456,10 +447,12 @@ void apply_settings_put(AsyncWebServerRequest* request, const char* body_text) {
     return;
   }
   LiftSettings parsed;
-  if (!lift_settings_from_json(body_text, &parsed)) {
+  // ceiling_standalone が無い PUT は、いま保存している値を保つ（true に戻さない）
+  if (!lift_settings_from_put(body_text, g_settings, &parsed)) {
     send_settings_error(request, 400,
                         "下限 ≦ 初期値 ≦ 上限・0〜100（mm/s）の整数・"
-                        "モータへの出力の上限 10〜100（%）の整数にしてください");
+                        "モータへの出力の上限 10〜100（%）の整数・"
+                        "単体の操作でも天井で止めるは真偽値にしてください");
     return;
   }
   if (!store_settings(parsed)) {
@@ -468,10 +461,10 @@ void apply_settings_put(AsyncWebServerRequest* request, const char* body_text) {
   }
   g_settings = parsed;
   g_using_defaults = false;
-  controller.set_motor_max_pct(g_settings.motor_max_pct);
-  char inner[128];
+  controller.apply_settings(g_settings);
+  char inner[192];
   lift_settings_to_json(g_settings, inner, sizeof(inner));
-  char body[160];
+  char body[256];
   std::snprintf(body, sizeof(body), "{\"settings\":%s}", inner);
   request->send(200, "application/json", body);
 }
