@@ -114,6 +114,7 @@ struct LiftDecideInput {
   bool stalled = false;         // 出力しているのにエンコーダが進んでいない（#8a。呼び出し側が数える）
   CeilingReport ceiling;        // 持ち主の最後の hold に載っていた天井の値
   bool connection_has_sensor = true;  // 持ち主の接続が距離計を持つか
+  int ceiling_margin_mm = CEILING_MARGIN_MM_DEFAULT;  // 天井の閾値 [mm]（設定 ceiling_margin_mm）
   uint32_t now_ms = 0;
   bool bottom_pressed = false;
   int height_mm = 0;

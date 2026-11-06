@@ -45,11 +45,16 @@ bool validate_lift_settings(const LiftSettings& settings) {
       settings.motor_max_pct > LIFT_DUTY_ABS_MAX_PCT) {
     return false;
   }
+  if (settings.ceiling_margin_mm < CEILING_MARGIN_MM_MIN ||
+      settings.ceiling_margin_mm > CEILING_MARGIN_MM_MAX) {
+    return false;
+  }
   return axis_ok(settings.up) && axis_ok(settings.down);
 }
 
 bool lift_settings_from_json(const char* text, LiftSettings* out,
-                             bool ceiling_standalone_if_missing) {
+                             bool ceiling_standalone_if_missing,
+                             int ceiling_margin_mm_if_missing) {
   *out = LiftSettings();
   if (text == nullptr) {
     return false;
@@ -81,6 +86,15 @@ bool lift_settings_from_json(const char* text, LiftSettings* out,
   } else {
     return false;
   }
+  // ceiling_margin_mm も欠けていてもよい。あるのに整数でなければ誤り（真偽値は除く）。
+  // 範囲は validate_lift_settings が見る
+  if (!obj["ceiling_margin_mm"].is<JsonVariantConst>()) {
+    parsed.ceiling_margin_mm = ceiling_margin_mm_if_missing;
+  } else if (obj["ceiling_margin_mm"].is<int>() && !obj["ceiling_margin_mm"].is<bool>()) {
+    parsed.ceiling_margin_mm = obj["ceiling_margin_mm"].as<int>();
+  } else {
+    return false;
+  }
   if (!validate_lift_settings(parsed)) {
     return false;
   }
@@ -98,6 +112,7 @@ size_t lift_settings_to_json(const LiftSettings& settings, char* out, size_t out
   write_axis(obj, "lift_down", settings.down);
   obj["motor_max_pct"] = settings.motor_max_pct;
   obj["ceiling_standalone"] = settings.ceiling_standalone;
+  obj["ceiling_margin_mm"] = settings.ceiling_margin_mm;
   const size_t needed = measureJson(doc);
   if (needed >= out_size) {
     return 0;
@@ -106,7 +121,7 @@ size_t lift_settings_to_json(const LiftSettings& settings, char* out, size_t out
 }
 
 bool lift_settings_from_put(const char* text, const LiftSettings& current, LiftSettings* out) {
-  return lift_settings_from_json(text, out, current.ceiling_standalone);
+  return lift_settings_from_json(text, out, current.ceiling_standalone, current.ceiling_margin_mm);
 }
 
 LiftSettings lift_settings_from_saved(const char* saved, bool* using_defaults) {

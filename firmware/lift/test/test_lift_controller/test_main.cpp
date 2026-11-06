@@ -423,7 +423,7 @@ void test_max_run_does_not_count_while_stopped_by_ceiling_near() {
   rig.run(0, 45000, module(2), 1, LiftDir::UP, 30, 30.0);
   TEST_ASSERT_TRUE(rig.hal.motor_moving());
   assert_reason(StopReason::NONE, rig.last);
-  // 天井が近い（CEILING_MARGIN_MM 以下）。止まったまま 100 秒
+  // 天井が近い（CEILING_MARGIN_MM_DEFAULT 以下）。止まったまま 100 秒
   const LiftState near_state = rig.run(45100, 145000, module(2), 1, LiftDir::UP, 30, 30.0, 300);
   TEST_ASSERT_FALSE(rig.hal.motor_moving());
   assert_reason(StopReason::CEILING_NEAR, near_state);
@@ -1997,6 +1997,116 @@ void test_saved_false_makes_ui_climb_ignore_ceiling_after_boot() {
   TEST_ASSERT_TRUE(rig.climb(ui(1), 0).dir == LiftDir::UP);
 }
 
+// --- WP-LIFT-16: 天井の閾値を設定に（ceiling_margin_mm。protocol §3）---
+
+namespace {
+LiftSettings settings_with_margin(int margin_mm) {
+  LiftSettings settings;
+  settings.ceiling_margin_mm = margin_mm;
+  return settings;
+}
+}  // namespace
+
+// 変異 1・3: 判定が設定ではなく固定の 500 を使う／apply_settings が閾値を渡さない。
+// 閾値 1000・カメラモジュールが 800 mm を送っている間、fk の上昇が止まる（既定の 500 なら動く）
+void test_fk_climb_stops_at_800mm_when_margin_setting_is_1000() {
+  StandaloneRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_ceiling(module(2), measured(800, 0));
+  // 既定（500）では 800 mm は遠い
+  TEST_ASSERT_TRUE(rig.fk_step(0).dir == LiftDir::UP);
+  rig.ctrl.apply_settings(settings_with_margin(1000));
+  const LiftState state = rig.fk_step(10);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_FALSE(state.ceiling_ok);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(StopReason::CEILING_NEAR), static_cast<int>(state.ceiling_reason));
+  // 小さくすれば同じ値で動く（150 の下端。800 は遠い）
+  rig.ctrl.apply_settings(settings_with_margin(CEILING_MARGIN_MM_MIN));
+  TEST_ASSERT_TRUE(rig.fk_step(20, 2).dir == LiftDir::UP);
+}
+
+// 変異 2: 単体の操作（ui・button）の判定だけ固定の 500 を使う
+void test_ui_and_button_climb_stop_at_800mm_when_margin_setting_is_1000() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(800, 0));
+  rig.ctrl.apply_settings(settings_with_margin(1000));
+  LiftState state = rig.climb(ui(1), 0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_FALSE(state.ceiling_ok);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::USE),
+                        static_cast<int>(state.ceiling_standalone));
+  rig.ctrl.on_close(1);
+  rig.ctrl.step(10);
+  state = rig.climb(button(9), 20);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  // 既定に戻せば同じ 800 mm で上がる
+  rig.ctrl.apply_settings(settings_with_margin(CEILING_MARGIN_MM_DEFAULT));
+  rig.ctrl.on_close(9);
+  rig.ctrl.step(30);
+  TEST_ASSERT_TRUE(rig.climb(ui(1), 40, 2).dir == LiftDir::UP);
+}
+
+// PUT が通った次の周期から新しい値で判定する（動いている最中に大きくしたら、その場で止まる）
+void test_raising_margin_while_climbing_stops_from_next_cycle() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(800, 0));
+  TEST_ASSERT_TRUE(rig.climb(ui(1), 0).dir == LiftDir::UP);
+  rig.ctrl.apply_settings(settings_with_margin(1000));
+  rig.ctrl.on_ceiling(module(2), measured(800, 0));
+  const LiftState state = rig.climb(ui(1), 10);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+}
+
+// 出どころ選び（pick_source）の判定も同じ閾値: 2 台とも閾値以下のときは止める値が同列（先の接続）、
+// 500 のままなら遠い方（800）は ok で、近い方（600）が選ばれる
+void test_source_pick_uses_margin_setting() {
+  StandaloneRig rig;
+  rig.ctrl.on_hello(module(4), hello_as("cam2", true));
+  rig.ctrl.on_ceiling(module(2), measured(800, 0));
+  rig.ctrl.on_ceiling(module(4), measured(600, 0));
+  rig.ctrl.on_hold(ui(1), fk_up(1), 0);
+  rig.hal.set_height(500, true, 0);
+  LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_EQUAL_INT(600, state.ceiling_mm);
+  TEST_ASSERT_EQUAL_STRING("cam2", state.ceiling_from);
+  rig.ctrl.apply_settings(settings_with_margin(1000));
+  rig.ctrl.on_ceiling(module(2), measured(800, 10));
+  rig.ctrl.on_ceiling(module(4), measured(600, 10));
+  rig.hal.set_height(500, true, 10);
+  state = rig.ctrl.step(10);
+  TEST_ASSERT_EQUAL_INT(800, state.ceiling_mm);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+}
+
+// 起動時: NVS に保存した JSON から読んだ閾値が、そのまま LiftController の動きになる。
+// 欄の無い古い形は 500 で読む（動く）
+void test_saved_margin_applies_after_boot_and_missing_means_500() {
+  StandaloneRig rig;
+  rig.ctrl.on_ceiling(module(2), measured(800, 0));
+  bool using_defaults = true;
+  const char* saved =
+      "{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+      "\"lift_down\":{\"min\":10,\"max\":60,\"init\":30},"
+      "\"motor_max_pct\":50,\"ceiling_standalone\":true,\"ceiling_margin_mm\":1000}";
+  rig.ctrl.apply_settings(lift_settings_from_saved(saved, &using_defaults));
+  TEST_ASSERT_FALSE(using_defaults);
+  TEST_ASSERT_FALSE(rig.climb(ui(1), 0).dir == LiftDir::UP);
+  rig.ctrl.on_close(1);
+  rig.ctrl.step(10);
+  const char* old_saved =
+      "{\"lift_up\":{\"min\":10,\"max\":60,\"init\":30},"
+      "\"lift_down\":{\"min\":10,\"max\":60,\"init\":30},"
+      "\"motor_max_pct\":50,\"ceiling_standalone\":true}";
+  rig.ctrl.apply_settings(lift_settings_from_saved(old_saved, &using_defaults));
+  TEST_ASSERT_FALSE(using_defaults);
+  TEST_ASSERT_TRUE(rig.climb(ui(1), 20, 2).dir == LiftDir::UP);
+}
+
 // 接続を何度も繋ぎ直しても hold を受け付け続ける（閉じた接続の番号の欄を使い回す）
 void test_many_reconnects_still_accept_holds() {
   MultiRig rig;
@@ -2132,6 +2242,11 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_state_ceiling_standalone_reports_setting_off_no_source_and_use);
   RUN_TEST(test_standalone_source_must_be_an_explicit_control_sensor);
   RUN_TEST(test_apply_settings_hands_ceiling_standalone_to_controller);
+  RUN_TEST(test_fk_climb_stops_at_800mm_when_margin_setting_is_1000);
+  RUN_TEST(test_ui_and_button_climb_stop_at_800mm_when_margin_setting_is_1000);
+  RUN_TEST(test_raising_margin_while_climbing_stops_from_next_cycle);
+  RUN_TEST(test_source_pick_uses_margin_setting);
+  RUN_TEST(test_saved_margin_applies_after_boot_and_missing_means_500);
   RUN_TEST(test_saved_false_makes_ui_climb_ignore_ceiling_after_boot);
   RUN_TEST(test_many_reconnects_still_accept_holds);
 

@@ -80,7 +80,15 @@ void test_up_with_far_ceiling_moves() {
 
 void test_up_with_near_ceiling_stops_with_ceiling_near() {
   LiftDecideInput in = movable();
-  in.ceiling.mm = CEILING_MARGIN_MM;
+  in.ceiling.mm = CEILING_MARGIN_MM_DEFAULT;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::CEILING_NEAR);
+}
+
+void test_up_ceiling_uses_margin_from_input() {
+  LiftDecideInput in = movable();
+  in.ceiling.mm = 800;
+  assert_decision(in, LiftDir::UP, 40, StopReason::NONE);
+  in.ceiling_margin_mm = 1000;
   assert_decision(in, LiftDir::STOP, 0, StopReason::CEILING_NEAR);
 }
 
@@ -376,6 +384,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
   RUN_TEST(test_up_with_far_ceiling_moves);
   RUN_TEST(test_up_with_near_ceiling_stops_with_ceiling_near);
+  RUN_TEST(test_up_ceiling_uses_margin_from_input);
   RUN_TEST(test_up_with_too_near_stops_with_ceiling_near);
   RUN_TEST(test_up_with_no_echo_moves);
   RUN_TEST(test_up_with_read_error_stops_with_ceiling_stale);

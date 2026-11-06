@@ -17,8 +17,8 @@ CeilingReport measured(int mm, uint32_t age_ms = 80, uint32_t received_at_ms = 1
 }
 
 void assert_verdict(const CeilingReport& report, uint32_t now_ms, bool has_sensor, bool ok,
-                    StopReason reason) {
-  const CeilingVerdict verdict = ceiling_check(report, now_ms, has_sensor);
+                    StopReason reason, int margin_mm = CEILING_MARGIN_MM_DEFAULT) {
+  const CeilingVerdict verdict = ceiling_check(report, now_ms, has_sensor, margin_mm);
   TEST_ASSERT_EQUAL_INT(ok, verdict.ok);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(reason), static_cast<int>(verdict.reason));
 }
@@ -36,15 +36,30 @@ void test_no_sensor_is_always_ok() {
 // --- MEASURED ---
 
 void test_measured_far_is_ok() {
-  assert_verdict(measured(CEILING_MARGIN_MM + 1), 1000, true, true, StopReason::NONE);
+  assert_verdict(measured(CEILING_MARGIN_MM_DEFAULT + 1), 1000, true, true, StopReason::NONE);
 }
 
 void test_measured_at_margin_stops_with_near() {
-  assert_verdict(measured(CEILING_MARGIN_MM), 1000, true, false, StopReason::CEILING_NEAR);
+  assert_verdict(measured(CEILING_MARGIN_MM_DEFAULT), 1000, true, false, StopReason::CEILING_NEAR);
 }
 
 void test_measured_below_margin_stops_with_near() {
   assert_verdict(measured(0), 1000, true, false, StopReason::CEILING_NEAR);
+}
+
+// 閾値は引数（設定 ceiling_margin_mm）。既定の 500 でなくても、その値の境界で変わる
+void test_measured_uses_given_margin() {
+  assert_verdict(measured(800), 1000, true, false, StopReason::CEILING_NEAR, 1000);
+  assert_verdict(measured(1000), 1000, true, false, StopReason::CEILING_NEAR, 1000);
+  assert_verdict(measured(1001), 1000, true, true, StopReason::NONE, 1000);
+  assert_verdict(measured(200), 1000, true, true, StopReason::NONE, 150);
+  assert_verdict(measured(150), 1000, true, false, StopReason::CEILING_NEAR, 150);
+}
+
+void test_margin_constants() {
+  TEST_ASSERT_EQUAL_INT(500, CEILING_MARGIN_MM_DEFAULT);
+  TEST_ASSERT_EQUAL_INT(150, CEILING_MARGIN_MM_MIN);
+  TEST_ASSERT_EQUAL_INT(3000, CEILING_MARGIN_MM_MAX);
 }
 
 // --- TOO_NEAR / NO_ECHO / READ_ERROR ---
@@ -115,6 +130,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_measured_far_is_ok);
   RUN_TEST(test_measured_at_margin_stops_with_near);
   RUN_TEST(test_measured_below_margin_stops_with_near);
+  RUN_TEST(test_measured_uses_given_margin);
+  RUN_TEST(test_margin_constants);
 
   RUN_TEST(test_too_near_stops_with_near);
   RUN_TEST(test_no_echo_is_ok_with_out_of_range);

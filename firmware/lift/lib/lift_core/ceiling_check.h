@@ -21,7 +21,11 @@ enum class StopReason : uint8_t {
 };
 
 // 判定に使う定数（DetailedDesign-names.md §5.1）
-constexpr int CEILING_MARGIN_MM = 500;        // 仮（H-V8）
+// 天井の閾値。2026-11-06 から設定 ceiling_margin_mm（Spec-ui §2.3）で変えられる。
+// 既定は仮（H-V8）。判定は設定の値を引数で受ける
+constexpr int CEILING_MARGIN_MM_DEFAULT = 500;
+constexpr int CEILING_MARGIN_MM_MIN = 150;
+constexpr int CEILING_MARGIN_MM_MAX = 3000;
 constexpr uint32_t CEILING_STALE_MS = 600;    // 仮（H-V8）
 
 // 天井の状態（DetailedDesign-protocol.md §2.1 の status）。
@@ -57,5 +61,7 @@ bool ceiling_is_stale(const CeilingReport& report, uint32_t now_ms);
 
 // 天井の値・古さ・その接続が距離計を持つか → (ok, 理由)（DetailedDesign.md §3.2）。
 // 距離計を持たない接続なら常に ok。古さは age_ms ＋受け取ってからの経過時間。
+// margin_mm は天井の閾値（設定 ceiling_margin_mm。MEASURED で mm ≦ margin_mm → CEILING_NEAR）。
+// 既定値は付けない（呼び出し側が必ず設定の値を渡す）
 CeilingVerdict ceiling_check(const CeilingReport& report, uint32_t now_ms,
-                             bool connection_has_sensor);
+                             bool connection_has_sensor, int margin_mm);

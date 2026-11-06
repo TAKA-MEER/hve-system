@@ -48,7 +48,8 @@ LiftDecideResult lift_decide(const LiftDecideInput& in) {
 
   // 表 3 上昇 かつ ceiling_check() が ok でない（距離計を持つ接続のときだけ判定）
   if (in.dir == LiftDir::UP) {
-    const CeilingVerdict ceiling = ceiling_check(in.ceiling, in.now_ms, in.connection_has_sensor);
+    const CeilingVerdict ceiling = ceiling_check(in.ceiling, in.now_ms, in.connection_has_sensor,
+                                              in.ceiling_margin_mm);
     if (!ceiling.ok) {
       return stop_with(ceiling.reason);
     }

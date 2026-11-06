@@ -253,6 +253,118 @@ void test_to_json_writes_standalone_and_round_trips() {
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling_standalone\":true"));
 }
 
+// --- ceiling_margin_mm（2026-11-06。protocol §3。WP-LIFT-16）---
+
+namespace {
+std::string body_with_margin(const char* value_json) {
+  return std::string("{\"lift_up\":{\"min\":5,\"max\":50,\"init\":20},"
+                     "\"lift_down\":{\"min\":6,\"max\":55,\"init\":25},"
+                     "\"motor_max_pct\":40,\"ceiling_margin_mm\":") +
+         value_json + "}";
+}
+}  // namespace
+
+void test_ceiling_margin_default_and_range() {
+  TEST_ASSERT_EQUAL_INT(500, LiftSettings().ceiling_margin_mm);
+  TEST_ASSERT_TRUE(validate_lift_settings(LiftSettings()));
+  LiftSettings s;
+  s.ceiling_margin_mm = CEILING_MARGIN_MM_MIN;
+  TEST_ASSERT_TRUE(validate_lift_settings(s));
+  s.ceiling_margin_mm = CEILING_MARGIN_MM_MAX;
+  TEST_ASSERT_TRUE(validate_lift_settings(s));
+  s.ceiling_margin_mm = CEILING_MARGIN_MM_MIN - 1;
+  TEST_ASSERT_FALSE(validate_lift_settings(s));
+  s.ceiling_margin_mm = CEILING_MARGIN_MM_MAX + 1;
+  TEST_ASSERT_FALSE(validate_lift_settings(s));
+}
+
+// 変異 4: 検証が 149・3001・小数・文字列・真偽値を通す
+void test_margin_out_of_range_or_wrong_type_is_rejected() {
+  LiftSettings current;
+  LiftSettings out;
+  TEST_ASSERT_TRUE(lift_settings_from_put(body_with_margin("150").c_str(), current, &out));
+  TEST_ASSERT_EQUAL_INT(150, out.ceiling_margin_mm);
+  TEST_ASSERT_TRUE(lift_settings_from_put(body_with_margin("3000").c_str(), current, &out));
+  TEST_ASSERT_EQUAL_INT(3000, out.ceiling_margin_mm);
+  const char* bad[] = {"149", "3001", "0", "-500", "500.5", "\"500\"", "true", "false", "null", "[]", "{}"};
+  for (const char* value : bad) {
+    TEST_ASSERT_FALSE_MESSAGE(lift_settings_from_put(body_with_margin(value).c_str(), current, &out),
+                              value);
+    TEST_ASSERT_FALSE_MESSAGE(lift_settings_from_json(body_with_margin(value).c_str(), &out), value);
+  }
+}
+
+// 変異 5: NVS に欄が無いと全体が既定値になる・500 以外で読む
+void test_saved_without_margin_reads_500_and_keeps_other_items() {
+  bool using_defaults = true;
+  const LiftSettings s = lift_settings_from_saved(kBodyWithoutStandalone, &using_defaults);
+  TEST_ASSERT_FALSE(using_defaults);
+  TEST_ASSERT_EQUAL_INT(500, s.ceiling_margin_mm);
+  TEST_ASSERT_EQUAL_INT(5, s.up.min_mm_s);
+  TEST_ASSERT_EQUAL_INT(40, s.motor_max_pct);
+}
+
+void test_saved_margin_is_kept_and_bad_saved_margin_uses_defaults() {
+  bool using_defaults = true;
+  LiftSettings s = lift_settings_from_saved(body_with_margin("1000").c_str(), &using_defaults);
+  TEST_ASSERT_FALSE(using_defaults);
+  TEST_ASSERT_EQUAL_INT(1000, s.ceiling_margin_mm);
+  TEST_ASSERT_EQUAL_INT(40, s.motor_max_pct);
+  s = lift_settings_from_saved(body_with_margin("100").c_str(), &using_defaults);
+  TEST_ASSERT_TRUE(using_defaults);
+  TEST_ASSERT_EQUAL_INT(500, s.ceiling_margin_mm);
+  TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, s.motor_max_pct);
+}
+
+// 変異 6: 欄の無い PUT で、保存してある 1000 が 500 に戻る
+void test_put_without_margin_keeps_current_value() {
+  LiftSettings current;
+  current.ceiling_margin_mm = 1000;
+  current.ceiling_standalone = false;
+  LiftSettings out;
+  TEST_ASSERT_TRUE(lift_settings_from_put(kBodyWithoutStandalone, current, &out));
+  TEST_ASSERT_EQUAL_INT(1000, out.ceiling_margin_mm);
+  TEST_ASSERT_FALSE(out.ceiling_standalone);
+  TEST_ASSERT_EQUAL_INT(40, out.motor_max_pct);
+}
+
+void test_put_with_margin_overrides_current_value() {
+  LiftSettings current;
+  current.ceiling_margin_mm = 1000;
+  LiftSettings out;
+  TEST_ASSERT_TRUE(lift_settings_from_put(body_with_margin("700").c_str(), current, &out));
+  TEST_ASSERT_EQUAL_INT(700, out.ceiling_margin_mm);
+}
+
+// 変異 7: 範囲の外の PUT で、ほかの項目だけ保存される（全体を拒否する。out は既定のまま）
+void test_put_with_bad_margin_rejects_whole_body() {
+  LiftSettings current;
+  current.ceiling_margin_mm = 1000;
+  LiftSettings out;
+  out.motor_max_pct = 77;
+  TEST_ASSERT_FALSE(lift_settings_from_put(body_with_margin("3001").c_str(), current, &out));
+  // 部分的に読んだ値（motor_max_pct 40 など）を out に残さない
+  TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, out.motor_max_pct);
+  TEST_ASSERT_EQUAL_INT(10, out.up.min_mm_s);  // 既定値（LiftAxisSettings）
+}
+
+void test_to_json_writes_margin_and_round_trips() {
+  LiftSettings settings;
+  settings.ceiling_margin_mm = 1234;
+  char json[192];
+  TEST_ASSERT_GREATER_THAN(0, lift_settings_to_json(settings, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling_margin_mm\":1234"));
+  LiftSettings back;
+  TEST_ASSERT_TRUE(lift_settings_from_json(json, &back));
+  TEST_ASSERT_EQUAL_INT(1234, back.ceiling_margin_mm);
+  // 最悪の長さでも main.cpp の 192 バイトの書き出し先に入る
+  settings.up = {100, 100, 100};
+  settings.down = {100, 100, 100};
+  settings.motor_max_pct = 100;
+  settings.ceiling_margin_mm = 3000;
+  TEST_ASSERT_GREATER_THAN(0, lift_settings_to_json(settings, json, sizeof(json)));
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -275,6 +387,14 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_put_with_standalone_overrides_current_value);
   RUN_TEST(test_standalone_that_is_not_boolean_is_rejected);
   RUN_TEST(test_to_json_writes_standalone_and_round_trips);
+  RUN_TEST(test_ceiling_margin_default_and_range);
+  RUN_TEST(test_margin_out_of_range_or_wrong_type_is_rejected);
+  RUN_TEST(test_saved_without_margin_reads_500_and_keeps_other_items);
+  RUN_TEST(test_saved_margin_is_kept_and_bad_saved_margin_uses_defaults);
+  RUN_TEST(test_put_without_margin_keeps_current_value);
+  RUN_TEST(test_put_with_margin_overrides_current_value);
+  RUN_TEST(test_put_with_bad_margin_rejects_whole_body);
+  RUN_TEST(test_to_json_writes_margin_and_round_trips);
 
   return UNITY_END();
 }

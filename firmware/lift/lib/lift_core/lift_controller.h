@@ -51,7 +51,11 @@ class LiftController {
   // 動いている最中に変えたら次の周期から効く。上部モジュールからの命令には効かない
   void set_ceiling_standalone(bool enabled);
 
-  // 設定をまとめて効かせる（set_motor_max_pct と set_ceiling_standalone）。
+  // 天井の閾値 [mm]（設定 ceiling_margin_mm。Spec-ui §2.3）。上部モジュールからの命令・単体の
+  // 操作・出どころ選びのすべての判定に使う。動いている最中に変えたら次の周期から効く
+  void set_ceiling_margin_mm(int mm);
+
+  // 設定をまとめて効かせる（set_motor_max_pct・set_ceiling_standalone・set_ceiling_margin_mm）。
   // main.cpp は起動時と PUT の成功時に、設定の項目を 1 つずつでなくこれを呼ぶ
   void apply_settings(const LiftSettings& settings);
 
@@ -132,6 +136,7 @@ class LiftController {
   // 速さの制御（DetailedDesign.md §4.1.2）
   SpeedLoop speed_loop_;
   bool ceiling_standalone_ = LIFT_CEILING_STANDALONE_DEFAULT;  // set_ceiling_standalone で持たせる
+  int ceiling_margin_mm_ = CEILING_MARGIN_MM_DEFAULT;  // set_ceiling_margin_mm で持たせる
   int motor_max_pct_ = LIFT_MOTOR_MAX_PCT_DEFAULT;  // モータへの出力の上限 [%]。set_motor_max_pct で持たせる
   int last_duty_ = 0;          // 直前にモータへ出したデューティ（#8a の「動かしている」判定用）
   uint32_t loop_at_ms_ = 0;    // SpeedLoop を最後に進めた時刻
