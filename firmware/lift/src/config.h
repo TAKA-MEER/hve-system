@@ -54,10 +54,14 @@ constexpr const char* LIFT_WS_UI_PATH = "/ws/ui";
 constexpr const char* LIFT_WS_MODULE_PATH = "/ws/module";
 constexpr const char* LIFT_NVS_NAMESPACE = "hve_lift_mm";
 constexpr int LIFT_UI_CLIENTS_MAX = 4;  // **仮**。超えた接続は閉じる（WP-LIFT-04）
+// /ws/module の接続の上限。**仮**（実機で確かめる。WP-MEAS-03）。超えた**新しい**接続を
+// その場で閉じる（ライブラリの cleanupClients は超えると古い方＝カメラモジュールを閉じる）。
+// lift_core の LIFT_MODULE_LIST_MAX（state.modules の長さ）と同じ値（main.cpp で確かめる）
+constexpr int LIFT_MODULE_MAX_CONN = 6;
 constexpr const char* LIFT_MDNS_NAME = "hve-lift";  // names.md §2
 
-// state_encode のバッファ。**仮**（v2 の state の JSON は 500 バイト前後）
-constexpr size_t LIFT_STATE_TEXT_MAX = 640;
+// state_encode のバッファ LIFT_STATE_TEXT_MAX は lib/lift_core/cmd_codec.h にある
+// （試験が最大の state を作って長さを測るため。test_cmd_codec）
 
 // WiFi の状態を見る周期。**仮**（無線が落ちていたら張り直すだけなので短くなくてよい）
 constexpr uint32_t LIFT_WIFI_POLL_MS = 5000;
