@@ -13,7 +13,7 @@
 
 ## 1. 今どこにいるか
 
-**最終同期: 2026-11-06**（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`・`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11` のマージまで。それ以前: `redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06`・`WP-BASE-02`・`WP-LIFT-03`・`WP-IO-01`・`WP-LIFTUI-01`・`WP-LIFT-04`・`WP-IO-02`・`WP-CAM-04`・`WP-UI-02`・`WP-VIDEO-02`・`WP-CAM-05` まで）。更新のしかたは §2.3「計画書を都度更新する」。
+**最終同期: 2026-11-06**（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`・`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`・`WP-LIFT-16`・`WP-LIFTUI-05`・`WP-CAM-12` のマージまで。それ以前: `redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06`・`WP-BASE-02`・`WP-LIFT-03`・`WP-IO-01`・`WP-LIFTUI-01`・`WP-LIFT-04`・`WP-IO-02`・`WP-CAM-04`・`WP-UI-02`・`WP-VIDEO-02`・`WP-CAM-05` まで）。更新のしかたは §2.3「計画書を都度更新する」。
 
 | | 状態 |
 | --- | --- |
@@ -230,6 +230,9 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | `WP-LIFT-15` | 7 | **配線済み**（`b5f3762`。2026-11-06 ユーザー決定。単体の操作でも天井で止める。Sonnet 5.5 のサブエージェントが実装。native 313・esp32dev・esp32dev_manual。エージェントの変異 1〜12b が赤〈12c: `main.cpp` が起動時に `apply_settings` を呼ばない は native で縛れない〉。管理担当の 2 件〈古い値も含めて選ぶ・新しい `READ_ERROR` を許す〉が赤。**実機はまだ**〈カメラモジュールを繋いで画面・物理ボタンで上げ、板をかざして `CEILING_NEAR`／カメラモジュールの電源を落とすと上げられ「通信なし」／設定を切ると止まらない／電源を入れ直しても設定が残る〉） |
 | `WP-LIFTUI-04` | 7 | **配線済み**（`28dd6bb`。tools 110・web 24・スクロール 68/68・browser_paths 7/7。管理担当の変異 2 件が赤。**実機はまだ**） |
 | `WP-CAM-11` | 7 | **配線済み**（`4784d3c`。camera 513・web 32・スクロール 102/102・browser_paths 13/14〈9 は前から〉。管理担当の変異 2 件が赤〈`render` の呼び出し側は最初素通りし、経路 14 を足させた〉。**実機はまだ**） |
+| `WP-LIFT-16` | 8 | **ESP32 に書き込み済み**（2026-11-06。Sonnet 5.5 が実装。native 329・esp32dev・esp32dev_manual。エージェントの変異 1〜8・管理担当の 2 件が赤。書き込み後に `GET /api/settings` に `ceiling_margin_mm: 500` が載り、`provisional` から外れたことを確認。**閾値を変えて止まる位置の実機確認はまだ**） |
+| `WP-LIFTUI-05` | 8 | **配線済み**（tools 119・web 25・スクロール 68/68・browser_paths 8/8。管理担当の変異 2 件が赤。ESP32 に埋め込み済み） |
+| `WP-CAM-12` | 8 | **配線済み**（camera 526・web 34・スクロール 119/119・browser_paths 14/15〈9 は前から〉。管理担当の変異 2 件が赤。**UnitV2 にはまだ入れていない**） |
 | `WP-LIFT-07` | 5 | **実機確認済み（400 mm で）**（`5688686`。2026-10-28。Sonnet 5.5 のサブエージェントが実装。native 211 件・esp32dev・esp32dev_manual。`WAIVER(demo): W-1` は空・台帳の `W-1` をクローズ。変異 5 件＋管理担当の 1 件〈`LiftController` が `top_mm` を渡さない〉が赤。**2026-10-28 に実機確認**（天井があるので `LIFT_TOP_MM` を 400 にした試験用のファームで）: 下端から 100 mm/s で上げて 400 mm で `TOP`〈行き過ぎ最大 5 mm〉・`TOP` のあと上昇しない・下降はできる・10 回ほど上げ下げして高さが 0 に戻らない〈`WP-LIFT-10` も〉。原点の前は `HEIGHT_UNKNOWN` で上昇しない→下端に着けると上がる。**このとき `HOME_SLACK_MM` 20 では下端スイッチが押されたまま 23 mm 上がって故障と判定し動けなくなった → 50 に**（`0c6b089`）。本番の 1800 mm のファームを書き戻した。搭載物を外して軽く、下降でロープがたるみ表示が −230 mm まで下がった場面がある〈ユーザー: 無視してよい〉。**残り**: 1800 mm での実機確認〈天井の無い所で〉。`camera/web` の上端が未設定のときの文言は「上端が未設定（開発中）」に直した〈2026-10-28〉） |
 | `WP-MEAS-01`〜`05` | 4 | 未着手 |
 
@@ -271,7 +274,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | 8 | **上部モジュールの複数対応**（fk-system・ss-system が繋ぐ口。spec 2026-11-01 以降の [Spec-module.md](spec/Spec-module.md) §1〜§5。設計は [detailed/DetailedDesign-protocol-modules.md](detailed/DetailedDesign-protocol-modules.md)。2026-11-05 に fk・ss が確かめ済み）: `WP-LIFT-13` → `WP-LIFT-14` ／ `WP-LIFTUI-03` ／ `WP-CAM-10`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 6）。**LIFT-13・LIFTUI-03・CAM-10 の 3 つ揃えてから実機に入れる**（`state` の `module` → `modules` に互換が無い）。揃うまで fk・ss は今の昇降部で上昇させない（伝え済み）。**2026-11-06 に 3 つともマージ**（`eeda66f`・`f50ebd9`・`6b14ea8`）。`WP-LIFT-14` が残り | 配線済み（実機確認待ち。LIFT-14 は未着手） |
 | 8a | **カメラモジュールが ss-system に開く口**（ヨー・ピッチの操作・静止画の要求。spec [Spec-module.md](spec/Spec-module.md) §1。2026-11-05 ユーザー決定で hve が書き ss が確かめる）。**行 8 のあとに案を書く**。ピッチは目標角を渡し、カメラモジュールが再起動したことも読めるようにする（`H-V14`。2026-11-05 ss の決定）。ヨーの向きの欄は名前だけ決め、`H-A11` が決まるまで `null` | 未着手 |
 | 8b | **単体の操作でも天井で止める**（2026-11-06 ユーザー決定。spec [Spec-safety.md](spec/Spec-safety.md) §2 #4c・[Spec-ui.md](spec/Spec-ui.md) §2.2。設計は [detailed/DetailedDesign-protocol-modules.md](detailed/DetailedDesign-protocol-modules.md) §2.5）: `WP-LIFT-15` → `WP-LIFTUI-04` ／ `WP-CAM-11`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 7）。**行 8 の 3 つのあと**（単体の操作で使う天井の値は、行 8 の出どころと止まっている間の `ceiling` が無いと届かない）。設定の欄は欠けてもよいので、3 つは別々に入れてよい。**2026-11-06 に 3 つともマージ**（`b5f3762`・`28dd6bb`・`4784d3c`） | 配線済み（実機確認待ち） |
-| 8c | **天井の閾値を設定に**（2026-11-06 ユーザー決定。spec [Spec-ui.md](spec/Spec-ui.md) §2.3）: `WP-LIFT-16` → `WP-LIFTUI-05` ／ `WP-CAM-12`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 8）。3 つは別々に入れてよい | 未着手（パケット済み） |
+| 8c | **天井の閾値を設定に**（2026-11-06 ユーザー決定。spec [Spec-ui.md](spec/Spec-ui.md) §2.3）: `WP-LIFT-16` → `WP-LIFTUI-05` ／ `WP-CAM-12`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 8）。3 つは別々に入れてよい。**2026-11-06 に 3 つともマージ・ESP32 に書き込み**（UnitV2 はまだ） | 配線済み（実機確認待ち） |
 | 随時 | 組み立て用ファーム（`env:esp32dev_manual`。スイッチで回すだけ・台帳 `W-2`。メカ担当向け）。**実機確認はまだ**。組み立てが終わったら本番を書き戻して `W-2` を閉じる | 実装あり（実機確認待ち） |
 | いつでも | 先方・機構側に聞く値（`H-V1`・`H-V2`）／目標 `H-G1` | 未着手 |
 
