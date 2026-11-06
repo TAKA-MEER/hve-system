@@ -24,6 +24,8 @@ async def test_hello_is_sent_on_connect() -> None:
         assert hello["t"] == "hello"
         assert hello["ceiling_sensor"] is True
         assert hello["name"] == "hve-cam"
+        assert hello["role"] == "control"
+        assert hello["operator"] == "human"
     finally:
         await lift.close()
         await esp32.stop()
@@ -68,6 +70,31 @@ async def test_hold_and_release_shapes() -> None:
         assert "duty" not in hold, "duty を送ると昇降部が捨てる（変異 a の芯）"
         assert hold["ceiling"] == {"status": "MEASURED", "mm": 2000, "age_ms": 80}
         assert esp32.release_history[-1] == {"t": "release", "press": 7}
+    finally:
+        await lift.close()
+        await esp32.stop()
+
+
+async def test_ceiling_is_sent_while_idle_and_keeps_the_age() -> None:
+    """止まっている間も `ceiling` を送る。中身は `hold` に載せるものと同じ（§2.3）。
+
+    **変異 1（止まっている間に送らない）・変異 2（古さを送らない）の芯。**
+    """
+    clock = ManualClock()
+    esp32 = FakeEsp32(clock)
+    url = await esp32.start()
+    lift = LiftLink(url, clock)
+    try:
+        await lift.start()
+        await wait_until(lambda: esp32.connected)
+        await lift.send_ceiling("MEASURED", 1450, 80)
+        await wait_until(lambda: len(esp32.ceiling_history) >= 1)
+        assert esp32.ceiling_history[-1] == {
+            "t": "ceiling",
+            "status": "MEASURED",
+            "mm": 1450,
+            "age_ms": 80,
+        }
     finally:
         await lift.close()
         await esp32.stop()

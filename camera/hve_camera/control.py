@@ -220,6 +220,10 @@ class ControlLoop:
                 await self._lift.send_release(self._press)
                 self._lift_sending = False
                 self._press_dir = "stop"
+            # **止まっている間も天井の値を送る**（ほかの上部モジュールの上昇の判定に使う。
+            # protocol-modules §2.3）。中身と古さの扱いは `hold` に載せるものと同じ。
+            status, mm, age_ms = self._ceiling_triple(now)
+            await self._lift.send_ceiling(status, mm, age_ms)
             return
         if (
             not self._lift_sending
@@ -274,11 +278,13 @@ class ControlLoop:
         raw = self._lift.latest_state() or {}
 
         raw_ceiling = raw.get("ceiling") if isinstance(raw.get("ceiling"), dict) else {}
-        # 昇降部の判定は、自分が持ち主で昇降部が判定を返しているときだけ使う。
-        # それ以外（止まっている・別の画面が持ち主・`ceiling` が無い）は判定なし（protocol §4）
+        # 昇降部の判定は、**自分が持ち主**で昇降部が判定を返しているときだけ使う。
+        # 持ち主は `owner_name` で見る（`fk`・`ss` が動かしている間の判定と取り違えない。
+        # protocol-modules §5）。
         has_verdict = (
             link_ok
             and raw.get("owner") == "module"
+            and raw.get("owner_name") == self._params.get("module_name", "hve-cam")
             and "reason" in raw_ceiling
             and "ok" in raw_ceiling
         )
@@ -306,10 +312,16 @@ class ControlLoop:
                 "height_ok": bool(raw.get("height_ok", False)),
                 "top_detect": bool(raw.get("top_detect", False)),
                 "owner": raw.get("owner"),
+                "owner_name": raw.get("owner_name"),
+                "owner_operator": raw.get("owner_operator"),
                 "ui_clients": raw.get("ui_clients", 0),
                 #: 昇降部の IP（画面に昇降部へのリンクを出す。§4.6）
                 "lift_ip": getattr(self._lift, "current_host", None),
             },
+            #: 繋がっている上部モジュール（持ち主の `busy_label` を画面が引く。§1.6）
+            "modules": raw.get("modules", []),
+            #: 測定機構。`out` が `true` のとき画面に「腕が出ています」を出す（Spec-ui §1.6）
+            "arm": raw.get("arm"),
             "ceiling": {
                 "status": status,
                 "mm": mm,

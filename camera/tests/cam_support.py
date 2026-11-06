@@ -119,6 +119,7 @@ class FakeEsp32:
         self.hello_history: list[dict[str, Any]] = []
         self.hold_history: list[dict[str, Any]] = []
         self.release_history: list[dict[str, Any]] = []
+        self.ceiling_history: list[dict[str, Any]] = []
         self.state_history: list[dict[str, Any]] = []
         #: 昇降の設定（`GET /api/settings` が返す・`PUT /api/settings` が置き換える）
         self.lift_settings: dict[str, Any] = {
@@ -207,6 +208,8 @@ class FakeEsp32:
                 self.hold_history.append(data)
             elif kind == "release":
                 self.release_history.append(data)
+            elif kind == "ceiling":
+                self.ceiling_history.append(data)
 
     async def _get_settings(self, request: web.Request) -> web.Response:
         return web.json_response(
@@ -259,20 +262,32 @@ class FakeEsp32:
                 "top_detect": False,
                 "ceiling": {
                     "used": False,
+                    "from": "hve-cam",
                     "status": "MISSING",
                     "mm": None,
                     "age_ms": 0,
                     "ok": False,
                     "reason": "CEILING_STALE",
+                    "standalone": "USE",
                 },
                 "owner": None,
+                "owner_name": None,
+                "owner_operator": None,
+                "homed": True,
+                "modules": [
+                    {
+                        "name": "hve-cam",
+                        "role": "control",
+                        "operator": "human",
+                        "ceiling_sensor": True,
+                        "busy_label": None,
+                        "ip": "127.0.0.1",
+                        "fw": "fake-esp32-0.2.0",
+                    }
+                ],
+                "goto": None,
+                "arm": {"attached": None, "link": None, "confirm": None, "out": None, "drum": None},
                 "ui_clients": 0,
-                "module": {
-                    "connected": True,
-                    "ceiling_sensor": True,
-                    "ip": "127.0.0.1",
-                    "name": "hve-cam",
-                },
                 "provisional": [],
                 "fw": "fake-esp32-0.2.0",
             }

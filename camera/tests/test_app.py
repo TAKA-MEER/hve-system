@@ -199,11 +199,20 @@ async def test_hold_from_the_browser_reaches_the_esp32(rig: Rig) -> None:
     await ws.close()
 
 
-async def test_nothing_is_sent_while_idle(rig: Rig) -> None:
+async def test_no_hold_or_release_while_idle_but_ceiling_is_sent(rig: Rig) -> None:
+    """止まっている間も `ceiling` を送る（ほかの上部モジュールの上昇の判定に使う。§2.3）。
+
+    **変異 1 を本物の WS 経路で縛る。**`hold`・`release` は送らない。
+    """
     for _ in range(3):
         await rig.pump()
     assert rig.holds == []
     assert rig.releases == []
+    assert rig.esp32 is not None
+    esp32 = rig.esp32
+    await wait_until(lambda: bool(esp32.ceiling_history))  # WS 越しなので少し遅れて届く
+    assert rig.esp32.ceiling_history[-1]["t"] == "ceiling"
+    assert rig.esp32.ceiling_history[-1]["status"] == "MEASURED"
 
 
 async def test_press_increases_over_the_wire(rig: Rig) -> None:
@@ -629,6 +638,30 @@ async def test_fake_api_changes_the_ceiling_and_the_lift(fake_rig: Rig) -> None:
     assert state["ceiling"]["mm"] == 120
     assert state["lift"]["height_mm"] == 800
     assert state["lift"]["bottom"] is True
+
+
+async def test_fake_api_other_owner_and_arm_reach_the_screen_state(fake_rig: Rig) -> None:
+    """別の上部モジュールが持ち主・腕が出ている、を偽物 API で作れて、画面の `state` に届く。
+
+    自分の判定を出さず（変異 3）、`modules` の `busy_label`・`arm.out` を運ぶ。
+    """
+    rig = fake_rig
+    assert rig.client is not None
+    response = await rig.client.post(
+        "/api/fake",
+        json={"arm_out": True, "other_owner": {"name": "fk", "busy_label": "測定操作中"}},
+    )
+    assert response.status == 200
+    await rig.pump()
+    rig.lift._step(rig.clock())  # noqa: SLF001
+    state = await rig.camera.broadcast_state()
+    assert state["lift"]["owner_name"] == "fk"
+    assert state["lift"]["owner_operator"] == "auto"
+    assert state["ceiling"]["ok"] is None, "fk が持ち主のとき、自分の判定を出さない"
+    assert {m["name"]: m["busy_label"] for m in state["modules"]}["fk"] == "測定操作中"
+    assert state["arm"]["out"] is True
+    bad = await rig.client.post("/api/fake", json={"arm_out": "yes"})
+    assert bad.status == 400
 
 
 async def test_fake_api_can_freeze_the_ceiling(fake_rig: Rig) -> None:
