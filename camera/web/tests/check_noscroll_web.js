@@ -5,7 +5,7 @@
 //
 // docs/plan/spec/mockup/check_noscroll.js を、実装の画面（モックアップではない）向けに
 // 作り直したもの。状態の作り方は URL 引数ではなく POST /api/fake で偽物を操作する。
-// 17 の画面サイズ × 4 状態（通常・天井の値なし・設定画面・静止画の重ね表示）で、
+// 17 の画面サイズ × 複数の状態（通常・天井の値なし・設定画面・静止画の重ね表示）で、
 // ページ・要素のスクロールと中身のはみ出し、操作部品の画面外・カード外・小さすぎを検出する。
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -24,6 +24,7 @@ const states = [
   {name: '天井の値なし', fake: {ceiling: {status: 'READ_ERROR'}, height_mm: 1200, arm_out: null, other_owner: null}},
   {name: '設定画面', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true},
   {name: '設定画面（昇降部が ceiling_standalone に対応していない）', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true, legacy_lift: true},
+  {name: '設定画面（昇降部が ceiling_margin_mm に対応していない）', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true, legacy_margin: true},
   {name: '静止画の重ね表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, snapshot: true},
   // 別の上部モジュールが持ち主（長い busy_label）＋腕が出ている（WP-CAM-10）
   {name: '別の上部モジュール操作中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: true, other_owner: {name: 'ss', busy_label: '画像認識で操作中（長い表示の確認）'}}},
@@ -96,6 +97,16 @@ const MEASURE = () => {
           const response = await route.fetch();
           const body = await response.json();
           delete body.settings.ceiling_standalone;
+          return route.fulfill({response, json: body});
+        });
+      }
+      if (state.legacy_margin) {
+        // WP-CAM-12 より前の昇降部のふり: GET /api/settings から ceiling_margin_mm を消す
+        await page.route('**/api/settings', async (route) => {
+          if (route.request().method() !== 'GET') return route.continue();
+          const response = await route.fetch();
+          const body = await response.json();
+          delete body.settings.ceiling_margin_mm;
           return route.fulfill({response, json: body});
         });
       }

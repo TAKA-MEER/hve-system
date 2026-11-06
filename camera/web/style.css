@@ -148,7 +148,9 @@ td input.bad{border-color:var(--ng)}
   .sheet{padding:4px 12px;gap:2px} .sheet h1{font-size:14px}
   th,td{font-size:12px} td input{padding:2px 6px;font-size:12px}
   .row-actions .hbtn{padding:2px 8px;font-size:12px}
-  .prov{font-size:10px;padding:2px 6px} .err{font-size:11px}
+  .err{font-size:11px}
+  /* 天井の閾値の行が増えたので、仮値の一覧は省く（spec Spec-ui §2.3 の決定。ここで変えられない読み取り専用の説明） */
+  .prov{display:none}
 }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
 .toast.show{display:block}
