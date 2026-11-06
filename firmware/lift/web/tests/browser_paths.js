@@ -16,6 +16,8 @@
 //    反映されている
 // 7. 画面の上昇が、距離計を持つ上部モジュールの新しい近い値で CEILING_NEAR で止まり、
 //    その上部モジュールが切れる（出どころ無し）と天井を使わずに上がる
+// 8. 設定画面の天井の閾値（ceiling_margin_mm）。149 は PUT を出さず、2500 を保存すると PUT に
+//    ceiling_margin_mm: 2500 が載り、開き直すと反映され、2000 mm の天井で上昇が CEILING_NEAR で止まる
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -398,6 +400,60 @@ test('7 画面の上昇は近い天井で止まり、出どころが切れると
   } finally {
     if (source) { clearInterval(source.timer); source.close(); }
     watcher.close();
+    await cleanup();
+  }
+});
+
+/* --- 8. 天井の閾値の設定 ------------------------------------------------------ */
+test('8 天井の閾値は範囲の外で PUT を出さず、保存すると PUT に載って上昇の判定に効く', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, ceiling: null, arm: {out: null}});
+  const {page, errors, cleanup} = await openScreen(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  let source = null;
+  const putMargin = (mm) => fetch(`${BASE}/api/settings`).then((r) => r.json()).then((now) =>
+    fetch(`${BASE}/api/settings`, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...now.settings, ceiling_margin_mm: mm})}));
+  try {
+    const puts = [];
+    page.on('request', (request) => {
+      if (request.method() === 'PUT') puts.push(request.postData());
+    });
+    await page.click('#openSettings');
+    await page.waitForSelector('#settings.show');
+    const input = page.locator('#stBody input[data-axis="ceiling_margin_mm"]');
+    assert.equal(await input.inputValue(), '500', '既定は 500');
+    await input.fill('149');
+    assert.equal(await page.locator('#stSave').isDisabled(), true, '149 は保存できない');
+    await page.locator('#stSave').click({force: true}).catch(() => {});
+    assert.equal(puts.length, 0, `範囲の外では PUT を出さない（${JSON.stringify(puts)}）`);
+    await input.fill('2500');
+    await page.click('#stSave');
+    await page.waitForSelector('#settings.show', {state: 'hidden'});
+    assert.equal(puts.length, 1, `PUT が 1 回（${JSON.stringify(puts)}）`);
+    assert.equal(JSON.parse(puts[0]).ceiling_margin_mm, 2500, 'PUT に ceiling_margin_mm: 2500 が載る');
+    const saved = await (await fetch(`${BASE}/api/settings`)).json();
+    assert.equal(saved.settings.ceiling_margin_mm, 2500, 'サーバーに保存された');
+
+    await page.click('#openSettings');
+    await page.waitForSelector('#settings.show');
+    assert.equal(await input.inputValue(), '2500', '開き直すと反映されている');
+    await page.click('#stCancel').catch(async () => { await page.keyboard.press('Escape'); });
+
+    // 2000 mm の天井は、閾値 2500 なら近い（既定 500 なら通る）
+    source = await openSource({status: 'MEASURED', mm: 2000, age_ms: 0});
+    await page.waitForFunction(() => document.getElementById('bCeil').textContent.includes('2000 mm'),
+      null, {timeout: 3000});
+    await pressUp(page);
+    const stopped = await watcher.waitFor((s) => s.owner === 'ui' && s.reason === 'CEILING_NEAR',
+      1500, '閾値 2500 で 2000 mm の天井に止まる');
+    assert.equal(stopped.dir, 'stop');
+    await page.mouse.up();
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    if (source) { clearInterval(source.timer); source.close(); }
+    watcher.close();
+    await putMargin(500);
     await cleanup();
   }
 });

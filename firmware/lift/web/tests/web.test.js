@@ -127,6 +127,19 @@ test('設定の ceiling_standalone は真偽値だけ通し、欠けていても
   }
 });
 
+test('設定の ceiling_margin_mm は 150〜3000 の整数だけ通し、欠けていてもよい', () => {
+  assert.equal(app.SETTING_CEILING_MARGIN.key, 'ceiling_margin_mm');
+  assert.equal(app.validateSettingsDraft(GOOD).ok, true);
+  for (const good of [150, 500, 3000, '150', '3000', '1000']) {
+    assert.equal(app.validateSettingsDraft({...GOOD, ceiling_margin_mm: good}).ok, true, String(good));
+  }
+  for (const bad of [149, 3001, 0, -1, 500.5, '500.5', '', null, 'abc', true, '149', '3001']) {
+    const result = app.validateSettingsDraft({...GOOD, ceiling_margin_mm: bad});
+    assert.equal(result.ok, false, String(bad));
+    assert.equal(result.errors[0].key, 'ceiling_margin_mm');
+  }
+});
+
 test('高さは読めない値と値なしを区別する', () => {
   assert.equal(app.heightText(102, true), '高さ 102 mm');
   assert.equal(app.heightText(102, false), '高さ 読めない');

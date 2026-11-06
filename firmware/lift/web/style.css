@@ -106,8 +106,10 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
 .prov{padding:6px 10px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:12px}
 /* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう） */
 @media (max-height:480px){
-  .sheet{padding:8px 12px;gap:4px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px} .cdesc{display:none}
+  .sheet{padding:8px 12px;gap:4px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px} .cdesc{display:none} .cdesc-row{display:none}
   .prov{font-size:11px;padding:4px 8px} .err{min-height:0}
 }
+/* さらに低い画面（高さ 400px 以下）では、設定の行が増えたぶん仮値の帯も省く（Spec-ui §2.3 の表） */
+@media (max-height:400px){ .prov{display:none !important} }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
 .toast.show{display:block}

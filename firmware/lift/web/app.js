@@ -46,6 +46,13 @@ const SETTING_CEILING = {
   note: '（昇降部の画面・物理ボタンでも、通信できていれば天井で止める）',
 };
 
+/* 天井の閾値 [mm]（Spec-ui §2.3。150〜3000 の整数・既定 500）。欠けた GET は既定として読む */
+const SETTING_CEILING_MARGIN = {
+  key: 'ceiling_margin_mm', name: '天井の閾値', unit: 'mm',
+  abs_low: 150, abs_high: 3000, step: 1, default: 500,
+};
+const CEILING_MARGIN_NOTE = '上部モジュールの距離計から天井までこの距離以下なら上昇しない（既定 500）';
+
 /* 停止理由の文言（names §3。**文言は仮**） */
 const REASON_TEXT = {
   CEILING_NEAR: ['ng', '天井が近いため上昇できません'],
@@ -266,6 +273,22 @@ function validateSettingsDraft(draft) {
       key: SETTING_MOTOR.key,
       text: `${SETTING_MOTOR.name}: ${SETTING_MOTOR.abs_low}〜${SETTING_MOTOR.abs_high} ${SETTING_MOTOR.unit} の整数にしてください`,
     });
+  }
+  // 天井の閾値（150〜3000 の整数。ドラフトに無ければ検査しない＝保存では既定を入れて送る）
+  const marginRaw = draft[SETTING_CEILING_MARGIN.key];
+  if (marginRaw !== undefined) {
+    const margin = SETTING_CEILING_MARGIN;
+    const marginValue = Number(marginRaw);
+    if (marginRaw === '' || marginRaw === null || typeof marginRaw === 'boolean' || !isFinite(marginValue)) {
+      errors.push({key: margin.key, text: `${margin.name}: 数値を入れてください`});
+    } else if (!Number.isInteger(marginValue)) {
+      errors.push({key: margin.key, text: `${margin.name}: 整数にしてください`});
+    } else if (marginValue < margin.abs_low || marginValue > margin.abs_high) {
+      errors.push({
+        key: margin.key,
+        text: `${margin.name}: ${margin.abs_low}〜${margin.abs_high} ${margin.unit} の整数にしてください`,
+      });
+    }
   }
   // 単体の操作でも天井で止めるか（真偽値。欠けていてもよい＝既定 true）
   const ceilingValue = draft[SETTING_CEILING.key];
@@ -499,7 +522,7 @@ function validateSettingsInputs() {
   const badKeys = {};
   for (const error of errors) badKeys[error.key] = true;
 
-  for (const axis of SETTING_AXES) {
+  for (const axis of [...SETTING_AXES, SETTING_CEILING_MARGIN]) {
     const row = document.querySelector(`#stBody tr[data-key="${axis.key}"]`);
     if (!row) continue;
     const bad = !!badKeys[axis.key];
@@ -531,6 +554,10 @@ function openSettingsOverlay(settings, provisional) {
   }
   const motorCurrent = (settings || {})[SETTING_MOTOR.key];
   settings_draft[SETTING_MOTOR.key] = motorCurrent === undefined ? '' : motorCurrent;
+  // 閾値が欠けていれば既定（昇降部も欠けた形は 500 として読む）
+  const marginCurrent = (settings || {})[SETTING_CEILING_MARGIN.key];
+  settings_draft[SETTING_CEILING_MARGIN.key] =
+    marginCurrent === undefined || marginCurrent === null ? SETTING_CEILING_MARGIN.default : marginCurrent;
   // 欠けていれば true（昇降部も欠けた形は true として読む）
   settings_draft[SETTING_CEILING.key] = (settings || {})[SETTING_CEILING.key] !== false;
 
@@ -548,6 +575,10 @@ function openSettingsOverlay(settings, provisional) {
     `<tr data-key="${SETTING_MOTOR.key}"><td class="wrapcell">${SETTING_MOTOR.name}</td>` +
     `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_MOTOR.key}"` +
     ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>` +
+    `<tr data-key="${SETTING_CEILING_MARGIN.key}"><td class="wrapcell">${SETTING_CEILING_MARGIN.name}</td>` +
+    `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_CEILING_MARGIN.key}"` +
+    ` value="${settings_draft[SETTING_CEILING_MARGIN.key]}"></td><td>${SETTING_CEILING_MARGIN.unit}</td></tr>` +
+    `<tr class="cdesc-row"><td colspan="5" class="wrapcell"><span class="cdesc">${CEILING_MARGIN_NOTE}</span></td></tr>` +
     `<tr data-key="${SETTING_CEILING.key}"><td colspan="5" class="wrapcell">` +
     `<label><input type="checkbox" data-axis="${SETTING_CEILING.key}"` +
     `${settings_draft[SETTING_CEILING.key] ? ' checked' : ''}>${SETTING_CEILING.name}` +
@@ -559,6 +590,8 @@ function openSettingsOverlay(settings, provisional) {
         settings_draft[SETTING_CEILING.key] = input.checked;
       } else if (input.dataset.axis === SETTING_MOTOR.key) {
         settings_draft[SETTING_MOTOR.key] = input.value;
+      } else if (input.dataset.axis === SETTING_CEILING_MARGIN.key) {
+        settings_draft[SETTING_CEILING_MARGIN.key] = input.value;
       } else {
         settings_draft[input.dataset.axis][input.dataset.f] = input.value;
       }
@@ -591,6 +624,7 @@ async function saveSettingsOverlay() {
     };
   }
   payload[SETTING_MOTOR.key] = Number(settings_draft[SETTING_MOTOR.key]);
+  payload[SETTING_CEILING_MARGIN.key] = Number(settings_draft[SETTING_CEILING_MARGIN.key]);
   payload[SETTING_CEILING.key] = settings_draft[SETTING_CEILING.key] !== false;
 
   const save = document.getElementById('stSave');
@@ -672,6 +706,6 @@ if (typeof module === 'object' && module !== null) {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
     formatSpeed, reasonText, ceilingText, heightText, ownerText, buttonNoteText, moveText, stateStale,
     ownerBusyLabel, modulesText, armNoticeText,
-    validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, MOTOR_NOTE,
+    validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, SETTING_CEILING_MARGIN, MOTOR_NOTE,
   };
 }
