@@ -381,6 +381,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   - `cmd_codec`: `state` の `ceiling.standalone`
   - `src/main.cpp`: 起動時（NVS を読んだあと）と `PUT /api/settings` の成功時に `set_ceiling_standalone` を呼ぶ。`GET` に載せる
   - `lift_core_version` を上げる
+  - **今の試験のうち「昇降部の画面・物理ボタンの上昇は天井を使わない」を確かめているもの（#4c・`WP-LIFT-12`）は、既定が `true` になると赤になる。消したり緩めたりせず、`ceiling_standalone = false` の場合の試験に書き換える**（`true` の場合は下の変異の試験で足す）
+  - **`docs/使い方.md`**: 物理ボタンの節の「天井の距離計は見ない」と、昇降部の画面の天井の扱いを直す（このパケットだけで実機の挙動が変わる。既定で入なので単体の上昇が天井で止まるようになる）
 - 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL を通した試験で縛る。純関数だけで済ませない）
   1. ※ 設定が `true` で、カメラモジュールが `ceiling` で `MEASURED` 300 mm を送っている間に、昇降部の画面（`ui`）の上昇が止まらない
   2. ※ 同じ条件で、物理ボタン（`button`）の上昇が止まらない
