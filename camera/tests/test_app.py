@@ -199,11 +199,20 @@ async def test_hold_from_the_browser_reaches_the_esp32(rig: Rig) -> None:
     await ws.close()
 
 
-async def test_nothing_is_sent_while_idle(rig: Rig) -> None:
+async def test_no_hold_or_release_while_idle_but_ceiling_is_sent(rig: Rig) -> None:
+    """止まっている間も `ceiling` を送る（ほかの上部モジュールの上昇の判定に使う。§2.3）。
+
+    **変異 1 を本物の WS 経路で縛る。**`hold`・`release` は送らない。
+    """
     for _ in range(3):
         await rig.pump()
     assert rig.holds == []
     assert rig.releases == []
+    assert rig.esp32 is not None
+    esp32 = rig.esp32
+    await wait_until(lambda: bool(esp32.ceiling_history))  # WS 越しなので少し遅れて届く
+    assert rig.esp32.ceiling_history[-1]["t"] == "ceiling"
+    assert rig.esp32.ceiling_history[-1]["status"] == "MEASURED"
 
 
 async def test_press_increases_over_the_wire(rig: Rig) -> None:

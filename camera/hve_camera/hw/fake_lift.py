@@ -74,6 +74,8 @@ class FakeLift(LiftPort):
         #: 受けた `hold`・`release` の履歴（試験用）
         self.hold_history: List[Dict[str, Any]] = []
         self.release_history: List[Dict[str, Any]] = []
+        #: 受けた `ceiling` の履歴（試験用）
+        self.ceiling_history: List[Dict[str, Any]] = []
 
     # --- 外から偽の値を変える ---------------------------------------------------------------------
 
@@ -168,6 +170,21 @@ class FakeLift(LiftPort):
             self._cmd = {"dir": "stop", "speed": 0}
             self._cmd_at_ms = self._clock()
 
+    async def send_ceiling(
+        self,
+        ceiling_status: str,
+        ceiling_mm: Optional[int],
+        ceiling_age_ms: int,
+    ) -> None:
+        """`ceiling` を受ける。**止まっている間も届く**（protocol-modules §2.3）。"""
+        body = {
+            "status": ceiling_status,
+            "mm": ceiling_mm,
+            "age_ms": int(ceiling_age_ms),
+        }
+        self.ceiling_history.append(body)
+        self._ceiling = dict(body)
+
     def link_ok(self, now_ms: float, timeout_ms: float) -> bool:
         """プロセス内に線は無い。`state` を作り始めていれば繋がっている扱い。"""
         return self._state is not None
@@ -242,6 +259,7 @@ class FakeLift(LiftPort):
             int(self._ceiling.get("age_ms", 0)),
         )
         self._seq += 1
+        owner = self._owner_press is not None
         self._state = {
             "t": "state",
             "seq": self._seq,
@@ -256,21 +274,33 @@ class FakeLift(LiftPort):
             "height_ok": True,
             "top_detect": False,
             "ceiling": {
-                "used": self._owner_press is not None,
+                "used": owner,
+                "from": "hve-cam",
                 "status": self._ceiling.get("status", "MISSING"),
                 "mm": self._ceiling.get("mm"),
                 "age_ms": int(self._ceiling.get("age_ms", 0)),
                 "ok": ok,
                 "reason": ceiling_reason,
+                "standalone": "USE",
             },
-            "owner": "module" if self._owner_press is not None else None,
+            "owner": "module" if owner else None,
+            "owner_name": "hve-cam" if owner else None,
+            "owner_operator": "human" if owner else None,
+            "homed": True,
+            "modules": [
+                {
+                    "name": "hve-cam",
+                    "role": "control",
+                    "operator": "human",
+                    "ceiling_sensor": True,
+                    "busy_label": None,
+                    "ip": None,
+                    "fw": "fake-0.2.0",
+                }
+            ],
+            "goto": None,
+            "arm": {"attached": None, "link": None, "confirm": None, "out": None, "drum": None},
             "ui_clients": 0,
-            "module": {
-                "connected": True,
-                "ceiling_sensor": True,
-                "ip": None,
-                "name": "hve-cam",
-            },
             "provisional": ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],
             "fw": "fake-0.2.0",
         }

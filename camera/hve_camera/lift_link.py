@@ -2,8 +2,9 @@
 
 [DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §1・§2。
 カメラ部は**クライアント側**（昇降部 ESP32 がサーバ）。
-繋いだら `hello`、昇降を動かしている間だけ `hold`、離したら `release` を送る。
-**止まっている間は送らない**（protocol §1）。
+繋いだら `hello`、昇降を動かしている間は `hold`、離したら `release` を送る。
+**昇降を命じていない間も `ceiling` を送り続ける**（ほかの上部モジュールの天井の判定に使う。
+[-protocol-modules.md](../../docs/plan/detailed/DetailedDesign-protocol-modules.md) §2.3）。
 **上下端の判定はしない**（spec [Spec-safety.md](../../docs/plan/spec/Spec-safety.md) §2・`DD-4`）。
 
 - `LiftPort`: 昇降部への出口の抽象。**`FakeLift`（`hw/fake_lift.py`）も同じものを実装する**ので、
@@ -42,6 +43,11 @@ def _host_of(url: str) -> Optional[str]:
 #: 昇降部の `LIFT_WS_MODULE_PATH` と同じ値。
 LIFT_WS_MODULE_PATH = "/ws/module"
 
+#: `hello` の `role`・`operator`（[-protocol-modules.md](../../docs/plan/detailed/DetailedDesign-protocol-modules.md) §1.1）。
+#: カメラモジュールの昇降の命令はいつも人の操作の中継なので、定数で持つ（`params.toml` に置かない）。
+MODULE_ROLE = "control"
+MODULE_OPERATOR = "human"
+
 #: `hello` の `fw`。表示とログのためだけ（判定に使わない）。
 _FW = "0.1.0"
 
@@ -76,6 +82,15 @@ class LiftPort(ABC):
         ceiling_age_ms: int,
     ) -> None:
         """昇降部へ `hold` を送る。`speed` は目標の速さ [mm/s] の整数。`ceiling_mm` は `MEASURED` のときだけ値が入る。"""
+
+    @abstractmethod
+    async def send_ceiling(
+        self,
+        ceiling_status: str,
+        ceiling_mm: Optional[int],
+        ceiling_age_ms: int,
+    ) -> None:
+        """昇降部へ `ceiling` を送る。**昇降を命じていない間も送る**（protocol-modules §2.3）。"""
 
     @abstractmethod
     async def send_release(self, press: int) -> None:
@@ -167,21 +182,46 @@ class LiftLink(LiftPort):
         ws = self._ws
         if ws is None or ws.closed:
             return
-        ceiling: Dict[str, Any] = {
-            "status": str(ceiling_status),
-            "age_ms": int(ceiling_age_ms),
-        }
-        if ceiling_status == "MEASURED":
-            ceiling["mm"] = int(ceiling_mm) if ceiling_mm is not None else 0
         message = {
             "t": "hold",
             "press": int(press),
             "dir": direction,
             "speed": int(speed),
-            "ceiling": ceiling,
+            "ceiling": self._ceiling_body(ceiling_status, ceiling_mm, ceiling_age_ms),
         }
         with contextlib.suppress(Exception):
             await ws.send_str(json.dumps(message))
+
+    async def send_ceiling(
+        self,
+        ceiling_status: str,
+        ceiling_mm: Optional[int],
+        ceiling_age_ms: int,
+    ) -> None:
+        """`ceiling` を送る。**止まっている間も**送り続ける（protocol-modules §2.3）。
+
+        中身は `hold` に載せるものと同じ。**繋がっていなければ捨てる。**
+        """
+        ws = self._ws
+        if ws is None or ws.closed:
+            return
+        message = {"t": "ceiling"}
+        message.update(self._ceiling_body(ceiling_status, ceiling_mm, ceiling_age_ms))
+        with contextlib.suppress(Exception):
+            await ws.send_str(json.dumps(message))
+
+    @staticmethod
+    def _ceiling_body(
+        ceiling_status: str, ceiling_mm: Optional[int], ceiling_age_ms: int
+    ) -> Dict[str, Any]:
+        """`hold`・`ceiling` に載せる天井の値（形をそろえる）。"""
+        body: Dict[str, Any] = {
+            "status": str(ceiling_status),
+            "age_ms": int(ceiling_age_ms),
+        }
+        if ceiling_status == "MEASURED":
+            body["mm"] = int(ceiling_mm) if ceiling_mm is not None else 0
+        return body
 
     async def send_release(self, press: int) -> None:
         """`release` を送る。**繋がっていなければ捨てる**（持ち主が空なら止まっている）。"""
@@ -234,6 +274,8 @@ class LiftLink(LiftPort):
                 "t": "hello",
                 "ceiling_sensor": self._ceiling_sensor,
                 "name": self._name,
+                "role": MODULE_ROLE,
+                "operator": MODULE_OPERATOR,
                 "fw": _FW,
             }
         )

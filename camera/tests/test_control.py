@@ -223,14 +223,14 @@ async def test_close_ceiling_stops_the_fake_lift_up() -> None:
 async def test_idle_ceiling_shows_own_measurement_without_verdict() -> None:
     """止まっている間は、自分で測った値だけを載せ、判定（ok・reason）は null（protocol §4）。
 
-    偽昇降部は止まっていても `ceiling`（`CEILING_STALE`）を返してくるので、
+    偽昇降部は止まっていても `ceiling`（`ok`・`reason`）を返してくるので、
     持ち主でないときに判定を拾わないことを縛る。
     """
     rig = Loop()
     await rig.prime()
     state = await rig.step()
     assert state["lift"]["owner"] is None
-    assert rig.lift.latest_state()["ceiling"]["reason"] == "CEILING_STALE", "前提: 昇降部は返す"
+    assert rig.lift.latest_state()["ceiling"]["reason"] == "NONE", "前提: 昇降部は判定を返す"
     assert state["ceiling"]["status"] == "MEASURED"
     assert state["ceiling"]["mm"] == 2000
     assert state["ceiling"]["ok"] is None
@@ -252,6 +252,44 @@ async def test_verdict_only_while_module_is_owner() -> None:
     assert state["lift"]["owner"] is None
     assert state["ceiling"]["ok"] is None
     assert state["ceiling"]["reason"] is None
+
+
+async def test_verdict_is_hidden_when_another_module_is_owner() -> None:
+    """**変異 3 の芯。**`owner == "module"` だけで自分とみなすと、`fk` が持ち主のときの
+    天井の判定を自分のものとして画面に出す。`owner_name` で見分ける（§5）。
+    """
+    rig = Loop()
+    await rig.prime()
+    raw = dict(rig.lift.latest_state())
+    raw["owner"] = "module"
+    raw["owner_name"] = "fk"
+    raw["owner_operator"] = "auto"
+    raw["ceiling"] = dict(raw["ceiling"], ok=False, reason="CEILING_NEAR")
+    rig.lift._state = raw  # noqa: SLF001 - 偽昇降部の state を差し替える
+    state = rig.loop.build_state(1)
+    assert state["lift"]["owner_name"] == "fk"
+    assert state["ceiling"]["ok"] is None, "fk が持ち主のときの判定を自分に使わない"
+    assert state["ceiling"]["reason"] is None
+
+
+async def test_ceiling_is_sent_while_idle_with_status_and_age() -> None:
+    """**変異 1・2 の芯。**止まっている間も `ceiling` を送り、古さもそのまま運ぶ。
+
+    読めない値（まだ 1 行も来ていない）は `MEASURED` にせず `READ_ERROR` で送る。
+    """
+    rig = Loop()
+    await rig.step()  # まだ天井を読んでいない
+    first = rig.lift.ceiling_history[-1]
+    assert first["status"] == "READ_ERROR", "読めない値を MEASURED で送らない"
+    assert first["mm"] is None
+
+    await rig.step()  # 天井を読んだあと
+    assert rig.lift.ceiling_history[-1]["status"] == "MEASURED"
+    assert rig.lift.ceiling_history[-1]["mm"] == 2000
+
+    rig.hw.freeze_ceiling()
+    await rig.step(700)  # 読み値が古くなる
+    assert rig.lift.ceiling_history[-1]["age_ms"] >= 700, "古さを 0 にしない"
 
 
 async def test_ceiling_link_lost_is_false_link_lost() -> None:
@@ -283,6 +321,10 @@ async def test_state_shape() -> None:
     assert state["lift"]["dir"] == "up"
     assert state["lift"]["top_detect"] is False
     assert state["lift"]["owner"] == "module"
+    assert state["lift"]["owner_name"] == "hve-cam"
+    assert state["lift"]["owner_operator"] == "human"
+    assert [m["name"] for m in state["modules"]] == ["hve-cam"]
+    assert state["arm"] is not None and state["arm"]["out"] is None
     assert state["lift"]["lift_ip"] is None, "プロセス内に線は無い"
     assert state["ceiling"]["status"] == "MEASURED"
     assert state["ceiling"]["ok"] is True
