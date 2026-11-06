@@ -62,6 +62,9 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-14` | 6 | **目標の高さへの移動（`goto`）**（spec §2.1。`ARRIVED`・`PREEMPTED`・`TARGET_RANGE`・`state.goto`・`LIFT_GOTO_TOL_MM`） | LIFT-13 | 不要（実機の確認は管理担当） |
 | `WP-LIFTUI-03` | 6 | 昇降部の画面・偽の昇降部・`lift_probe` を複数の上部モジュールに（`modules`・`owner_name`・`busy_label`・「腕が出ています」・名乗り・`goto`） | LIFT-13（取り決め） | 不要 |
 | `WP-CAM-10` | 6 | カメラモジュール（アプリ・画面・偽の昇降部）を複数の上部モジュールに（`hello` の `role`・`operator`・止まっている間の `ceiling`・`owner_name` で自分を見分ける・持ち主の表示） | LIFT-13（取り決め） | 不要（偽物のモード） |
+| `WP-LIFT-15` | 7 | **単体の操作でも天井で止める**（2026-11-06。設定 `ceiling_standalone`・単体の操作の天井の判定・`state.ceiling.standalone`） | LIFT-13 | 不要（実機の確認は管理担当） |
+| `WP-LIFTUI-04` | 7 | 昇降部の画面・偽の昇降部に `ceiling_standalone`（設定画面の切り替え・天井の扱いの表示） | LIFT-15（取り決め）・LIFTUI-03 | 不要 |
+| `WP-CAM-11` | 7 | カメラモジュールに `ceiling_standalone`（設定の中継・設定画面の切り替え） | LIFT-15（取り決め）・CAM-10 | 不要（偽物のモード） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -70,6 +73,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **段階 6（2026-11-05。上部モジュールの複数対応。[-protocol-modules.md](DetailedDesign-protocol-modules.md)）**: `WP-LIFTUI-03` と `WP-CAM-10` は取り決めが書いてあるので `WP-LIFT-13` と並べて進められる。**ただし `state` の `module` → `modules` は互換が無く、カメラモジュールは `owner_name` で自分を見分けるようになるので、`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10` の 3 つ揃えてから実機に入れる。**`WP-LIFT-14` は `WP-LIFT-13` のあと（`goto` を受けない昇降部は `goto` を知らない `t` として捨てるだけなので、あとから入れてよい）。
 **揃うまで、fk-system・ss-system は今の昇降部へ繋いで上昇させない**（今のファームは、距離計を持たない接続の上昇に天井を使わない。fk・ss に伝え済み）。
+
+**段階 7（2026-11-06。単体の操作でも天井で止める。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5）**: 段階 6 の 3 つ（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`）のあと。単体の操作で使う天井の値は、`WP-LIFT-13` の出どころと `WP-CAM-10` の止まっている間の `ceiling` が無いと届かない。`ceiling_standalone` は設定 API で欠けてもよい（[-protocol.md](DetailedDesign-protocol.md) §3）ので、**3 つは互換を崩さず別々に入れてよい**（`WP-CAM-11` の前のカメラモジュールは設定を中継しないだけ）。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -366,6 +371,43 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   4. `hello` に `operator` を載せない・`auto` を載せる
   5. 画面が `fk` の `busy_label` を出さない
 - **実機で管理担当が確かめる**（`WP-LIFT-13`・`WP-LIFTUI-03` と揃えて）: カメラモジュールが止まっている間も、昇降部の `state.ceiling.from` が `hve-cam` で古くならない／`lift_probe`（`fk`）が動かしている間、カメラモジュールの画面に「測定操作中」と出て、天井の判定は自分のものとして出ない
+
+### `WP-LIFT-15` 単体の操作でも天井で止める
+
+- 読む節: spec [Spec-safety.md](../spec/Spec-safety.md) §2 #3〜#4c・[Spec-ui.md](../spec/Spec-ui.md) §2・§2.2・[Spec-module.md](../spec/Spec-module.md) §2・§3、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.3〜§2.5・§3、[-protocol.md](DetailedDesign-protocol.md) §3、[-names.md](DetailedDesign-names.md) の「単体の操作でも天井で止める」の表
+- 作るもの:
+  - `lift_settings`: `ceiling_standalone`（`LIFT_CEILING_STANDALONE_DEFAULT` = `true`）。**JSON に無ければ `true` で読み、ほかの項目は捨てない**（NVS の古い形）。`PUT` 用に「欠けていれば今の値を保つ」読み方。真偽値でなければ検証の誤り
+  - `lift_controller`: `set_ceiling_standalone`。持ち主が `ui`・`button` のとき -protocol-modules §2.5 の表で判定する（出どころの値は `WP-LIFT-13` のものを使う）。`state.ceiling.standalone` を毎周期出す
+  - `cmd_codec`: `state` の `ceiling.standalone`
+  - `src/main.cpp`: 起動時（NVS を読んだあと）と `PUT /api/settings` の成功時に `set_ceiling_standalone` を呼ぶ。`GET` に載せる
+  - `lift_core_version` を上げる
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL を通した試験で縛る。純関数だけで済ませない）
+  1. ※ 設定が `true` で、カメラモジュールが `ceiling` で `MEASURED` 300 mm を送っている間に、昇降部の画面（`ui`）の上昇が止まらない
+  2. ※ 同じ条件で、物理ボタン（`button`）の上昇が止まらない
+  3. ※ 設定が `false` でも天井で止まる
+  4. ※ カメラモジュールが繋がっていない・値が `CEILING_STALE_MS` より古いとき、`ui` の上昇を `CEILING_STALE` で止める
+  5. ※ `ui` で上昇している最中にカメラモジュールの値が古くなっても、前の判定のまま止め続ける（周期ごとに決め直さない）
+  6. ※ 新しい値が `READ_ERROR` のとき `ui` の上昇を許す
+  7. ※ 設定が上部モジュールからの命令に効く（`false` にすると `fk` の上昇が天井で止まらない）
+  8. NVS に `ceiling_standalone` の無い形で保存してあると、全体が既定値になる・`false` で読む
+  9. `ceiling_standalone` の無い `PUT` で、保存してある `false` が `true` に戻る
+  10. `state.ceiling.standalone` が、設定が `false` のとき `SETTING_OFF` にならない・出どころが無いとき `NO_SOURCE` にならない
+- **実機で管理担当が確かめる**（`WP-LIFTUI-04` と揃えて）: カメラモジュールを繋いだまま昇降部の画面と物理ボタンで上げ、天井（板をかざす）で `CEILING_NEAR` で止まる／カメラモジュールの電源を落とすと天井を使わずに上げられ、画面に「通信なし」と出る／設定を切ると天井で止まらない／電源を入れ直しても設定が残る
+
+### `WP-LIFTUI-04` 昇降部の画面・偽の昇降部に `ceiling_standalone`
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§0.2・§2・§2.2、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5・§3、[-protocol.md](DetailedDesign-protocol.md) §3
+- 作るもの:
+  - 昇降部の画面 `firmware/lift/web/`: 設定画面に「単体の操作でも天井で止める」の切り替え。天井の表示に `ceiling.standalone`（`SETTING_OFF` → 「天井: 使わない（設定が切）」・`NO_SOURCE` → 「天井: 使わない（通信なし）」）。純関数の試験。スクロールの検査
+  - 偽の昇降部 `tools/fake_lift_server.py`: 設定の `ceiling_standalone`（欠けた `PUT` は今の値を保つ）・単体の操作の天井の判定（`WP-LIFT-15` と同じ）・`state.ceiling.standalone`
+  - **`docs/使い方.md`** の昇降部の画面の節（設定の欄・天井の表示）
+- 受け入れ: `.venv/bin/python -m pytest tools/tests`・`node firmware/lift/web/tests/web.test.js`・スクロールの検査が通る。**変異**: 画面が `NO_SOURCE` で「使わない」を出さない／保存で `ceiling_standalone` を送らない／偽の昇降部が単体の操作に天井を使わない／偽の昇降部が欠けた `PUT` で `true` に戻す → 赤
+
+### `WP-CAM-11` カメラモジュールに `ceiling_standalone`
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§2・§2.2、[-protocol.md](DetailedDesign-protocol.md) §3・§4
+- 作るもの: `camera/hve_camera/settings.py`（真偽値の検証）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない。`motor_max_pct` と同じ）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の切り替え）・`state.lift` に昇降部の `ceiling.standalone` を載せ、天井のバッジは**昇降部の画面・物理ボタンが持ち主で `USE` でないとき**「天井: 使わない（設定が切／通信なし）」と出す・**`docs/使い方.md`**
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `ceiling_standalone` を送らない／自分で保存する／検証が `"yes"` を通す／`GET` が `ceiling_standalone` を落とす → 赤
 
 ### `WP-LIFT-12` 点検用の物理ボタン
 

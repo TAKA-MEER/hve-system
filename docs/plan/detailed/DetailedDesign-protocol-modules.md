@@ -103,16 +103,30 @@
 | --- | --- |
 | 距離計を持つ上部モジュール | 自分の `hold`・`goto` に載せた値（今のまま） |
 | **距離計を持たない上部モジュール（fk・ss）** | **距離計を持つ上部モジュール（§2.3 の出どころになる接続だけ）の最新の値**と、受け取ってからの経過を足した古さ。**無い・古い・距離計を持つ上部モジュールが繋がっていないときは止める（`CEILING_STALE`）**（spec #4。2026-11-01 に `H-X11` を改めた決まり。**今の §3.1 の「`ceiling_sensor: false` なら使わない」は、この行で置き換える**） |
-| 昇降部の画面・物理ボタン | 使わない（今のまま。spec #4c） |
+| 昇降部の画面・物理ボタン | **設定 `ceiling_standalone`（既定 `true`）が `true` で、出どころ（§2.3）の新しい値があるときだけ、その値を使う**（§2.5。2026-11-06 spec #4c）。それ以外は使わない |
 
 距離計を持つ上部モジュールが 2 台以上のときは未定（spec `H-M5`）。いまはカメラモジュールだけなので、2 台目が名乗ったら**近い方（厳しい側）**を使う案にしておく。
+
+### 2.5 単体の操作の天井（2026-11-06。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4c・[Spec-ui.md](../spec/Spec-ui.md) §2.2）
+
+持ち主が昇降部の画面（`ui`）・物理ボタン（`button`）のとき、`tick` のたびに次の順で決める。**周期ごとに決め直す**（上昇中に出どころが古くなれば、次の周期から使わない）。
+
+| # | 条件 | 判定 | `state.ceiling.standalone` |
+| --- | --- | --- | --- |
+| 1 | 設定 `ceiling_standalone` が `false` | 天井を使わない（`ok`） | `SETTING_OFF` |
+| 2 | 出どころ（§2.3）が無い、または**どの出どころの値も**受け取ってからの経過 ＋ `age_ms` が `CEILING_STALE_MS` を超えた | 天井を使わない（`ok`）。**`CEILING_STALE` にしない**（上部モジュールからの命令と逆。spec #4c） | `NO_SOURCE` |
+| 3 | それ以外（新しい値がある） | その値を `ceiling_check` に渡す（2 台以上なら新しい値の中で近い方。§2.4）。`MEASURED` の閾値以下・`TOO_NEAR` → `CEILING_NEAR`、`NO_ECHO` → `OUT_OF_RANGE`（`ok`）、**`READ_ERROR`・`MISSING` → `CEILING_STALE`（止める。通信はできていて距離計が読めないため）** | `USE` |
+
+- `state.ceiling.standalone` は、**持ち主が誰でも（いなくても）**、いま単体の操作で上げたらどうなるかを出す（画面が押す前から「天井: 使わない（設定が切）」などと出せるように）。`ceiling.used` は今のとおり「いまの持ち主の命令に天井の値を使っているか」で、持ち主が `ui`・`button` で #3 のとき `true`。
+- 上部モジュールからの命令（§2.4）には設定は効かない。
+- 2 の「古い」は §2.4 と同じ `CEILING_STALE_MS`。2 と 3 の境目で、古くなった値を `CEILING_STALE` として使わないこと（それをすると #4 になり、通信が途切れたときに単体で上げられなくなる）。
 
 ## 3. 昇降部 → 上部モジュール（`state` に足すもの）
 
 ```json
 {"t":"state", "…今のまま…": "…",
  "owner":"module","owner_name":"fk","owner_operator":"auto","homed":true,
- "ceiling":{"used":true,"from":"hve-cam","status":"MEASURED","mm":1450,"age_ms":95,"ok":true,"reason":"NONE"},
+ "ceiling":{"used":true,"from":"hve-cam","status":"MEASURED","mm":1450,"age_ms":95,"ok":true,"reason":"NONE","standalone":"USE"},
  "modules":[{"name":"hve-cam","role":"control","operator":"human","ceiling_sensor":true,"busy_label":null,"ip":"192.168.5.23","fw":"0.2.0"},
             {"name":"fk","role":"control","operator":"auto","ceiling_sensor":false,"busy_label":"測定操作中","ip":"192.168.5.10","fw":"0.1.0"}],
  "goto":{"by":"fk","press":21,"target_mm":1200,"status":"MOVING","reason":"NONE"},
@@ -126,6 +140,7 @@
 | **`owner_operator`** | `human` / `auto` / `null`。`ui`・`button` は `human`、`module` はその接続の `operator`、`arm` は `auto` |
 | **`homed`** | 原点を取ったか（電源を入れてから一度下端に着いたか）。`height_ok: false` で `homed: true` なら、下端スイッチの誤りなど（spec [Spec-safety.md](../spec/Spec-safety.md) §1.2） |
 | `ceiling.from` | 判定に使った天井の値を送ってきた上部モジュールの `name`（spec §3「どの上部モジュールから来たか」） |
+| **`ceiling.standalone`** | `USE` / `SETTING_OFF` / `NO_SOURCE`。単体の操作（昇降部の画面・物理ボタン）で天井を使うか・使わない理由（§2.5。2026-11-06）。**足すだけの変更**なので、fk・ss に確かめ直さなくてよい（読まなければ今のまま） |
 | **`modules`** | 繋がっている接続の一覧（`observe` を含む）。**今の `module`（1 つ）を置き換える** |
 | **`goto`** | 最後の `goto`。`by`（送った接続の `name`）・`press`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason`（止めた理由。§3.1）。次の `goto` まで残す。起動してから無ければ `null` |
 | **`arm`** | 測定機構（spec §3・§5）。`attached`（コネクタを検知しているか）・`link`（アームの制御器と通信できて、腕の角度が古くないか）・`confirm`（コネクタの確認待ち。`null` / `DETACHED` / `ATTACHED`）・`out`（腕が格納位置にないか）・`drum`（ドラムの状態）。**名前だけ決め、`link`・`out`・`drum` の中身はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから。**分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**`attached: false` は「付いていないと検知した」ときだけ**で、コネクタの検知を作るまでは `attached` も `null`。`out: false` も「格納位置にあると知らされた」ときだけ。fk-system は `attached: false` を「付いていない」と読んで機体を動かし、`null` は「腕の状態が読めない」として動かさない |

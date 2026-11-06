@@ -148,6 +148,15 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | `state` のフィールド | **`owner_name`**・**`owner_operator`**・**`homed`**・**`modules`**（今の `module` を置き換える）・**`goto`**・**`arm`**・`ceiling.from` を足す。`owner` に `arm` を足す（名前だけ） |
 | **`LiftHal::homed`** | 原点を取ったか（`EncoderHeight` から。`state.homed` の元。`WP-LIFT-13`） |
 
+**単体の操作でも天井で止める（2026-11-06。`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`）で足すもの**。中身は [-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5・[-protocol.md](DetailedDesign-protocol.md) §3:
+
+| 名前 | 中身 |
+| --- | --- |
+| **`LiftSettings::ceiling_standalone`** / 設定の JSON の **`ceiling_standalone`** | 単体の操作でも天井で止めるか（真偽値。既定 `true`。NVS に保存） |
+| **`LIFT_CEILING_STANDALONE_DEFAULT`** | `lift_settings.h`。`true`（spec [Spec-ui.md](../spec/Spec-ui.md) §2.2） |
+| **`LiftController::set_ceiling_standalone`** | 設定を `LiftController` に持たせる（`set_motor_max_pct` と同じく、起動時と `PUT` 成功時に `main.cpp` が呼ぶ） |
+| **`StandaloneCeiling`** / `state` の **`ceiling.standalone`** | `USE` / `SETTING_OFF` / `NO_SOURCE` |
+
 `POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
 偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
 
