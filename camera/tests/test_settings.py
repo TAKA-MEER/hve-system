@@ -62,6 +62,16 @@ def test_the_protocol_example_settings_pass():
     assert validate_settings(FULL_DEFAULTS, PARAMS) == []
 
 
+def test_ceiling_standalone_is_optional_and_boolean():
+    """`ceiling_standalone` は無くてもよい（昇降部が対応していない・古い中継）。あれば真偽値だけ。"""
+    assert validate_settings(FULL_DEFAULTS, PARAMS) == []
+    for value in (True, False):
+        assert validate_settings({**FULL_DEFAULTS, "ceiling_standalone": value}, PARAMS) == []
+    for bad in ("yes", "true", 0, 1, None, [], {}):
+        errors = validate_settings({**FULL_DEFAULTS, "ceiling_standalone": bad}, PARAMS)
+        assert any("ceiling_standalone" in e for e in errors), bad
+
+
 def test_the_defaults_in_the_code_are_the_protocol_examples():
     """実装の既定値が protocol §3 の例の値と食い違わない。"""
     assert settings_mod._DEFAULT_SETTINGS == PROTOCOL_DEFAULTS

@@ -315,6 +315,9 @@ class ControlLoop:
                 "owner_name": raw.get("owner_name"),
                 "owner_operator": raw.get("owner_operator"),
                 "ui_clients": raw.get("ui_clients", 0),
+                #: 昇降部の画面・物理ボタンが天井を使うか・使わない理由（`USE`／`SETTING_OFF`／`NO_SOURCE`。
+                #: 無いか知らない値なら `None`。protocol-modules §2.5）
+                "ceiling_standalone": raw_ceiling.get("standalone"),
                 #: 昇降部の IP（画面に昇降部へのリンクを出す。§4.6）
                 "lift_ip": getattr(self._lift, "current_host", None),
             },

@@ -35,6 +35,7 @@ from hve_camera.lift_resolve import resolve_lift_host
 from hve_camera.settings import (
     LIFT_AXES,
     MOTOR_MAX_PCT_DEFAULT,
+    CEILING_STANDALONE_KEY,
     MOTOR_MAX_PCT_KEY,
     OWN_AXES,
     save_settings,
@@ -139,6 +140,7 @@ class CameraApp:
                 axis: dict(settings[axis]) for axis in LIFT_AXES
             }
             self._fake_lift_settings[MOTOR_MAX_PCT_KEY] = MOTOR_MAX_PCT_DEFAULT
+            self._fake_lift_settings[CEILING_STANDALONE_KEY] = True
         else:
             self._fake_lift_settings = None
 
@@ -285,10 +287,10 @@ class CameraApp:
         return web.json_response({"settings": merged, "using_defaults": self._using_defaults})
 
     async def put_settings(self, request: web.Request) -> web.Response:
-        """`PUT /api/settings`。4 軸と `motor_max_pct` をまとめて受ける。
+        """`PUT /api/settings`。4 軸と `motor_max_pct`・`ceiling_standalone`（任意）をまとめて受ける。
 
-        先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`）→
-        成功したら自分の 2 軸を保存（`motor_max_pct` は自分では保存しない。持ち主は昇降部）。
+        先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`・`ceiling_standalone`）→
+        成功したら自分の 2 軸を保存（`motor_max_pct`・`ceiling_standalone` は自分では保存しない。持ち主は昇降部）。
         昇降部が `400` ならその `errors` を返し、自分も保存しない。
         昇降部に繋がらなければ `503` で何も保存しない。
         """
@@ -303,6 +305,9 @@ class CameraApp:
 
         lift_body = {axis: data[axis] for axis in LIFT_AXES}
         lift_body[MOTOR_MAX_PCT_KEY] = data[MOTOR_MAX_PCT_KEY]
+        # 昇降部が対応していない（画面が欄を出さず送ってこない）ときは送らない（昇降部は今の値を保つ）
+        if CEILING_STANDALONE_KEY in data:
+            lift_body[CEILING_STANDALONE_KEY] = data[CEILING_STANDALONE_KEY]
         status, lift_errors = await self._put_lift_settings(lift_body)
         if status is None:
             return web.json_response({"errors": ["昇降部に繋がらない"]}, status=503)
@@ -357,6 +362,9 @@ class CameraApp:
         body = {axis: settings[axis] for axis in LIFT_AXES if axis in settings}
         if MOTOR_MAX_PCT_KEY in settings:
             body[MOTOR_MAX_PCT_KEY] = settings[MOTOR_MAX_PCT_KEY]
+        # 無い（このファームより前の昇降部）なら載せない。画面は欄を「対応していない」にする
+        if isinstance(settings.get(CEILING_STANDALONE_KEY), bool):
+            body[CEILING_STANDALONE_KEY] = settings[CEILING_STANDALONE_KEY]
         if validate_settings(body, self._params, axes=LIFT_AXES):
             return None
         return body
@@ -367,8 +375,13 @@ class CameraApp:
             errors = validate_settings(body, self._params, axes=LIFT_AXES)
             if errors:
                 return 400, errors
+            # 作り直すので、欠けた `ceiling_standalone` は今の値を引き継ぐ（`true` に戻さない）
+            kept = self._fake_lift_settings.get(CEILING_STANDALONE_KEY, True)
             self._fake_lift_settings = {axis: dict(body[axis]) for axis in LIFT_AXES}
+            self._fake_lift_settings[CEILING_STANDALONE_KEY] = kept
             self._fake_lift_settings[MOTOR_MAX_PCT_KEY] = body[MOTOR_MAX_PCT_KEY]
+            if CEILING_STANDALONE_KEY in body:
+                self._fake_lift_settings[CEILING_STANDALONE_KEY] = body[CEILING_STANDALONE_KEY]
             return 200, []
         base = await self._lift_http_base()
         if base is None:

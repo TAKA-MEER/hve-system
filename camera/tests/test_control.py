@@ -238,6 +238,32 @@ async def test_idle_ceiling_shows_own_measurement_without_verdict() -> None:
     assert state["reason"] == "NONE", "止まっている間に CEILING_STALE を停止理由に出さない"
 
 
+async def test_state_lift_carries_the_lift_ceiling_standalone() -> None:
+    """昇降部の `ceiling.standalone` を `state.lift.ceiling_standalone` に載せる。無ければ `None`。"""
+    rig = Loop()
+    await rig.prime()
+    assert (await rig.step())["lift"]["ceiling_standalone"] == "USE"
+
+    real = rig.lift.latest_state
+
+    def with_standalone(value: Any):
+        def latest() -> Any:
+            raw = real()
+            ceiling = dict(raw["ceiling"])
+            if value is None:
+                ceiling.pop("standalone", None)
+            else:
+                ceiling["standalone"] = value
+            return {**raw, "ceiling": ceiling}
+        return latest
+
+    for value in ("SETTING_OFF", "NO_SOURCE"):
+        rig.lift.latest_state = with_standalone(value)  # type: ignore[assignment]
+        assert (await rig.step())["lift"]["ceiling_standalone"] == value
+    rig.lift.latest_state = with_standalone(None)  # type: ignore[assignment]
+    assert (await rig.step())["lift"]["ceiling_standalone"] is None
+
+
 async def test_verdict_only_while_module_is_owner() -> None:
     """持ち主のあいだは昇降部の判定を載せ、離すと null に戻る。"""
     rig = Loop()
