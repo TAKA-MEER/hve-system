@@ -7,18 +7,27 @@ LiftArbiter::LiftArbiter() : seen_(), has_owner_(false), owner_(), owner_press_(
 
 LiftArbiter::Seen* LiftArbiter::find_or_add(int conn_id) {
   Seen* free_slot = nullptr;
+  Seen* closed_slot = nullptr;
   for (int i = 0; i < kMaxConns; ++i) {
     if (seen_[i].used && seen_[i].id == conn_id) {
+      seen_[i].closed = false;  // 閉じたあとに同じ番号の hold が来た。使っている欄に戻す
       return &seen_[i];
     }
     if (!seen_[i].used && free_slot == nullptr) {
       free_slot = &seen_[i];
     }
+    if (seen_[i].used && seen_[i].closed && closed_slot == nullptr) {
+      closed_slot = &seen_[i];
+    }
+  }
+  if (free_slot == nullptr) {
+    free_slot = closed_slot;
   }
   if (free_slot == nullptr) {
     return nullptr;  // 置き場が無い接続の hold は受け付けない（安全側＝止める）
   }
   free_slot->used = true;
+  free_slot->closed = false;
   free_slot->id = conn_id;
   free_slot->last_press = INT32_MIN;
   return free_slot;
@@ -71,6 +80,11 @@ bool LiftArbiter::on_release(const ConnId& conn, int press) {
 }
 
 void LiftArbiter::on_close(int conn_id) {
+  for (int i = 0; i < kMaxConns; ++i) {
+    if (seen_[i].used && seen_[i].id == conn_id) {
+      seen_[i].closed = true;
+    }
+  }
   // 持ち主の接続が閉じたらその場で空にする
   if (has_owner_ && owner_.id == conn_id) {
     has_owner_ = false;

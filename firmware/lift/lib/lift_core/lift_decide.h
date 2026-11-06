@@ -29,6 +29,38 @@ constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進�
 // 止めずに済む進行方向への最小の進みは hal_core.h の LIFT_STALL_MIN_UM /
 // LIFT_STALL_MIN_COUNTS（µm で決めて LIFT_UM_PER_COUNT で割る。#8a）
 
+// 上部モジュールの役割・人か自動か（hello の role / operator。
+// DetailedDesign-protocol-modules.md §1.1）
+enum class ModuleRole : uint8_t {
+  CONTROL = 0,   // 昇降を命じる
+  OBSERVE = 1,   // 状態を読むだけ（命令は捨てる）
+};
+
+enum class ModuleOperator : uint8_t {
+  HUMAN = 0,  // 人が操作する画面の中継（カメラモジュール）
+  AUTO = 1,   // 自分で判断して動かす（fk・ss）
+};
+
+// state.modules に並べる接続の数。config.h の LIFT_MODULE_MAX_CONN と同じ値に保つ
+// （main.cpp の static_assert で確かめる。2026-11-05）
+constexpr int LIFT_MODULE_LIST_MAX = 6;
+
+// LiftController・LiftArbiter が覚える接続の数。画面（LIFT_UI_CLIENTS_MAX）＋上部モジュール
+// （LIFT_MODULE_MAX_CONN）＋物理ボタン 1 が入る数。config.h の 2 つの値との関係は
+// main.cpp の static_assert で確かめる（lift_core は config.h を include できないため）
+constexpr int LIFT_CONN_SLOTS = 4 + LIFT_MODULE_LIST_MAX + 1;
+
+// state.modules の 1 要素（DetailedDesign-protocol-modules.md §3）
+struct ModuleInfo {
+  char name[32] = {};
+  ModuleRole role = ModuleRole::CONTROL;
+  ModuleOperator op = ModuleOperator::HUMAN;
+  bool ceiling_sensor = true;
+  char busy_label[49] = {};  // 空なら無し（UTF-8 で最大 48 バイト）
+  char ip[64] = {};
+  char fw[16] = {};
+};
+
 // 昇降部からカメラ部へ返す状態（DetailedDesign-protocol.md §2.2）
 struct LiftState {
   int seq = 0;                  // 送出ごとの連番
@@ -49,15 +81,18 @@ struct LiftState {
   uint32_t ceiling_age_ms = 0;
   bool ceiling_ok = false;  // ceiling_check() の結果
   StopReason ceiling_reason = StopReason::CEILING_STALE;
+  // 天井の値を送ってきた接続の名前（判定に使った値。無ければ空）
+  char ceiling_from[32] = {};
   // 持ち主（いなければ has_owner が偽。種類は lift_arbiter.h の ConnKind）
   bool has_owner = false;
   uint8_t owner_kind = 0;  // 0 = UI（画面）・1 = MODULE（上部モジュール）・2 = BUTTON（物理ボタン）
-  int ui_clients = 0;      // /ws/ui に繋いでいる画面の数
-  // 上部モジュールの接続
-  bool module_connected = false;
-  bool module_has_sensor = true;
-  char module_ip[64] = {};
-  char module_name[32] = {};
+  char owner_name[32] = {};  // owner が module のときの接続の名前（それ以外は空）
+  ModuleOperator owner_operator = ModuleOperator::HUMAN;  // has_owner のときだけ意味を持つ
+  bool homed = false;        // 原点を取ったか（電源を入れてから一度下端に着いたか）
+  int ui_clients = 0;        // /ws/ui に繋いでいる画面の数
+  // 繋がっている上部モジュールの一覧（observe を含む。今の module を置き換える）
+  ModuleInfo modules[LIFT_MODULE_LIST_MAX] = {};
+  int module_count = 0;
   uint32_t cmd_age_ms = 0;
 };
 

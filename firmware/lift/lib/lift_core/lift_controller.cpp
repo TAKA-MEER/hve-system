@@ -1,5 +1,7 @@
 #include "lift_controller.h"
 
+#include <climits>
+#include <cstdio>
 #include <cstring>
 
 #include "hal_core.h"  // ENC_UP_SIGN・LIFT_UM_PER_COUNT（速さの測定・#8a の数え用）
@@ -68,8 +70,16 @@ LiftController::ConnInfo* LiftController::find_or_add(const ConnId& conn) {
   free_slot->hello_seen = false;
   // 欠けている・読めないときは厳しい側（持つ）に倒す（DetailedDesign.md §3.1）
   free_slot->has_sensor = true;
+  free_slot->sensor_explicit = false;
+  free_slot->role = ModuleRole::CONTROL;
+  free_slot->op = ModuleOperator::HUMAN;
   free_slot->name[0] = '\0';
+  free_slot->named = false;
+  free_slot->busy_label[0] = '\0';
   free_slot->ip[0] = '\0';
+  free_slot->fw[0] = '\0';
+  free_slot->has_ceiling = false;
+  free_slot->ceiling = CeilingReport();
   return free_slot;
 }
 
@@ -80,6 +90,62 @@ LiftController::ConnInfo* LiftController::find(int conn_id) {
     }
   }
   return nullptr;
+}
+
+const LiftController::ConnInfo* LiftController::find(int conn_id) const {
+  for (int i = 0; i < kMaxConns; ++i) {
+    if (conns_[i].used && conns_[i].id == conn_id) {
+      return &conns_[i];
+    }
+  }
+  return nullptr;
+}
+
+bool LiftController::is_observer(int conn_id) const {
+  const ConnInfo* info = find(conn_id);
+  return info != nullptr && info->kind == ConnKind::MODULE && info->hello_seen &&
+         info->role == ModuleRole::OBSERVE;
+}
+
+bool LiftController::is_ceiling_source(const ConnInfo& info) {
+  return info.used && info.kind == ConnKind::MODULE && info.hello_seen && info.sensor_explicit &&
+         info.has_sensor && info.role == ModuleRole::CONTROL;
+}
+
+void LiftController::remember_ceiling(ConnInfo* info, const CeilingReport& report) {
+  if (info == nullptr || !is_ceiling_source(*info)) {
+    return;
+  }
+  info->has_ceiling = true;
+  info->ceiling = report;
+}
+
+const LiftController::ConnInfo* LiftController::pick_ceiling_source(uint32_t now_ms) const {
+  // 厳しい側（止める値 → 近い値）を選ぶ。2 台以上のときの規則は spec H-M5 が未定なので、
+  // 近い方を使う案（protocol-modules §2.4）
+  const ConnInfo* best = nullptr;
+  int best_key = INT_MAX;
+  for (int i = 0; i < kMaxConns; ++i) {
+    const ConnInfo& info = conns_[i];
+    if (!is_ceiling_source(info) || !info.has_ceiling) {
+      continue;
+    }
+    const CeilingVerdict verdict = ceiling_check(info.ceiling, now_ms, true);
+    int key = 0;
+    if (verdict.ok) {
+      key = info.ceiling.status == CeilingStatus::MEASURED ? info.ceiling.mm : INT_MAX - 1;
+      if (key < 0) {
+        key = 0;
+      }
+    } else {
+      key = -1;
+    }
+    if (best == nullptr || key < best_key) {
+      best = &info;
+      best_key = key;
+    }
+  }
+  return best;
 }
 
 bool LiftController::sensor_of(int conn_id, ConnKind kind) const {
@@ -100,7 +166,10 @@ bool LiftController::sensor_of(int conn_id, ConnKind kind) const {
   return true;
 }
 
-bool LiftController::on_hello(const ConnId& conn, const HelloMsg& hello) {
+bool LiftController::on_hello(const ConnId& conn, const HelloMsg& hello, int* replaced_conn_id) {
+  if (replaced_conn_id != nullptr) {
+    *replaced_conn_id = -1;
+  }
   // /ws/ui で hello を受けたら、その接続を閉じる（§3.1）
   if (conn.kind == ConnKind::UI) {
     return false;
@@ -109,41 +178,88 @@ bool LiftController::on_hello(const ConnId& conn, const HelloMsg& hello) {
   if (info == nullptr) {
     return true;
   }
-  // ceiling_sensor は接続ごとに 1 度だけ受け付ける（2 度目以降は無視する）
+  // role・ceiling_sensor・名前は接続ごとに 1 度だけ受け付ける（2 度目以降は無視する。
+  // 途中で役割を変えて守りを外させない。protocol-modules §1.1）
   if (!info->hello_seen) {
     info->hello_seen = true;
     info->has_sensor = hello.has_sensor;
-    copy_name(info->name, sizeof(info->name), hello.name);
+    info->sensor_explicit = hello.sensor_explicit;
+    info->role = hello.role;
+    info->op = hello.op;
+    copy_name(info->busy_label, sizeof(info->busy_label), hello.busy_label);
+    copy_name(info->ip, sizeof(info->ip), hello.ip);
+    copy_name(info->fw, sizeof(info->fw), hello.fw);
+    info->named = hello.name[0] != '\0';
+    if (info->named) {
+      copy_name(info->name, sizeof(info->name), hello.name);
+    } else {
+      std::snprintf(info->name, sizeof(info->name), "anon-%d", conn.id);
+    }
+    // 同じ名前の別の接続は古い接続。呼び出し側が閉じる（名前の無い接続は置き換えない）
+    if (info->named && conn.kind == ConnKind::MODULE && replaced_conn_id != nullptr) {
+      for (int i = 0; i < kMaxConns; ++i) {
+        const ConnInfo& other = conns_[i];
+        if (other.used && other.id != conn.id && other.kind == ConnKind::MODULE &&
+            other.hello_seen && other.named && std::strcmp(other.name, info->name) == 0) {
+          *replaced_conn_id = other.id;
+          break;
+        }
+      }
+    }
   }
   return true;
 }
 
+void LiftController::on_ceiling(const ConnId& conn, const CeilingReport& report) {
+  if (conn.kind != ConnKind::MODULE) {
+    return;
+  }
+  remember_ceiling(find(conn.id), report);
+}
+
 void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t now_ms) {
-  if (!arbiter_.on_hold(conn, hold.press, now_ms)) {
+  // observe の接続からは昇降を命じられない（捨てる。protocol-modules §2.1）
+  if (conn.kind == ConnKind::MODULE && is_observer(conn.id)) {
+    return;
+  }
+  const bool accepted = arbiter_.on_hold(conn, hold.press, now_ms);
+  CeilingReport report;
+  if (hold.has_ceiling) {
+    report = hold.ceiling;
+  } else {
+    // 型の違う中身・欠けは MISSING として受け取り、その場で止める。
+    // 前の hold の値で動き続けない（DetailedDesign-protocol.md §2.1）
+    report.status = CeilingStatus::MISSING;
+    report.mm = 0;
+    report.age_ms = 0;
+    report.received_at_ms = now_ms;
+  }
+  // 値は持ち主でない接続の hold に載っていても新しい測定なので、出どころなら覚える。
+  // 載っていない hold は、持ち主のものだけ MISSING として覚える（古い hold で汚さない）
+  if (conn.kind == ConnKind::MODULE && (hold.has_ceiling || accepted)) {
+    remember_ceiling(find(conn.id), report);
+  }
+  if (!accepted) {
     return;
   }
   owner_cmd_.dir = hold.dir;
   owner_cmd_.speed_mm_s = hold.speed;
   owner_cmd_.has_sensor = sensor_of(conn.id, conn.kind);
-  if (hold.has_ceiling) {
-    owner_cmd_.ceiling = hold.ceiling;
-  } else {
-    // 型の違う中身・欠けは MISSING として受け取り、その場で止める。
-    // 前の hold の値で動き続けない（DetailedDesign-protocol.md §2.1）
-    owner_cmd_.ceiling.status = CeilingStatus::MISSING;
-    owner_cmd_.ceiling.mm = 0;
-    owner_cmd_.ceiling.age_ms = 0;
-    owner_cmd_.ceiling.received_at_ms = now_ms;
-  }
+  owner_cmd_.ceiling = report;
   if (conn.kind == ConnKind::MODULE) {
     last_module_ceiling_ = owner_cmd_.ceiling;
     has_last_module_ceiling_ = true;
+    const ConnInfo* info = find(conn.id);
+    copy_name(last_module_name_, sizeof(last_module_name_), info != nullptr ? info->name : "");
   }
   has_owner_cmd_ = true;
   had_owner_ = true;
 }
 
 void LiftController::on_release(const ConnId& conn, int press) {
+  if (conn.kind == ConnKind::MODULE && is_observer(conn.id)) {
+    return;  // observe の接続からは何も命じられない
+  }
   if (arbiter_.on_release(conn, press)) {
     has_owner_cmd_ = false;
     owner_cmd_.dir = LiftDir::STOP;
@@ -264,10 +380,26 @@ LiftState LiftController::step(uint32_t now_ms) {
   in.dir = cmd_dir;
   in.speed_mm_s = owner_cmd_.speed_mm_s;
   in.stalled = stalled_;
-  in.ceiling = owner_cmd_.ceiling;
   // hello が hold のあとに届いても、その時点の値を向き先で使う
   const bool owner_has_sensor = has_owner ? sensor_of(owner.id, owner.kind) : false;
-  in.connection_has_sensor = owner_has_sensor;
+  // 距離計を持たない上部モジュール（fk・ss）の命令には、距離計を持つ上部モジュールの
+  // 値を使う（protocol-modules §2.4）。無い・古いときは MISSING で CEILING_STALE
+  const bool borrows_ceiling =
+      has_owner && owner.kind == ConnKind::MODULE && !owner_has_sensor;
+  const ConnInfo* ceiling_source =
+      (borrows_ceiling || !has_owner_cmd_) ? pick_ceiling_source(now_ms) : nullptr;
+  if (borrows_ceiling) {
+    if (ceiling_source != nullptr) {
+      in.ceiling = ceiling_source->ceiling;
+    } else {
+      in.ceiling = CeilingReport();  // MISSING
+      in.ceiling.received_at_ms = now_ms;
+    }
+    in.connection_has_sensor = true;
+  } else {
+    in.ceiling = owner_cmd_.ceiling;
+    in.connection_has_sensor = owner_has_sensor;
+  }
   in.now_ms = now_ms;
   in.bottom_pressed = hal_->bottom_pressed();
   in.height_mm = hal_->height_mm();
@@ -337,20 +469,37 @@ LiftState LiftController::step(uint32_t now_ms) {
   state_.top_detect = LIFT_TOP_DETECT_ENABLED && top_mm_ >= 0;
   // 天井は持ち主の最後の hold の値。持ち主がいなければ上部モジュールの
   // 最後の hold の値（無ければ null）
-  state_.ceiling_used = has_owner && owner_has_sensor;
-  const bool show_last = !has_owner_cmd_ && has_last_module_ceiling_;
+  state_.ceiling_used = has_owner && (owner_has_sensor || borrows_ceiling);
+  state_.ceiling_from[0] = '\0';
+  const bool show_last = !has_owner_cmd_ && (has_last_module_ceiling_ || ceiling_source != nullptr);
   state_.ceiling_present = has_owner_cmd_ || show_last;
   if (state_.ceiling_present) {
-    // 持ち主がいなければ上部モジュールの最後の hold の値（古さは増え続ける）
-    const CeilingReport& shown = has_owner_cmd_ ? owner_cmd_.ceiling : last_module_ceiling_;
+    // 判定に使った値（借りるときは出どころの値）。持ち主がいなければ、出どころの接続の
+    // 最新の値（無ければ上部モジュールの最後の hold の値）。古さは増え続ける
+    const CeilingReport& shown = borrows_ceiling ? in.ceiling
+                                 : has_owner_cmd_ ? owner_cmd_.ceiling
+                                 : ceiling_source != nullptr ? ceiling_source->ceiling
+                                                             : last_module_ceiling_;
+    if (borrows_ceiling || !has_owner_cmd_) {
+      if (ceiling_source != nullptr) {
+        copy_name(state_.ceiling_from, sizeof(state_.ceiling_from), ceiling_source->name);
+      } else if (!borrows_ceiling) {
+        copy_name(state_.ceiling_from, sizeof(state_.ceiling_from), last_module_name_);
+      }
+    } else if (owner.kind == ConnKind::MODULE) {
+      const ConnInfo* owner_info = find(owner.id);
+      if (owner_info != nullptr) {
+        copy_name(state_.ceiling_from, sizeof(state_.ceiling_from), owner_info->name);
+      }
+    }
     state_.ceiling_status = shown.status;
     state_.ceiling_mm = shown.mm;
     const int32_t transit = elapsed_ms(now_ms, shown.received_at_ms);
     const int64_t age = static_cast<int64_t>(shown.age_ms) + (transit > 0 ? transit : 0);
     state_.ceiling_age_ms = age < 0 ? 0u : static_cast<uint32_t>(age);
     if (has_owner_cmd_) {
-      const CeilingVerdict verdict =
-          ceiling_check(owner_cmd_.ceiling, now_ms, has_owner ? owner_has_sensor : false);
+      const CeilingVerdict verdict = ceiling_check(
+          in.ceiling, now_ms, has_owner ? (owner_has_sensor || borrows_ceiling) : false);
       state_.ceiling_ok = verdict.ok;
       state_.ceiling_reason = verdict.reason;
     } else {
@@ -363,19 +512,32 @@ LiftState LiftController::step(uint32_t now_ms) {
   state_.has_owner = has_owner;
   state_.owner_kind = !has_owner ? 0 : owner.kind == ConnKind::MODULE ? 1 : owner.kind == ConnKind::BUTTON ? 2 : 0;
   state_.ui_clients = ui_clients_;
-  // 上部モジュールの接続（/ws/module で hello を受けたもの）
-  state_.module_connected = false;
-  state_.module_has_sensor = true;
-  state_.module_ip[0] = '\0';
-  state_.module_name[0] = '\0';
-  for (int i = 0; i < kMaxConns; ++i) {
-    if (conns_[i].used && conns_[i].kind == ConnKind::MODULE && conns_[i].hello_seen) {
-      state_.module_connected = true;
-      state_.module_has_sensor = conns_[i].has_sensor;
-      copy_name(state_.module_ip, sizeof(state_.module_ip), conns_[i].ip);
-      copy_name(state_.module_name, sizeof(state_.module_name), conns_[i].name);
-      break;
+  // 持ち主の名前・人か自動か（module のときはその接続の hello の値）
+  state_.owner_name[0] = '\0';
+  state_.owner_operator = ModuleOperator::HUMAN;
+  if (has_owner && owner.kind == ConnKind::MODULE) {
+    const ConnInfo* owner_info = find(owner.id);
+    if (owner_info != nullptr) {
+      copy_name(state_.owner_name, sizeof(state_.owner_name), owner_info->name);
+      state_.owner_operator = owner_info->op;
     }
+  }
+  state_.homed = hal_->homed();
+  // 繋がっている上部モジュール（/ws/module で hello を受けたもの。observe を含む）
+  state_.module_count = 0;
+  for (int i = 0; i < kMaxConns && state_.module_count < LIFT_MODULE_LIST_MAX; ++i) {
+    const ConnInfo& info = conns_[i];
+    if (!info.used || info.kind != ConnKind::MODULE || !info.hello_seen) {
+      continue;
+    }
+    ModuleInfo& item = state_.modules[state_.module_count++];
+    copy_name(item.name, sizeof(item.name), info.name);
+    item.role = info.role;
+    item.op = info.op;
+    item.ceiling_sensor = info.has_sensor;
+    copy_name(item.busy_label, sizeof(item.busy_label), info.busy_label);
+    copy_name(item.ip, sizeof(item.ip), info.ip);
+    copy_name(item.fw, sizeof(item.fw), info.fw);
   }
   // 指令の年齢も elapsed_ms で数える。負や一周したときは 0 として出す
   const int32_t cmd_age =

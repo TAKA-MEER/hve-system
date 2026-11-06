@@ -79,7 +79,13 @@ struct ConnSlot {
   int ours = 0;
 };
 
-constexpr int kConnSlots = 12;  // UI 上限 4＋上部モジュール＋余り（LiftController の 8 枠より広く）
+// UI 上限＋上部モジュール上限＋物理ボタンが入る LiftController の枠（LIFT_CONN_SLOTS）に、
+// 上限を超えて繋いだ直後に閉じる接続の分の余りを足した数
+static_assert(LIFT_MODULE_MAX_CONN == LIFT_MODULE_LIST_MAX,
+              "state.modules の長さと /ws/module の上限は同じ値にする");
+static_assert(LIFT_UI_CLIENTS_MAX + LIFT_MODULE_MAX_CONN + 1 <= LIFT_CONN_SLOTS,
+              "LiftController・LiftArbiter の接続の枠が、画面・上部モジュール・ボタンの上限に足りない");
+constexpr int kConnSlots = LIFT_UI_CLIENTS_MAX + LIFT_MODULE_MAX_CONN + 4;
 ConnSlot g_conns[kConnSlots];
 int g_next_conn_id = 1;
 
@@ -131,6 +137,7 @@ enum class PendingType : uint8_t {
   HOLD,
   RELEASE,
   HELLO,
+  CEILING,
   CLOSE,
 };
 
@@ -139,6 +146,7 @@ struct PendingEvent {
   ConnId conn;
   HoldMsg hold;
   HelloMsg hello;
+  CeilingReport ceiling;
   int press = 0;
   uint32_t at_ms = 0;
 };
@@ -164,6 +172,21 @@ void post_event(const PendingEvent& event) {
   portEXIT_CRITICAL(&g_cmd_mux);
 }
 
+// 同じ名前で繋ぎ直された古い /ws/module の接続（LiftController の接続番号）を閉じる。
+// 閉じたあとの DISCONNECT で on_close が呼ばれ、持ち主ならその場で止まる（OWNER_GONE）
+void close_module_conn(int ours) {
+  for (int i = 0; i < kConnSlots; ++i) {
+    if (g_conns[i].used && g_conns[i].ws == &ws_module && g_conns[i].ours == ours) {
+      AsyncWebSocketClient* old_client = ws_module.client(g_conns[i].ws_id);
+      if (old_client != nullptr) {
+        Serial.printf("[ws] #%u は同じ名前で繋ぎ直されたので閉じる\n", g_conns[i].ws_id);
+        old_client->close();
+      }
+      return;
+    }
+  }
+}
+
 // 積んであるイベントを 1 つ取り出す。取れなければ false。loop() からしか呼ばない
 bool take_pending_event(PendingEvent* out) {
   portENTER_CRITICAL(&g_cmd_mux);
@@ -186,6 +209,13 @@ bool frame_type_is(const char* text, const char* want) {
   }
   const char* t = doc["t"];
   return t != nullptr && std::strcmp(t, want) == 0;
+}
+
+// 接続元の IP を文字列で写す（state.modules[].ip 用。表示だけ）
+void copy_remote_ip(AsyncWebSocketClient* client, char* out, size_t out_size) {
+  const String ip = client->remoteIP().toString();
+  std::strncpy(out, ip.c_str(), out_size - 1);
+  out[out_size - 1] = '\0';
 }
 
 // 1 フレームを読む。hello ならその口に応じて閉じるか loop() へ渡す。
@@ -238,6 +268,18 @@ void handle_frame(AsyncWebSocket* ws, AsyncWebSocketClient* client, const uint8_
     event.type = PendingType::HELLO;
     event.conn = conn;
     event.hello = hello;
+    copy_remote_ip(client, event.hello.ip, sizeof(event.hello.ip));
+    post_event(event);
+    return;
+  }
+  CeilingReport ceiling;
+  if (decode_ceiling(text, &ceiling, millis())) {
+    // 距離計を持つ上部モジュールが止まっている間も送る値（protocol-modules §2.3）。
+    // /ws/ui からのものは LiftController が捨てる
+    PendingEvent event;
+    event.type = PendingType::CEILING;
+    event.conn = conn;
+    event.ceiling = ceiling;
     post_event(event);
     return;
   }
@@ -253,6 +295,7 @@ void handle_frame(AsyncWebSocket* ws, AsyncWebSocketClient* client, const uint8_
     event.type = PendingType::HELLO;
     event.conn = conn;
     event.hello = HelloMsg();
+    copy_remote_ip(client, event.hello.ip, sizeof(event.hello.ip));
     post_event(event);
   }
   // 知らない t・読めないものは捨てる
@@ -271,6 +314,14 @@ void on_ws_event(AsyncWebSocket* ws, AsyncWebSocketClient* client, AwsEventType 
       // count() にはいま繋いだ接続も入っている）。
       if (ws == &ws_ui && ws_ui.count() > static_cast<size_t>(LIFT_UI_CLIENTS_MAX)) {
         Serial.println("[ws] 画面が多すぎるので閉じる");
+        free_conn(ws, client->id());
+        client->close();
+        break;
+      }
+      // LIFT_MODULE_MAX_CONN を超えた上部モジュールは、**新しい方を**その場で閉じる
+      // （古い方＝先に繋いでいたカメラモジュールを閉じない。protocol-modules §1.3）
+      if (ws == &ws_module && ws_module.count() > static_cast<size_t>(LIFT_MODULE_MAX_CONN)) {
+        Serial.println("[ws] 上部モジュールが多すぎるので、新しい接続を閉じる");
         free_conn(ws, client->id());
         client->close();
         break;
@@ -591,7 +642,16 @@ void loop() {
         break;
       case PendingType::HELLO:
         // /ws/ui の hello は frame 側で閉じているので、ここに来るのは module のみ
-        controller.on_hello(event.conn, event.hello);
+        {
+          int replaced = -1;
+          controller.on_hello(event.conn, event.hello, &replaced);
+          if (replaced >= 0) {
+            close_module_conn(replaced);  // 同じ名前の古い接続を閉じる（再起動の残り）
+          }
+        }
+        break;
+      case PendingType::CEILING:
+        controller.on_ceiling(event.conn, event.ceiling);
         break;
       case PendingType::CLOSE:
         controller.on_close(event.conn.id);
@@ -632,5 +692,8 @@ void loop() {
 
   poll_wifi(now);
   ws_ui.cleanupClients();
-  ws_module.cleanupClients();
+  // 消えた接続の後始末だけ続ける。ライブラリの上限（既定 8）を超えたら古い接続を閉じる
+  // 作りなので、上限より大きい値を渡して古い接続（カメラモジュール）を閉じさせない。
+  // 上限は CONNECT で LIFT_MODULE_MAX_CONN を見て新しい方を閉じている
+  ws_module.cleanupClients(UINT16_MAX);
 }

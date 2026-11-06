@@ -147,6 +147,10 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | 上部モジュールの名前 | **`hve-cam`**（カメラモジュール）・**`fk`**（fk-system）・**`ss`**（ss-system） |
 | `state` のフィールド | **`owner_name`**・**`owner_operator`**・**`homed`**・**`modules`**（今の `module` を置き換える）・**`goto`**・**`arm`**・`ceiling.from` を足す。`owner` に `arm` を足す（名前だけ） |
 | **`LiftHal::homed`** | 原点を取ったか（`EncoderHeight` から。`state.homed` の元。`WP-LIFT-13`） |
+| **`decode_ceiling`**・**`LiftController::on_ceiling`** | `cmd_codec.h`・`lift_controller.h` | `t: "ceiling"` を読む・天井の値の出どころになれる接続のものだけ覚える（`WP-LIFT-13`） |
+| **`ModuleRole`**（`CONTROL`・`OBSERVE`）・**`ModuleOperator`**（`HUMAN`・`AUTO`）・**`ModuleInfo`** | `lift_decide.h` | `hello` の `role`・`operator` と、`state.modules` の 1 要素（`LiftState::modules`・`module_count`・`owner_name`・`owner_operator`・`homed`・`ceiling_from`） |
+| **`HelloMsg`** の `role`・`op`・`busy_label`・`sensor_explicit`・`ip` | `cmd_codec.h` | `sensor_explicit` は `ceiling_sensor` を明示したか（天井の値の出どころにできるのは明示した接続だけ）。`ip` は JSON には載らず `main.cpp` が入れる |
+| **`LIFT_MODULE_LIST_MAX`**・**`LIFT_CONN_SLOTS`** | `lift_decide.h` | `state.modules` の長さ（`LIFT_MODULE_MAX_CONN` と同じ 6。`main.cpp` の `static_assert`）・`LiftController`／`LiftArbiter` が覚える接続の数（画面 4＋上部モジュール 6＋物理ボタン 1） |
 
 **単体の操作でも天井で止める（2026-11-06。`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`）で足すもの**。中身は [-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5・[-protocol.md](DetailedDesign-protocol.md) §3:
 
@@ -193,7 +197,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`LIFT_UI_CLIENTS_MAX`** | `config.h` | 4 | **仮**（ESP32 のメモリ。超えた接続は閉じる） |
 | **`LIFT_MODULE_MAX_CONN`** | `config.h` | 6 | **仮**（2026-11-05。`/ws/module` の接続の上限。**超えた新しい接続をその場で閉じる**。ライブラリの `cleanupClients()` に古い接続を閉じさせない。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.3。`WP-LIFT-13`） |
 | **`LIFT_GOTO_TOL_MM`** | `lift_decide.h` | 10 | **仮**（spec `H-M6`。目標の高さに「着いた」とみなす幅。`WP-LIFT-14`） |
-| `LIFT_STATE_TEXT_MAX` | `config.h` | 640 | **仮**（v2 の `state` は 500 バイト前後） |
+| `LIFT_STATE_TEXT_MAX` | **`cmd_codec.h`**（`config.h` から移した。native の試験が最大の `state` を作って測れるように） | 2304 | `modules` を 6 本並べ `busy_label` を 48 バイト・名前・IP・`fw` を最大にした `state` が **1770 バイト**。その約 1.3 倍（`test_state_worst_case_fits_text_max`。`WP-LIFT-13`） |
 | `LIFT_MDNS_NAME` / `LIFT_HTTP_PORT` | `config.h` | `hve-lift` / 80 | 旧版 |
 | ピン・PWM の定数 | `config.h` | 旧版のまま | 旧版 §5 |
 | **`ENC_A_PIN`** / **`ENC_B_PIN`** | `config.h` | 25 / 26 | **仮**（[-hardware.md](DetailedDesign-hardware.md) §1.1） |

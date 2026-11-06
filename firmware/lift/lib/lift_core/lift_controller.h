@@ -16,9 +16,17 @@ class LiftController {
   LiftController(LiftHal* hal, int top_mm);
 
   // hello を受ける。/ws/ui で受けたら偽（呼び出し側はその接続を閉じること。
-  // DetailedDesign.md §3.1）。2 度目以降の hello は無視する。
-  // 真のときだけ接続として覚える
-  bool on_hello(const ConnId& conn, const HelloMsg& hello);
+  // DetailedDesign.md §3.1）。2 度目以降の hello は無視する（role・ceiling_sensor・名前は
+  // 最初のものから変えない）。真のときだけ接続として覚える。
+  // 同じ名前の別の接続が繋がっていたら、その接続番号を *replaced_conn_id に入れる
+  // （無ければ -1。呼び出し側がその接続を閉じること。名前の無い接続は置き換えない。
+  // DetailedDesign-protocol-modules.md §1.2）
+  bool on_hello(const ConnId& conn, const HelloMsg& hello, int* replaced_conn_id = nullptr);
+
+  // ceiling（距離計を持つ上部モジュールが止まっている間も送る値。protocol-modules §2.3）。
+  // 値の出どころになれる接続（hello で ceiling_sensor: true を明示した control の接続）の
+  // ものだけ覚える。それ以外は捨てる。report.received_at_ms は受け取った時刻
+  void on_ceiling(const ConnId& conn, const CeilingReport& report);
 
   // hold を受ける。持ち主のものだけ覚え、それ以外は無視する
   void on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t now_ms);
@@ -52,21 +60,41 @@ class LiftController {
     CeilingReport ceiling;
   };
 
-  // 接続ごとの hello の記録（ceiling_sensor は 1 度だけ受け付ける）
+  // 接続ごとの hello の記録（role・ceiling_sensor は 1 度だけ受け付ける）
   struct ConnInfo {
     bool used = false;
     int id = 0;
     ConnKind kind = ConnKind::UI;
     bool hello_seen = false;
     bool has_sensor = true;
-    char name[32] = {};
+    bool sensor_explicit = false;  // ceiling_sensor を hello で明示したか
+    ModuleRole role = ModuleRole::CONTROL;
+    ModuleOperator op = ModuleOperator::HUMAN;
+    char name[32] = {};  // 名前が無ければ anon-<接続番号>
+    bool named = false;  // hello の名前が形に合っていたか（置き換えの対象か）
+    char busy_label[49] = {};
     char ip[64] = {};
+    char fw[16] = {};
+    // 最後に受け取った天井の値（hold・ceiling のどちらから来たものでも）。
+    // 出どころになれる接続だけが持つ
+    bool has_ceiling = false;
+    CeilingReport ceiling;
   };
-  static constexpr int kMaxConns = 8;
+  static constexpr int kMaxConns = LIFT_CONN_SLOTS;
 
   ConnInfo* find_or_add(const ConnId& conn);
   ConnInfo* find(int conn_id);
+  const ConnInfo* find(int conn_id) const;
   bool sensor_of(int conn_id, ConnKind kind) const;
+  // 天井の値の出どころになれる接続か（hello で ceiling_sensor: true を明示した control。
+  // protocol-modules §2.3）
+  static bool is_ceiling_source(const ConnInfo& info);
+  // 受け取った天井の値を、その接続が出どころになれるときだけ覚える
+  void remember_ceiling(ConnInfo* info, const CeilingReport& report);
+  // 出どころの接続の中で、いちばん厳しい（止める・近い）値を選ぶ。無ければ nullptr
+  const ConnInfo* pick_ceiling_source(uint32_t now_ms) const;
+  // observe の接続からの命令か（捨てる）
+  bool is_observer(int conn_id) const;
 
   LiftHal* hal_;
   int top_mm_;
@@ -79,6 +107,7 @@ class LiftController {
   // （判定には使わない）。無ければ has_last_module_ceiling_ が偽
   CeilingReport last_module_ceiling_;
   bool has_last_module_ceiling_ = false;
+  char last_module_name_[32] = {};  // その hold を送ってきた接続の名前
   ConnInfo conns_[kMaxConns];
   int ui_clients_ = 0;
   uint32_t run_travel_um_;  // 現在の方向について、回していた間に目標の速さで進んだとみなした距離 [µm]

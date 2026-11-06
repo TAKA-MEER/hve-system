@@ -47,6 +47,32 @@ ConnId button() {
 
 }  // namespace
 
+// 接続の番号は増え続ける。閉じた接続の欄を使い回さないと、何度か繋ぎ直しただけで
+// どの hold も受け付けられなくなる
+void test_many_reconnects_keep_accepting_holds() {
+  LiftArbiter arbiter;
+  for (int id = 1; id <= 60; ++id) {
+    TEST_ASSERT_TRUE(arbiter.on_hold(module(id), 1, 1000 + id));
+    assert_owner(&arbiter, true, id, 1);
+    arbiter.on_close(id);
+    assert_owner(&arbiter, false);
+  }
+}
+
+// 閉じた接続の欄を使い回しても、使っている接続の press の記録は消さない
+void test_live_connections_keep_press_memory_when_slots_are_reused() {
+  LiftArbiter arbiter;
+  TEST_ASSERT_TRUE(arbiter.on_hold(ui(1), 5, 1000));
+  arbiter.on_release(ui(1), 5);
+  for (int id = 10; id < 40; ++id) {
+    arbiter.on_hold(module(id), 1, 1000);
+    arbiter.on_close(id);
+  }
+  // 接続 1 は閉じていない。前に見た press（5）以下では持ち主になれないまま
+  TEST_ASSERT_FALSE(arbiter.on_hold(ui(1), 5, 2000));
+  assert_owner(&arbiter, false);
+}
+
 // --- 最初の hold が持ち主になる ---
 
 void test_first_hold_becomes_owner() {
@@ -224,6 +250,8 @@ void test_button_release_clears_owner() {
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
+  RUN_TEST(test_many_reconnects_keep_accepting_holds);
+  RUN_TEST(test_live_connections_keep_press_memory_when_slots_are_reused);
   RUN_TEST(test_first_hold_becomes_owner);
   RUN_TEST(test_new_press_takes_over);
   RUN_TEST(test_same_press_continues_owner_and_refreshes_timeout);

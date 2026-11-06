@@ -5,6 +5,7 @@
 #include <unity.h>
 
 #include <cstring>
+#include <string>
 
 #include "fake_hal.h"
 #include "hal_core.h"  // LIFT_STALL_MIN_COUNTS・LIFT_UM_PER_COUNT
@@ -30,8 +31,49 @@ ConnId module(int id) {
 HelloMsg hello_with_sensor(bool has_sensor) {
   HelloMsg hello;
   hello.has_sensor = has_sensor;
+  hello.sensor_explicit = true;  // 実際の hello は ceiling_sensor を明示する
   std::strncpy(hello.name, "hve-cam", sizeof(hello.name) - 1);
   return hello;
+}
+
+// 名前・役割・人か自動か・距離計を名乗った hello（sensor_explicit は真。既定はカメラモジュール）
+HelloMsg hello_as(const char* name, bool has_sensor, ModuleRole role = ModuleRole::CONTROL,
+                  ModuleOperator op = ModuleOperator::HUMAN) {
+  HelloMsg hello;
+  hello.has_sensor = has_sensor;
+  hello.sensor_explicit = true;
+  hello.role = role;
+  hello.op = op;
+  std::strncpy(hello.name, name, sizeof(hello.name) - 1);
+  return hello;
+}
+
+HelloMsg hello_cam() { return hello_as("hve-cam", true); }
+HelloMsg hello_fk() {
+  return hello_as("fk", false, ModuleRole::CONTROL, ModuleOperator::AUTO);
+}
+
+CeilingReport ceiling_at(CeilingStatus status, int mm, uint32_t age_ms, uint32_t at_ms) {
+  CeilingReport report;
+  report.status = status;
+  report.mm = mm;
+  report.age_ms = age_ms;
+  report.received_at_ms = at_ms;
+  return report;
+}
+
+CeilingReport measured(int mm, uint32_t at_ms, uint32_t age_ms = 0) {
+  return ceiling_at(CeilingStatus::MEASURED, mm, age_ms, at_ms);
+}
+
+// 距離計を持たない上部モジュール（fk）の上昇。ceiling は載せない
+HoldMsg fk_up(int press, int speed = 40) {
+  HoldMsg hold;
+  hold.press = press;
+  hold.dir = LiftDir::UP;
+  hold.speed = speed;
+  hold.has_ceiling = false;
+  return hold;
 }
 
 // 距離計を持つ接続からの上昇の hold（天井 MEASURED・十分遠い・送った瞬間は新しい）
@@ -843,8 +885,11 @@ void test_state_reports_top_detect_true_and_module() {
   TEST_ASSERT_EQUAL_INT(1450, state.ceiling_mm);
   TEST_ASSERT_EQUAL_INT(80 + 35, state.ceiling_age_ms);
   TEST_ASSERT_TRUE(state.ceiling_ok);
-  TEST_ASSERT_TRUE(state.module_connected);
-  TEST_ASSERT_TRUE(state.module_has_sensor);
+  TEST_ASSERT_EQUAL_INT(1, state.module_count);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.modules[0].name);
+  TEST_ASSERT_TRUE(state.modules[0].ceiling_sensor);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.owner_name);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
   TEST_ASSERT_EQUAL_INT(1, state.ui_clients);
   TEST_ASSERT_EQUAL_INT(35, state.cmd_age_ms);
   TEST_ASSERT_EQUAL_INT(812, state.height_mm);
@@ -1133,6 +1178,514 @@ void test_up_with_stale_height_is_refused() {
   TEST_ASSERT_FALSE(hal.motor_moving());
 }
 
+// --- 上部モジュールの複数対応（WP-LIFT-13。protocol-modules §1・§2） ---
+
+// 高さが読めている状態で、fk の上昇を time に step する。ceiling の値は呼び出し側が先に入れる
+struct MultiRig {
+  FakeHal hal;
+  LiftController ctrl;
+  MultiRig() : ctrl(&hal, LIFT_TOP_MM) { hal.set_height(500, true, 0); }
+  // 時刻 t に高さを新しくし、fk（conn 3）が press で上昇を送り、step する
+  LiftState fk_step(uint32_t t, int press = 1, int conn = 3) {
+    hal.set_height(500, true, t);
+    ctrl.on_hold(module(conn), fk_up(press), t);
+    return ctrl.step(t);
+  }
+};
+
+// 変異 1・4: カメラモジュールが止まっている間に ceiling で送った値で、fk の上昇が止まる
+void test_fk_climb_stops_at_camera_ceiling_sent_by_ceiling_message() {
+  MultiRig rig;
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(2), hello_cam()));
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(3), hello_fk()));
+  // カメラモジュールは昇降を命じていない。ceiling だけ送っている
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+  TEST_ASSERT_EQUAL_INT(300, state.ceiling_mm);
+  TEST_ASSERT_EQUAL_STRING("fk", state.owner_name);
+}
+
+void test_fk_climb_moves_when_camera_ceiling_is_far() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+  TEST_ASSERT_TRUE(state.ceiling_ok);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+  // 近づいたら次の周期から止まる（止まっている間も送り続ける値が効く）
+  rig.ctrl.on_ceiling(module(2), measured(400, 100));
+  const LiftState near = rig.fk_step(100);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, near);
+}
+
+// 変異 4 の相方: hold に載った値（カメラモジュールが持ち主だったときの最後の値）も使う
+void test_fk_uses_camera_hold_ceiling_too() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(3), hello_fk());
+  // カメラモジュールが下降の hold に近い天井を載せて送った（持ち主になって release した）
+  HoldMsg cam_hold = up_hold(1, 40, 0);
+  cam_hold.dir = LiftDir::DOWN;
+  cam_hold.ceiling.mm = 300;
+  rig.ctrl.on_hold(module(2), cam_hold, 0);
+  rig.ctrl.step(0);
+  rig.ctrl.on_release(module(2), 1);
+  const LiftState state = rig.fk_step(10);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+}
+
+// 変異 2: カメラモジュールが繋がっていない・値が古いとき、fk の上昇を許さない
+void test_fk_climb_refused_without_camera() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+  TEST_ASSERT_FALSE(state.ceiling_ok);
+}
+
+void test_fk_climb_refused_when_camera_value_is_old() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  TEST_ASSERT_TRUE(rig.fk_step(0).dir == LiftDir::UP);
+  // カメラモジュールが黙った。CEILING_STALE_MS を超えたら止まる（fk の hold は続いている）
+  const uint32_t late = CEILING_STALE_MS + 1;
+  const LiftState state = rig.fk_step(late - 300);  // まだ新しい
+  TEST_ASSERT_TRUE(state.dir == LiftDir::UP);
+  rig.fk_step(late - 100);
+  const LiftState stale = rig.fk_step(late);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, stale);
+  TEST_ASSERT_EQUAL_INT(late, stale.ceiling_age_ms);
+}
+
+void test_fk_climb_stops_when_camera_connection_closes() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  TEST_ASSERT_TRUE(rig.fk_step(0).dir == LiftDir::UP);
+  rig.ctrl.on_close(2);  // カメラモジュールの電源が落ちた
+  const LiftState state = rig.fk_step(10);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+}
+
+// 変異 3: 値の古さに、受け取ってからの経過を足す
+void test_fk_ceiling_age_counts_transit() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(3), hello_fk());
+  // 送る瞬間に 590 ms 古い値。受け取ってから 20 ms 経てば CEILING_STALE_MS 超
+  rig.ctrl.on_ceiling(module(2), measured(1450, 1000, 590));
+  TEST_ASSERT_TRUE(rig.fk_step(1000).dir == LiftDir::UP);
+  const LiftState state = rig.fk_step(1020);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+  TEST_ASSERT_EQUAL_INT(610, state.ceiling_age_ms);
+}
+
+// カメラモジュールが 2 台のときは近い方（厳しい側）
+void test_fk_uses_nearest_of_two_sensor_modules() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(4), hello_as("hve-cam2", true));
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  rig.ctrl.on_ceiling(module(4), measured(400, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_NEAR, state);
+  TEST_ASSERT_EQUAL_STRING("hve-cam2", state.ceiling_from);
+}
+
+// カメラモジュールの下降には fk の天井の判定は関係ない
+void test_fk_down_does_not_need_ceiling() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  HoldMsg down = down_hold(1);
+  rig.ctrl.on_hold(module(3), down, 0);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, state);
+}
+
+// 変異 5: observe の接続の hold・release では動かない・止められない
+void test_observe_connection_hold_is_dropped() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(5), hello_as("viewer", true, ModuleRole::OBSERVE));
+  rig.ctrl.on_hold(module(5), up_hold(1, 40, 0), 0);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_FALSE(state.has_owner);
+  assert_reason(StopReason::CMD_TIMEOUT, state);
+}
+
+void test_observe_connection_release_does_not_stop_owner() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(5), hello_as("viewer", true, ModuleRole::OBSERVE));
+  rig.ctrl.on_hold(ui(1), up_hold(7, 40, 0), 0);
+  TEST_ASSERT_TRUE(rig.ctrl.step(0).dir == LiftDir::UP);
+  rig.ctrl.on_release(module(5), 7);  // observe の release は捨てる
+  rig.hal.set_height(500, true, 100);
+  rig.ctrl.on_hold(ui(1), up_hold(7, 40, 100), 100);
+  TEST_ASSERT_TRUE(rig.ctrl.step(100).dir == LiftDir::UP);
+}
+
+// 変異 6: role の知らない値は observe。decode_hello を通した実際の経路で縛る
+void test_unknown_role_hello_cannot_command() {
+  MultiRig rig;
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello(
+      "{\"t\":\"hello\",\"name\":\"odd\",\"role\":\"superuser\",\"ceiling_sensor\":true}", &hello));
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(5), hello));
+  rig.ctrl.on_hold(module(5), up_hold(1, 40, 0), 0);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_FALSE(state.has_owner);
+}
+
+void test_missing_role_hello_can_command() {
+  MultiRig rig;
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"name\":\"hve-cam\",\"ceiling_sensor\":true}", &hello));
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(2), hello));
+  rig.ctrl.on_hold(module(2), up_hold(1, 40, 0), 0);
+  rig.ctrl.step(0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 変異 7: 同じ名前で繋ぎ直したら古い接続の番号を返す（呼び出し側が閉じる）。名前無しは置き換えない
+void test_same_name_hello_returns_old_connection() {
+  MultiRig rig;
+  int replaced = -2;
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(3), hello_fk(), &replaced));
+  TEST_ASSERT_EQUAL_INT(-1, replaced);
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(2), hello_cam(), &replaced));
+  TEST_ASSERT_EQUAL_INT(-1, replaced);  // 別の名前
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(4), hello_fk(), &replaced));
+  TEST_ASSERT_EQUAL_INT(3, replaced);
+}
+
+void test_nameless_hellos_do_not_replace_each_other() {
+  MultiRig rig;
+  HelloMsg nameless;  // 名前無し（形に合わない名前も decode が空にする）
+  nameless.sensor_explicit = true;
+  int replaced = -2;
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(3), nameless, &replaced));
+  TEST_ASSERT_TRUE(rig.ctrl.on_hello(module(4), nameless, &replaced));
+  TEST_ASSERT_EQUAL_INT(-1, replaced);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_EQUAL_INT(2, state.module_count);
+  TEST_ASSERT_EQUAL_STRING("anon-3", state.modules[0].name);
+  TEST_ASSERT_EQUAL_STRING("anon-4", state.modules[1].name);
+}
+
+void test_replacing_owner_stops_it_when_old_connection_closes() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  rig.ctrl.on_hello(module(3), hello_fk());
+  TEST_ASSERT_TRUE(rig.fk_step(0).dir == LiftDir::UP);
+  int replaced = -1;
+  rig.ctrl.on_hello(module(6), hello_fk(), &replaced);
+  TEST_ASSERT_EQUAL_INT(3, replaced);
+  rig.ctrl.on_close(replaced);  // 呼び出し側が古い接続を閉じた（その場で止まる）
+  const LiftState state = rig.ctrl.step(10);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::OWNER_GONE, state);
+  // 新しい接続の press は新しい接続の分として数える（press 1 から動ける）
+  rig.ctrl.on_ceiling(module(2), measured(1450, 20));
+  const LiftState moved = rig.fk_step(20, 1, 6);
+  TEST_ASSERT_TRUE(moved.dir == LiftDir::UP);
+}
+
+// 変異 8: 2 度目の hello で role・ceiling_sensor・名前は変わらない
+void test_second_hello_does_not_change_role_or_sensor() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  rig.ctrl.on_hello(module(3), hello_fk());
+  // fk が 2 度目に observe・距離計あり・別の名前を名乗る。どれも受け付けない
+  int replaced = -1;
+  rig.ctrl.on_hello(module(3), hello_as("other", true, ModuleRole::OBSERVE), &replaced);
+  TEST_ASSERT_EQUAL_INT(-1, replaced);
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_TRUE(state.dir == LiftDir::UP);  // role は control のまま（observe なら hold は捨てられる）
+  TEST_ASSERT_TRUE(state.ceiling_used);        // 距離計なしのまま（あるなら自分の MISSING で止まる）
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+  TEST_ASSERT_EQUAL_STRING("fk", state.owner_name);
+  // 距離計ありと名乗り直した fk の ceiling は出どころにならない
+  rig.ctrl.on_ceiling(module(3), measured(100, 10));
+  const LiftState later = rig.fk_step(10);
+  TEST_ASSERT_TRUE(later.dir == LiftDir::UP);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", later.ceiling_from);
+}
+
+void test_second_hello_cannot_downgrade_camera_to_observer() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hello(module(2), hello_as("hve-cam", true, ModuleRole::OBSERVE));
+  rig.ctrl.on_hold(module(2), up_hold(1, 40, 0), 0);
+  rig.ctrl.step(0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 変異 9: 持ち主が fk のとき owner_name・owner_operator が fk・auto になる
+void test_state_owner_name_and_operator() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  rig.ctrl.on_hello(module(3), hello_fk());
+  const LiftState fk = rig.fk_step(0);
+  TEST_ASSERT_TRUE(fk.has_owner);
+  TEST_ASSERT_EQUAL_INT(1, fk.owner_kind);
+  TEST_ASSERT_EQUAL_STRING("fk", fk.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(fk.owner_operator));
+  // カメラモジュールが新しく押し始めたら、持ち主はカメラモジュール（人）
+  rig.ctrl.on_hold(module(2), up_hold(1, 40, 10), 10);
+  const LiftState cam = rig.ctrl.step(10);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", cam.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN), static_cast<int>(cam.owner_operator));
+  // 画面が押したら名前は空・人
+  rig.ctrl.on_hold(ui(1), up_hold(1, 40, 20), 20);
+  const LiftState ui_state = rig.ctrl.step(20);
+  TEST_ASSERT_EQUAL_INT(0, ui_state.owner_kind);
+  TEST_ASSERT_EQUAL_STRING("", ui_state.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN), static_cast<int>(ui_state.owner_operator));
+}
+
+// 変異 10: operator が欠けた hello は human（decode_hello を通した実際の経路）
+void test_hello_without_operator_is_human_owner() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"name\":\"fk\",\"ceiling_sensor\":false}", &hello));
+  rig.ctrl.on_hello(module(3), hello);
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_EQUAL_STRING("fk", state.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN), static_cast<int>(state.owner_operator));
+  // 名乗った auto は auto
+  rig.ctrl.on_close(3);
+  HelloMsg auto_hello;
+  TEST_ASSERT_TRUE(decode_hello(
+      "{\"t\":\"hello\",\"name\":\"ss\",\"operator\":\"auto\",\"ceiling_sensor\":false}", &auto_hello));
+  rig.ctrl.on_hello(module(4), auto_hello);
+  rig.ctrl.on_ceiling(module(2), measured(1450, 10));
+  const LiftState ss = rig.fk_step(10, 1, 4);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(ss.owner_operator));
+}
+
+// 変異 12: hello を送っていない・ceiling_sensor が欠けた接続の ceiling は出どころにならない
+void test_ceiling_from_connection_without_hello_is_not_a_source() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  // カメラモジュールは繋がっていない。名乗っていない接続が NO_ECHO を送るだけ
+  rig.ctrl.on_ceiling(module(9), ceiling_at(CeilingStatus::NO_ECHO, 0, 0, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+}
+
+void test_ceiling_from_hello_without_sensor_field_is_not_a_source() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"name\":\"x\"}", &hello));  // ceiling_sensor が欠けた
+  rig.ctrl.on_hello(module(8), hello);
+  rig.ctrl.on_ceiling(module(8), ceiling_at(CeilingStatus::NO_ECHO, 0, 0, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+  // 同じ接続の hold に載った値も出どころにならない
+  rig.ctrl.on_hold(module(8), up_hold(1, 40, 10), 10);
+  rig.ctrl.on_release(module(8), 1);
+  const LiftState again = rig.fk_step(10, 2);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, again);
+}
+
+// 変異 13: observe の接続・ceiling_sensor: false の接続の ceiling は fk の判定に使わない
+void test_ceiling_from_observer_is_not_a_source() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_hello(module(5), hello_as("viewer", true, ModuleRole::OBSERVE));
+  rig.ctrl.on_ceiling(module(5), measured(1450, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+  // カメラモジュールの値が有効なら、observe の近い値に引きずられない
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 10));
+  rig.ctrl.on_ceiling(module(5), measured(100, 10));
+  const LiftState ok = rig.fk_step(10);
+  TEST_ASSERT_TRUE(ok.dir == LiftDir::UP);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", ok.ceiling_from);
+}
+
+void test_ceiling_from_no_sensor_connection_is_not_a_source() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_hello(module(4), hello_as("ss", false, ModuleRole::CONTROL, ModuleOperator::AUTO));
+  rig.ctrl.on_ceiling(module(4), measured(1450, 0));  // 距離計を持たないと名乗った接続の値は捨てる
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+}
+
+void test_ceiling_from_ui_connection_is_ignored() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(3), hello_fk());
+  rig.ctrl.on_ceiling(ui(1), measured(1450, 0));
+  const LiftState state = rig.fk_step(0);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  assert_reason(StopReason::CEILING_STALE, state);
+}
+
+// 変異 14: busy_label は 48 バイトまで。超えたら切り詰めず無し（壊れた UTF-8 を state に載せない）
+void test_busy_label_over_48_bytes_is_dropped_not_truncated() {
+  MultiRig rig;
+  std::string text = "{\"t\":\"hello\",\"name\":\"fk\",\"busy_label\":\"a";
+  for (int i = 0; i < 16; ++i) {
+    text += "\xe6\xb8\xac";
+  }
+  text += "\"}";
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello(text.c_str(), &hello));
+  rig.ctrl.on_hello(module(3), hello);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_EQUAL_INT(1, state.module_count);
+  TEST_ASSERT_EQUAL_STRING("", state.modules[0].busy_label);
+  char json[LIFT_STATE_TEXT_MAX];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"busy_label\":null"));
+}
+
+void test_busy_label_48_bytes_reaches_state() {
+  MultiRig rig;
+  std::string label;
+  for (int i = 0; i < 16; ++i) {
+    label += "\xe6\xb8\xac";
+  }
+  const std::string text = "{\"t\":\"hello\",\"name\":\"fk\",\"busy_label\":\"" + label + "\"}";
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello(text.c_str(), &hello));
+  rig.ctrl.on_hello(module(3), hello);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_EQUAL_STRING(label.c_str(), state.modules[0].busy_label);
+}
+
+// state.modules・homed・ceiling.from
+void test_state_modules_list_includes_observer_and_hello_fields() {
+  MultiRig rig;
+  HelloMsg cam = hello_cam();
+  std::strncpy(cam.fw, "0.2.0", sizeof(cam.fw) - 1);
+  std::strncpy(cam.ip, "192.168.5.23", sizeof(cam.ip) - 1);
+  rig.ctrl.on_hello(module(2), cam);
+  HelloMsg fk = hello_fk();
+  std::strncpy(fk.busy_label, "fk-busy", sizeof(fk.busy_label) - 1);
+  rig.ctrl.on_hello(module(3), fk);
+  rig.ctrl.on_hello(module(5), hello_as("viewer", true, ModuleRole::OBSERVE));
+  // hello を送っていない接続は並べない
+  rig.ctrl.on_ceiling(module(9), measured(1, 0));
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_EQUAL_INT(3, state.module_count);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.modules[0].name);
+  TEST_ASSERT_EQUAL_STRING("192.168.5.23", state.modules[0].ip);
+  TEST_ASSERT_EQUAL_STRING("0.2.0", state.modules[0].fw);
+  TEST_ASSERT_EQUAL_STRING("", state.modules[0].busy_label);
+  TEST_ASSERT_EQUAL_STRING("fk", state.modules[1].name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(state.modules[1].op));
+  TEST_ASSERT_FALSE(state.modules[1].ceiling_sensor);
+  TEST_ASSERT_EQUAL_STRING("fk-busy", state.modules[1].busy_label);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::OBSERVE), static_cast<int>(state.modules[2].role));
+  rig.ctrl.on_close(3);
+  TEST_ASSERT_EQUAL_INT(2, rig.ctrl.step(10).module_count);
+}
+
+void test_state_modules_is_capped_at_list_max() {
+  MultiRig rig;
+  const char* names[] = {"a", "b", "c", "d", "e", "f"};
+  for (int i = 0; i < LIFT_MODULE_LIST_MAX; ++i) {
+    rig.ctrl.on_hello(module(10 + i), hello_as(names[i], false));
+  }
+  TEST_ASSERT_EQUAL_INT(LIFT_MODULE_LIST_MAX, rig.ctrl.step(0).module_count);
+}
+
+void test_state_homed_follows_hal() {
+  MultiRig rig;
+  TEST_ASSERT_FALSE(rig.ctrl.step(0).homed);
+  rig.hal.set_homed(true);
+  TEST_ASSERT_TRUE(rig.ctrl.step(10).homed);
+}
+
+void test_state_ceiling_from_while_idle_follows_ceiling_messages() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  // 昇降を命じていなくても、ceiling が届いている間は state.ceiling が新しい
+  rig.ctrl.on_ceiling(module(2), measured(1450, 1000, 50));
+  const LiftState state = rig.ctrl.step(1100);
+  TEST_ASSERT_FALSE(state.has_owner);
+  TEST_ASSERT_TRUE(state.ceiling_present);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+  TEST_ASSERT_EQUAL_INT(150, state.ceiling_age_ms);
+  TEST_ASSERT_FALSE(state.ceiling_used);
+}
+
+// 持ち主が距離計を持つ接続のときは、今までどおり自分の hold の値。ceiling.from は自分
+void test_camera_owner_uses_own_hold_ceiling_and_from() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_hold(module(2), up_hold(1, 40, 0), 0);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_TRUE(state.ceiling_used);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.ceiling_from);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 画面・物理ボタンは今のまま天井を使わない（WP-LIFT-15 まで）
+void test_ui_climb_ignores_camera_ceiling() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(300, 0));
+  HoldMsg hold = fk_up(1);
+  rig.ctrl.on_hold(ui(1), hold, 0);
+  const LiftState state = rig.ctrl.step(0);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  TEST_ASSERT_FALSE(state.ceiling_used);
+}
+
+// 接続を何度も繋ぎ直しても hold を受け付け続ける（閉じた接続の番号の欄を使い回す）
+void test_many_reconnects_still_accept_holds() {
+  MultiRig rig;
+  rig.ctrl.on_hello(module(2), hello_cam());
+  rig.ctrl.on_ceiling(module(2), measured(1450, 0));
+  uint32_t t = 0;
+  for (int id = 100; id < 140; ++id) {
+    rig.ctrl.on_hello(module(id), hello_fk());
+    const LiftState state = rig.fk_step(t, 1, id);
+    TEST_ASSERT_TRUE(state.dir == LiftDir::UP);
+    rig.ctrl.on_ceiling(module(2), measured(1450, t + 10));
+    rig.ctrl.on_close(id);
+    t += 10;
+    rig.ctrl.step(t);
+  }
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -1201,6 +1754,42 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_glitch_during_climb_does_not_reset_height);
   RUN_TEST(test_long_press_while_high_makes_height_unknown);
   RUN_TEST(test_bottom_stops_down_on_a_single_raw_read);
+
+
+  RUN_TEST(test_fk_climb_stops_at_camera_ceiling_sent_by_ceiling_message);
+  RUN_TEST(test_fk_climb_moves_when_camera_ceiling_is_far);
+  RUN_TEST(test_fk_uses_camera_hold_ceiling_too);
+  RUN_TEST(test_fk_climb_refused_without_camera);
+  RUN_TEST(test_fk_climb_refused_when_camera_value_is_old);
+  RUN_TEST(test_fk_climb_stops_when_camera_connection_closes);
+  RUN_TEST(test_fk_ceiling_age_counts_transit);
+  RUN_TEST(test_fk_uses_nearest_of_two_sensor_modules);
+  RUN_TEST(test_fk_down_does_not_need_ceiling);
+  RUN_TEST(test_observe_connection_hold_is_dropped);
+  RUN_TEST(test_observe_connection_release_does_not_stop_owner);
+  RUN_TEST(test_unknown_role_hello_cannot_command);
+  RUN_TEST(test_missing_role_hello_can_command);
+  RUN_TEST(test_same_name_hello_returns_old_connection);
+  RUN_TEST(test_nameless_hellos_do_not_replace_each_other);
+  RUN_TEST(test_replacing_owner_stops_it_when_old_connection_closes);
+  RUN_TEST(test_second_hello_does_not_change_role_or_sensor);
+  RUN_TEST(test_second_hello_cannot_downgrade_camera_to_observer);
+  RUN_TEST(test_state_owner_name_and_operator);
+  RUN_TEST(test_hello_without_operator_is_human_owner);
+  RUN_TEST(test_ceiling_from_connection_without_hello_is_not_a_source);
+  RUN_TEST(test_ceiling_from_hello_without_sensor_field_is_not_a_source);
+  RUN_TEST(test_ceiling_from_observer_is_not_a_source);
+  RUN_TEST(test_ceiling_from_no_sensor_connection_is_not_a_source);
+  RUN_TEST(test_ceiling_from_ui_connection_is_ignored);
+  RUN_TEST(test_busy_label_over_48_bytes_is_dropped_not_truncated);
+  RUN_TEST(test_busy_label_48_bytes_reaches_state);
+  RUN_TEST(test_state_modules_list_includes_observer_and_hello_fields);
+  RUN_TEST(test_state_modules_is_capped_at_list_max);
+  RUN_TEST(test_state_homed_follows_hal);
+  RUN_TEST(test_state_ceiling_from_while_idle_follows_ceiling_messages);
+  RUN_TEST(test_camera_owner_uses_own_hold_ceiling_and_from);
+  RUN_TEST(test_ui_climb_ignores_camera_ceiling);
+  RUN_TEST(test_many_reconnects_still_accept_holds);
 
   return UNITY_END();
 }

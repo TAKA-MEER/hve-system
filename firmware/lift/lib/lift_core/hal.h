@@ -23,4 +23,8 @@ class LiftHal {
   virtual int height_mm() const = 0;
   virtual bool height_ok() const = 0;
   virtual uint32_t height_at_ms() const = 0;
+
+  // 原点を取ったか（電源を入れてから一度下端に着いたか。state.homed の元。
+  // DetailedDesign-protocol-modules.md §3）。高さが読めない理由の切り分けに使う
+  virtual bool homed() const = 0;
 };
