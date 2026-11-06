@@ -145,11 +145,13 @@ function provisionalText(names) {
 /* 「単体の操作でも天井で止める」の行。対応していない昇降部では無効にして理由を出す */
 function standaloneRowHtml() {
   const supported = typeof settings_draft[SETTING_CEILING.key] === 'boolean';
-  const input = supported
-    ? `<input type="checkbox" data-axis="${SETTING_CEILING.key}"${settings_draft[SETTING_CEILING.key] ? ' checked' : ''}>`
-    : `<input type="checkbox" data-axis="${SETTING_CEILING.key}" disabled> ${CEILING_UNSUPPORTED_TEXT}`;
-  return `<tr data-key="${SETTING_CEILING.key}"><td class="wrapcell">${SETTING_CEILING.name}</td>` +
-    `<td colspan="4" class="wrapcell">${input}</td></tr>`;
+  const state = supported
+    ? (settings_draft[SETTING_CEILING.key] ? ' checked' : '')
+    : ' disabled';
+  const note = supported ? '' : `（${CEILING_UNSUPPORTED_TEXT}）`;
+  return `<tr data-key="${SETTING_CEILING.key}"><td colspan="5" class="wrapcell stwide">` +
+    `<label><input type="checkbox" data-axis="${SETTING_CEILING.key}"${state}>` +
+    `${SETTING_CEILING.name}${note}</label></td></tr>`;
 }
 
 /* 設定画面を開く。現在の設定を下書きにしてから出す。 */
