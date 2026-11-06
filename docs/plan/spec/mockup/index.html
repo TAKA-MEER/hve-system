@@ -151,7 +151,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
 /* さらに低い画面では表とボタンも詰める（横長・低丈の端末用） */
 @media (max-height:480px){
   .sheet{padding:4px 12px;gap:2px} .sheet h1{font-size:14px}
-  th,td{font-size:12px} td input{padding:2px 6px;font-size:12px}
+  th,td{font-size:12px;padding:1px 4px} td input{padding:1px 6px;font-size:12px}
+  .prov{display:none}  /* 仮値の一覧は背の高い画面だけ（天井の閾値の行を足して収まらなくなった） */
   .row-actions .hbtn{padding:2px 8px;font-size:12px}
   .prov{font-size:10px;padding:2px 6px} .err{font-size:11px}
 }
@@ -302,11 +303,13 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     {key:'yaw',       name:'ヨー',   unit:'deg/s', abs:[0.1,60], step:0.5},
   ];
   const MOTOR = {key:'motor_max_pct', name:'モータへの出力の上限', unit:'%', abs:[10,100]};  // Spec-ui.md §2.1
+  const MARGIN = {key:'ceil_margin_mm', name:'天井の閾値', unit:'mm', abs:[150,3000]};       // Spec-ui.md §2.3
   let settings = {
     lift_up:{min:10,max:60,init:30}, lift_down:{min:10,max:60,init:30},
     pitch:{min:1,max:30,init:10},    yaw:{min:1,max:30,init:10},
     motor_max_pct:50,
     ceil_standalone:true,  // 単体の操作でも天井で止める（Spec-ui.md §2.2。既定は入）
+    ceil_margin_mm:500,    // 天井の閾値（Spec-ui.md §2.3。150〜3000 の整数）
   };
   // 仮値で動作中のパラメータ（実装は state.provisional。camera/config/params.toml の provisional）
   const PROVISIONAL = ['hold_timeout_ms','lift_cmd_period_ms','lift_state_timeout_ms','state_period_ms',
@@ -320,7 +323,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
              link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true,
              active:null, reason:'NONE', runAxis:null, runT:0, runDist:0, meas:0};
   // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_PCT・pitch_min/max_deg）。GAUGE_FULL は上端の閾値
-  const CEIL_MARGIN = 500, PITCH_LIM = 45, MAX_RUN_PCT = 150, GAUGE_FULL = 1800;
+  const PITCH_LIM = 45, MAX_RUN_PCT = 150, GAUGE_FULL = 1800;
 
   // 停止理由の文言（camera/web/app.js の REASON_TEXT と同じ。文言は仮）
   const REASON = {
@@ -370,7 +373,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   function ceilingVerdict(){ // 昇降部の ceiling_check（距離計を持つ上部モジュールからの上昇のときだけ）
     if (ceilStale()) return 'CEILING_STALE';
     if (S.ceilOut) return 'OUT_OF_RANGE';                     // 反射が返らない＝天井は遠い（許す。#3b）
-    if (ceilGap() <= CEIL_MARGIN) return 'CEILING_NEAR';      // ちょうど閾値でも止める（#3）
+    if (ceilGap() <= settings.ceil_margin_mm) return 'CEILING_NEAR';      // ちょうど閾値でも止める（#3）
     return 'NONE';
   }
 
@@ -600,6 +603,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
       `<td>${a.unit}</td></tr>`).join('') +
       `<tr data-key="${MOTOR.key}"><td class="wrapcell">${MOTOR.name}</td>` +
       `<td colspan="3"><input type="number" inputmode="decimal" data-f="motor" value="${draft[MOTOR.key]}"></td><td>${MOTOR.unit}</td></tr>` +
+      `<tr data-key="${MARGIN.key}"><td class="wrapcell">${MARGIN.name}</td>` +
+      `<td colspan="3"><input type="number" inputmode="decimal" data-f="margin" value="${draft[MARGIN.key]}"></td><td>${MARGIN.unit}</td></tr>` +
       `<tr data-key="ceil_standalone"><td colspan="5" class="wrapcell">` +
       `<label><input type="checkbox" data-f="ceil"${draft.ceil_standalone ? ' checked' : ''}>単体の操作でも天井で止める<span class="cdesc">（昇降部の画面・物理ボタンでも、通信できていれば天井で止める）</span></label></td></tr>`;
     $('stBody').querySelectorAll('input').forEach(i => i.addEventListener('input', validate));
@@ -628,6 +633,12 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     else if (mv < MOTOR.abs[0] || mv > MOTOR.abs[1]) merr = `${MOTOR.abs[0]}〜${MOTOR.abs[1]} ${MOTOR.unit} の整数にしてください`;
     mi.classList.toggle('bad', !!merr);
     if (merr) msgs.push(`${MOTOR.name}: ${merr}`); else draft[MOTOR.key] = mv;
+    const gi = $('stBody').querySelector('input[data-f=margin]'), gv = gi.value === '' ? NaN : +gi.value;
+    let gerr = '';
+    if (Number.isNaN(gv)) gerr = '数値を入れてください';
+    else if (!Number.isInteger(gv) || gv < MARGIN.abs[0] || gv > MARGIN.abs[1]) gerr = `${MARGIN.abs[0]}〜${MARGIN.abs[1]} ${MARGIN.unit} の整数にしてください`;
+    gi.classList.toggle('bad', !!gerr);
+    if (gerr) msgs.push(`${MARGIN.name}: ${gerr}`); else draft[MARGIN.key] = gv;
     draft.ceil_standalone = $('stBody').querySelector('input[data-f=ceil]').checked;
     // エラーは 1 行にまとめる（行を増やして画面からはみ出さないように）
     $('stErr').textContent = msgs.length ? msgs[0] + (msgs.length > 1 ? `（ほか ${msgs.length - 1} 件）` : '') : '';
