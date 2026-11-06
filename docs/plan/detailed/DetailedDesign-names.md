@@ -172,6 +172,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`LIFT_CEILING_STANDALONE_DEFAULT`** | `lift_settings.h`。`true`（spec [Spec-ui.md](../spec/Spec-ui.md) §2.2） |
 | **`LiftController::set_ceiling_standalone`** | 設定を `LiftController` に持たせる（`set_motor_max_pct` と同じく、起動時と `PUT` 成功時に `main.cpp` が呼ぶ） |
 | **`StandaloneCeiling`** / `state` の **`ceiling.standalone`** | `USE` / `SETTING_OFF` / `NO_SOURCE` |
+| **`state.lift.ceiling_standalone`**・**`standaloneCeilingText`** | カメラモジュール（`WP-CAM-11`）。前者は昇降部の `ceiling.standalone` をそのまま載せる（無ければ `null`）。後者は `camera/web/app.js` の純関数で、持ち主が `ui`・`button` で `SETTING_OFF`／`NO_SOURCE` のときだけ天井のバッジの文言を返す |
 
 `POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
 偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
