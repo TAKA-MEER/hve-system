@@ -862,3 +862,24 @@ async def test_index_is_served_after_wp_ui_01(loop) -> None:
 async def test_state_is_json_serialisable(rig: Rig) -> None:
     state = await rig.pump()
     assert json.loads(json.dumps(state, ensure_ascii=False))["t"] == "state"
+
+
+async def test_fake_mode_screen_owner_and_standalone_follow(fake_rig: Rig) -> None:
+    """偽物のモード: `screen_owner` で持ち主と standalone を作れ、設定を切にすると `SETTING_OFF` に追従する。"""
+    rig = fake_rig
+    assert rig.client is not None
+    lift = rig.camera._fake_lift()  # noqa: SLF001
+    response = await rig.client.post(
+        "/api/fake", json={"screen_owner": {"owner": "ui", "standalone": "NO_SOURCE"}}
+    )
+    assert response.status == 200
+    bad = await rig.client.post("/api/fake", json={"screen_owner": {"owner": "x"}})
+    assert bad.status == 400
+    lift._step(lift._clock())  # noqa: SLF001
+    state = lift.latest_state()
+    assert state["owner"] == "ui" and state["ceiling"]["standalone"] == "NO_SOURCE"
+    await rig.client.post("/api/fake", json={"screen_owner": None})
+    good = {**copy.deepcopy(SETTINGS), "motor_max_pct": 50, "ceiling_standalone": False}
+    assert (await rig.client.put("/api/settings", json=good)).status == 200
+    lift._step(lift._clock())  # noqa: SLF001
+    assert lift.latest_state()["ceiling"]["standalone"] == "SETTING_OFF"

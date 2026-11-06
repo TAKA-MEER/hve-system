@@ -382,6 +382,9 @@ class CameraApp:
             self._fake_lift_settings[MOTOR_MAX_PCT_KEY] = body[MOTOR_MAX_PCT_KEY]
             if CEILING_STANDALONE_KEY in body:
                 self._fake_lift_settings[CEILING_STANDALONE_KEY] = body[CEILING_STANDALONE_KEY]
+            fake = self._fake_lift()
+            if fake is not None and hasattr(fake, "set_ceiling_standalone"):
+                fake.set_ceiling_standalone(self._fake_lift_settings[CEILING_STANDALONE_KEY])
             return 200, []
         base = await self._lift_http_base()
         if base is None:
@@ -458,12 +461,26 @@ class CameraApp:
 
     def _apply_fake_modules(self, data: Mapping[str, Any]) -> list[str]:
         """`arm_out`（腕が出ている）・`other_owner`（`{name, busy_label}`。別の上部モジュールが持ち主）。"""
-        if "arm_out" not in data and "other_owner" not in data:
+        if "arm_out" not in data and "other_owner" not in data and "screen_owner" not in data:
             return []
         lift = self._fake_lift()
         if lift is None or not hasattr(lift, "set_arm_out"):
-            return ["arm_out・other_owner: 昇降部が偽物でない"]
+            return ["arm_out・other_owner・screen_owner: 昇降部が偽物でない"]
         errors: list[str] = []
+        if "screen_owner" in data:
+            value = data["screen_owner"]
+            if value is None:
+                lift.set_screen_owner(None)
+            elif (
+                isinstance(value, dict)
+                and value.get("owner") in ("ui", "button")
+                and value.get("standalone") in (None, "USE", "SETTING_OFF", "NO_SOURCE")
+            ):
+                lift.set_screen_owner(value["owner"], value.get("standalone"))
+            else:
+                errors.append(
+                    "screen_owner: null か {owner: ui|button, standalone: USE|SETTING_OFF|NO_SOURCE} でない"
+                )
         if "arm_out" in data:
             value = data["arm_out"]
             if value is not None and not isinstance(value, bool):

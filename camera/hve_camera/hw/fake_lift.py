@@ -78,6 +78,12 @@ class FakeLift(LiftPort):
         self.ceiling_history: List[Dict[str, Any]] = []
         #: ほかの上部モジュールが持ち主のふり（`(name, busy_label)`）。`None` なら演じない
         self._other_owner: Optional[tuple] = None
+        #: 昇降部の画面・物理ボタンが持ち主のふり（`"ui"`／`"button"`。`None` なら演じない）
+        self._screen_owner: Optional[str] = None
+        #: `state.ceiling.standalone` を決め打ちにする値（`None` なら設定 `ceiling_standalone` に追従）
+        self._standalone_override: Optional[str] = None
+        #: 設定 `ceiling_standalone`（偽物の設定を変えたとき `app.py` が入れる）
+        self._ceiling_standalone_setting = True
         #: `arm.out` に出す値（`True`＝腕が出ている・`None`＝分からない）
         self._arm_out: Optional[bool] = None
 
@@ -92,6 +98,16 @@ class FakeLift(LiftPort):
     def set_other_owner(self, name: Optional[str], busy_label: Optional[str] = None) -> None:
         """`fk`・`ss` のような別の上部モジュールが持ち主のふりをする（`None` でやめる）。"""
         self._other_owner = None if name is None else (str(name), busy_label)
+
+    def set_screen_owner(self, owner: Optional[str], standalone: Optional[str] = None) -> None:
+        """昇降部の画面（`ui`）・物理ボタン（`button`）が持ち主のふり。`standalone` は
+        `state.ceiling.standalone` の決め打ち（`USE`／`SETTING_OFF`／`NO_SOURCE`。`None` で設定に追従）。"""
+        self._screen_owner = owner
+        self._standalone_override = standalone
+
+    def set_ceiling_standalone(self, enabled: bool) -> None:
+        """設定 `ceiling_standalone`。決め打ちが無ければ、切なら `SETTING_OFF`・入なら `USE` を出す。"""
+        self._ceiling_standalone_setting = bool(enabled)
 
     def set_arm_out(self, out: Optional[bool]) -> None:
         self._arm_out = out
@@ -316,12 +332,17 @@ class FakeLift(LiftPort):
                 "age_ms": int(self._ceiling.get("age_ms", 0)),
                 "ok": ok,
                 "reason": ceiling_reason,
-                "standalone": "USE",
+                "standalone": self._standalone_override
+                or ("USE" if self._ceiling_standalone_setting else "SETTING_OFF"),
             },
-            "owner": "module" if (owner or other is not None) else None,
-            "owner_name": other[0] if other is not None else ("hve-cam" if owner else None),
+            "owner": self._screen_owner
+            or ("module" if (owner or other is not None) else None),
+            "owner_name": None
+            if self._screen_owner
+            else (other[0] if other is not None else ("hve-cam" if owner else None)),
             "owner_operator": (
-                "auto" if other is not None else ("human" if owner else None)
+                "human" if self._screen_owner
+                else "auto" if other is not None else ("human" if owner else None)
             ),
             "homed": True,
             "modules": modules,
