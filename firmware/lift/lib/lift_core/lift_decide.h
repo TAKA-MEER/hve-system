@@ -41,6 +41,13 @@ enum class ModuleOperator : uint8_t {
   AUTO = 1,   // 自分で判断して動かす（fk・ss）
 };
 
+// state.ceiling.standalone（単体の操作の天井。protocol-modules §2.5。2026-11-06）
+enum class StandaloneCeiling : uint8_t {
+  USE = 0,      // 新しい値があり、設定も入。その値で止める
+  SETTING_OFF,  // 設定 ceiling_standalone が切
+  NO_SOURCE,    // 出どころが無い・どれも古い。天井を使わない（CEILING_STALE にしない）
+};
+
 // state.modules に並べる接続の数。config.h の LIFT_MODULE_MAX_CONN と同じ値に保つ
 // （main.cpp の static_assert で確かめる。2026-11-05）
 constexpr int LIFT_MODULE_LIST_MAX = 6;
@@ -83,6 +90,8 @@ struct LiftState {
   StopReason ceiling_reason = StopReason::CEILING_STALE;
   // 天井の値を送ってきた接続の名前（判定に使った値。無ければ空）
   char ceiling_from[32] = {};
+  // いま単体の操作（画面・物理ボタン）で上げたら天井を使うか。持ち主が誰でも毎周期決める
+  StandaloneCeiling ceiling_standalone = StandaloneCeiling::NO_SOURCE;
   // 持ち主（いなければ has_owner が偽。種類は lift_arbiter.h の ConnKind）
   bool has_owner = false;
   uint8_t owner_kind = 0;  // 0 = UI（画面）・1 = MODULE（上部モジュール）・2 = BUTTON（物理ボタン）

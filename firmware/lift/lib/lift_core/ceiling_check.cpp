@@ -5,6 +5,16 @@
 
 #include "lift_decide.h"  // elapsed_ms（経過時間を数える唯一の関数）
 
+bool ceiling_is_stale(const CeilingReport& report, uint32_t now_ms) {
+  // 古さは「送る瞬間の古さ ＋受け取ってからの経過」（§3.2）。
+  // received_at が now より少し新しいときは小さな負の値になるので足さない
+  // （誤って古いと見ない）。
+  const int32_t transit_ms = elapsed_ms(now_ms, report.received_at_ms);
+  const int64_t age_ms =
+      static_cast<int64_t>(report.age_ms) + (transit_ms > 0 ? transit_ms : 0);
+  return age_ms > static_cast<int64_t>(CEILING_STALE_MS);
+}
+
 CeilingVerdict ceiling_check(const CeilingReport& report, uint32_t now_ms,
                              bool connection_has_sensor) {
   // 距離計を持たない接続（/ws/ui・hello で ceiling_sensor: false）の命令には
@@ -16,13 +26,7 @@ CeilingVerdict ceiling_check(const CeilingReport& report, uint32_t now_ms,
     return verdict;
   }
 
-  // 古さは「送る瞬間の古さ ＋受け取ってからの経過」（§3.2）。
-  // received_at が now より少し新しいときは小さな負の値になるので足さない
-  // （誤って古いと見ない）。
-  const int32_t transit_ms = elapsed_ms(now_ms, report.received_at_ms);
-  const int64_t age_ms =
-      static_cast<int64_t>(report.age_ms) + (transit_ms > 0 ? transit_ms : 0);
-  if (age_ms > static_cast<int64_t>(CEILING_STALE_MS)) {
+  if (ceiling_is_stale(report, now_ms)) {
     CeilingVerdict verdict;
     verdict.ok = false;
     verdict.reason = StopReason::CEILING_STALE;

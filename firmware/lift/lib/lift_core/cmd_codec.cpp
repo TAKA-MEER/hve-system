@@ -105,6 +105,37 @@ bool reason_from_name(const char* name, StopReason* out) {
   return false;
 }
 
+const char* standalone_ceiling_name(StandaloneCeiling value) {
+  switch (value) {
+    case StandaloneCeiling::USE:
+      return "USE";
+    case StandaloneCeiling::SETTING_OFF:
+      return "SETTING_OFF";
+    case StandaloneCeiling::NO_SOURCE:
+      break;
+  }
+  return "NO_SOURCE";
+}
+
+bool standalone_ceiling_from_name(const char* name, StandaloneCeiling* out) {
+  if (name == nullptr) {
+    return false;
+  }
+  if (std::strcmp(name, "USE") == 0) {
+    *out = StandaloneCeiling::USE;
+    return true;
+  }
+  if (std::strcmp(name, "SETTING_OFF") == 0) {
+    *out = StandaloneCeiling::SETTING_OFF;
+    return true;
+  }
+  if (std::strcmp(name, "NO_SOURCE") == 0) {
+    *out = StandaloneCeiling::NO_SOURCE;
+    return true;
+  }
+  return false;
+}
+
 const char* ceiling_status_name(CeilingStatus status) {
   switch (status) {
     case CeilingStatus::MEASURED:
@@ -380,8 +411,12 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
     } else {
       ceiling["from"] = nullptr;
     }
+    ceiling["standalone"] = standalone_ceiling_name(state.ceiling_standalone);
   } else {
-    obj["ceiling"] = nullptr;
+    // 天井の値が無くても、単体の操作の天井（標準で押す前から画面が出す）は毎周期出す。
+    // 値の欄（used・status など）は無い
+    JsonObject ceiling = obj["ceiling"].to<JsonObject>();
+    ceiling["standalone"] = standalone_ceiling_name(state.ceiling_standalone);
   }
   if (state.has_owner) {
     obj["owner"] = state.owner_kind == 1 ? "module" : state.owner_kind == 2 ? "button" : "ui";
@@ -445,6 +480,39 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
   return serializeJson(doc, out, out_size);
 }
 
+// state の ceiling のうち、値の欄（used・status・mm・age_ms・ok・reason・from）を読む
+static bool read_state_ceiling_values(JsonObject ceiling, LiftState* out) {
+  if (!ceiling["used"].is<bool>() || !ceiling["status"].is<const char*>() ||
+      !ceiling["age_ms"].is<int>() || !ceiling["ok"].is<bool>() ||
+      !ceiling["reason"].is<const char*>()) {
+    return false;
+  }
+  if (!ceiling_status_from_name(ceiling["status"].as<const char*>(), &out->ceiling_status)) {
+    // MISSING は encode しない値なので、読めたことにはならない
+    if (std::strcmp(ceiling["status"].as<const char*>(), "MISSING") != 0) {
+      return false;
+    }
+    out->ceiling_status = CeilingStatus::MISSING;
+  }
+  if (!reason_from_name(ceiling["reason"].as<const char*>(), &out->ceiling_reason)) {
+    return false;
+  }
+  if (ceiling["mm"].is<int>()) {
+    out->ceiling_mm = ceiling["mm"].as<int>();
+  } else if (!ceiling["mm"].isNull()) {
+    return false;
+  }
+  out->ceiling_used = ceiling["used"].as<bool>();
+  out->ceiling_age_ms = static_cast<uint32_t>(ceiling["age_ms"].as<int>());
+  out->ceiling_ok = ceiling["ok"].as<bool>();
+  if (ceiling["from"].is<const char*>()) {
+    copy_text_field(out->ceiling_from, sizeof(out->ceiling_from), ceiling["from"]);
+  } else if (!ceiling["from"].isNull()) {
+    return false;
+  }
+  return true;
+}
+
 bool state_decode(const char* text, LiftState* out) {
   *out = LiftState();
   JsonDocument doc;
@@ -480,35 +548,23 @@ bool state_decode(const char* text, LiftState* out) {
 
   if (obj["ceiling"].is<JsonObject>()) {
     JsonObject ceiling = obj["ceiling"].as<JsonObject>();
-    if (!ceiling["used"].is<bool>() || !ceiling["status"].is<const char*>() ||
-        !ceiling["age_ms"].is<int>() || !ceiling["ok"].is<bool>() ||
-        !ceiling["reason"].is<const char*>()) {
-      return false;
-    }
-    if (!ceiling_status_from_name(ceiling["status"].as<const char*>(), &out->ceiling_status)) {
-      // MISSING は encode しない値なので、読めたことにはならない
-      if (std::strcmp(ceiling["status"].as<const char*>(), "MISSING") != 0) {
+    // standalone は足すだけの欄。欠けていれば今までの形（読み手が無視してよい）
+    if (ceiling["standalone"].is<const char*>()) {
+      if (!standalone_ceiling_from_name(ceiling["standalone"].as<const char*>(),
+                                        &out->ceiling_standalone)) {
         return false;
       }
-      out->ceiling_status = CeilingStatus::MISSING;
-    }
-    if (!reason_from_name(ceiling["reason"].as<const char*>(), &out->ceiling_reason)) {
+    } else if (!ceiling["standalone"].isNull()) {
       return false;
     }
-    if (ceiling["mm"].is<int>()) {
-      out->ceiling_mm = ceiling["mm"].as<int>();
-    } else if (!ceiling["mm"].isNull()) {
-      return false;
+    // 値の欄（status）が無く standalone だけの形は「天井の値は無い」（ceiling_present は偽）
+    const bool value_less = ceiling["status"].isNull() && !ceiling["standalone"].isNull();
+    if (!value_less) {
+      if (!read_state_ceiling_values(ceiling, out)) {
+        return false;
+      }
+      out->ceiling_present = true;
     }
-    out->ceiling_used = ceiling["used"].as<bool>();
-    out->ceiling_age_ms = static_cast<uint32_t>(ceiling["age_ms"].as<int>());
-    out->ceiling_ok = ceiling["ok"].as<bool>();
-    if (ceiling["from"].is<const char*>()) {
-      copy_text_field(out->ceiling_from, sizeof(out->ceiling_from), ceiling["from"]);
-    } else if (!ceiling["from"].isNull()) {
-      return false;
-    }
-    out->ceiling_present = true;
   } else if (!obj["ceiling"].isNull()) {
     return false;
   }

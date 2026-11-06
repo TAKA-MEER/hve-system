@@ -429,12 +429,15 @@ void test_state_encode_writes_nulls_when_no_owner_or_module() {
   LiftState state;
   char json[1024];
   TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
-  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling\":null"));
+  // 天井の値が無くても、単体の操作の天井（ceiling.standalone）は毎周期出す。値の欄は無い
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling\":{\"standalone\":\"NO_SOURCE\"}"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner\":null"));
 
   LiftState back;
   TEST_ASSERT_TRUE(state_decode(json, &back));
   TEST_ASSERT_FALSE(back.ceiling_present);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StandaloneCeiling::NO_SOURCE),
+                        static_cast<int>(back.ceiling_standalone));
   TEST_ASSERT_FALSE(back.has_owner);
   TEST_ASSERT_EQUAL_INT(0, back.module_count);
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"modules\":[]"));
@@ -542,6 +545,46 @@ void test_state_decode_rejects_broken_input() {
   TEST_ASSERT_FALSE(state_decode(nullptr, &state));
 }
 
+// 変異 10（コーデック側）: ceiling.standalone を値の有る・無いのどちらでも出し、読み戻す
+void test_state_ceiling_standalone_round_trips_with_and_without_value() {
+  const StandaloneCeiling all[] = {StandaloneCeiling::USE, StandaloneCeiling::SETTING_OFF,
+                                   StandaloneCeiling::NO_SOURCE};
+  const char* names[] = {"USE", "SETTING_OFF", "NO_SOURCE"};
+  for (int i = 0; i < 3; ++i) {
+    for (int present = 0; present < 2; ++present) {
+      LiftState state = moving_state();
+      state.ceiling_present = present != 0;
+      state.ceiling_standalone = all[i];
+      char json[1536];
+      TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+      const std::string expected = std::string("\"standalone\":\"") + names[i] + "\"";
+      TEST_ASSERT_NOT_NULL(std::strstr(json, expected.c_str()));
+      LiftState back;
+      TEST_ASSERT_TRUE(state_decode(json, &back));
+      TEST_ASSERT_EQUAL_INT(static_cast<int>(all[i]), static_cast<int>(back.ceiling_standalone));
+      TEST_ASSERT_EQUAL_INT(present, back.ceiling_present ? 1 : 0);
+    }
+  }
+}
+
+void test_state_decode_without_standalone_is_the_old_shape_and_unknown_is_rejected() {
+  LiftState state = moving_state();
+  char json[1536];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  std::string text(json);
+  const size_t pos = text.find(",\"standalone\":\"NO_SOURCE\"");
+  // moving_state の既定は NO_SOURCE。足すだけの欄なので、無くても読める
+  TEST_ASSERT_TRUE(pos != std::string::npos);
+  std::string old_shape = text;
+  old_shape.erase(pos, std::strlen(",\"standalone\":\"NO_SOURCE\""));
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(old_shape.c_str(), &back));
+  TEST_ASSERT_TRUE(back.ceiling_present);
+  std::string bad = text;
+  bad.replace(pos, std::strlen(",\"standalone\":\"NO_SOURCE\""), ",\"standalone\":\"MAYBE\"");
+  TEST_ASSERT_FALSE(state_decode(bad.c_str(), &back));
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -572,6 +615,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_state_encode_contains_v2_fields);
   RUN_TEST(test_state_owner_button_round_trips);
   RUN_TEST(test_state_encode_writes_nulls_when_no_owner_or_module);
+  RUN_TEST(test_state_ceiling_standalone_round_trips_with_and_without_value);
+  RUN_TEST(test_state_decode_without_standalone_is_the_old_shape_and_unknown_is_rejected);
   RUN_TEST(test_state_arm_is_all_null);
   RUN_TEST(test_state_owner_auto_and_modules_round_trip);
   RUN_TEST(test_state_worst_case_fits_text_max);
