@@ -268,6 +268,39 @@ test('モータへの出力の上限は 10〜100 の整数（spec §2.1）', () 
   assert.match(over.errors[0].text, /モータへの出力の上限/);
 });
 
+test('単体の操作でも天井で止める: 無くてもよい・あれば真偽値（spec §2.2）', () => {
+  const withStandalone = (value) => Object.assign(JSON.parse(JSON.stringify(GOOD)), {ceiling_standalone: value});
+  assert.equal(settings.validateSettingsDraft(GOOD).ok, true); // 昇降部が対応していない
+  assert.equal(settings.validateSettingsDraft(withStandalone(true)).ok, true);
+  assert.equal(settings.validateSettingsDraft(withStandalone(false)).ok, true);
+  assert.equal(settings.validateSettingsDraft(withStandalone('yes')).ok, false);
+  assert.equal(settings.validateSettingsDraft(withStandalone(1)).ok, false);
+});
+
+test('PUT の本文は ceiling_standalone を、昇降部が対応しているときだけ載せる', () => {
+  const draft = (extra) => Object.assign(JSON.parse(JSON.stringify(GOOD)), extra);
+  assert.equal(settings.buildSettingsPayload(draft({ceiling_standalone: false})).ceiling_standalone, false);
+  assert.equal(settings.buildSettingsPayload(draft({ceiling_standalone: true})).ceiling_standalone, true);
+  assert.equal('ceiling_standalone' in settings.buildSettingsPayload(draft({})), false);
+  assert.equal(settings.buildSettingsPayload(draft({})).motor_max_pct, 50);
+});
+
+test('単体の操作が持ち主で天井を使わないときだけ、その理由をバッジに出す', () => {
+  const off = {owner: 'ui', ceiling_standalone: 'SETTING_OFF'};
+  assert.deepEqual(app.standaloneCeilingText(off), {cls: 'warn', text: '天井: 使わない（設定が切）'});
+  assert.deepEqual(
+    app.standaloneCeilingText({owner: 'button', ceiling_standalone: 'NO_SOURCE'}),
+    {cls: 'warn', text: '天井: 使わない（通信なし）'});
+  assert.equal(app.standaloneCeilingText({owner: 'ui', ceiling_standalone: 'USE'}), null);
+  assert.equal(app.standaloneCeilingText({owner: 'ui'}), null);
+  assert.equal(app.standaloneCeilingText({owner: 'ui', ceiling_standalone: 'FOO'}), null);
+  // 持ち主が上部モジュール・いない・アームのときは今のまま
+  assert.equal(app.standaloneCeilingText({owner: 'module', ceiling_standalone: 'SETTING_OFF'}), null);
+  assert.equal(app.standaloneCeilingText({owner: null, ceiling_standalone: 'SETTING_OFF'}), null);
+  assert.equal(app.standaloneCeilingText({owner: 'arm', ceiling_standalone: 'NO_SOURCE'}), null);
+  assert.equal(app.standaloneCeilingText(undefined), null);
+});
+
 test('下限 > 上限は保存できない', () => {
   const result = settings.validateSettingsDraft(withChange('lift_up', 'min', 70));
   assert.equal(result.ok, false);

@@ -165,6 +165,20 @@ function ceilingText(ceiling) {
   return {cls: 'ng', text: '天井 値なし'};
 }
 
+/**
+ * 単体の操作（昇降部の画面・物理ボタン）が持ち主のとき、天井を使っていない理由のバッジ。
+ * 持ち主がそれで `lift.ceiling_standalone` が `USE` でない（`SETTING_OFF`／`NO_SOURCE`）ときだけ
+ * `{色, 文言}`、それ以外（ほかの持ち主・`USE`・無い・知らない値）は `null`（今の天井の表示のまま）。
+ * 昇降部の設定 `ceiling_standalone` のこと（spec Spec-ui §2.2・protocol-modules §2.5）
+ */
+function standaloneCeilingText(lift) {
+  const value = lift || {};
+  if (value.owner !== 'ui' && value.owner !== 'button') return null;
+  if (value.ceiling_standalone === 'SETTING_OFF') return {cls: 'warn', text: '天井: 使わない（設定が切）'};
+  if (value.ceiling_standalone === 'NO_SOURCE') return {cls: 'warn', text: '天井: 使わない（通信なし）'};
+  return null;
+}
+
 /** 上端の検知の表示。`top_detect` が `true` でなければ「上端が未設定（開発中）」（#2a）。出さないときは `null` */
 function topDetectText(lift) {
   const value = lift || {};
@@ -560,7 +574,7 @@ function render() {
   }
 
   const lift = state.lift || {};
-  const ceiling = ceilingText(state.ceiling);
+  const ceiling = standaloneCeilingText(lift) || ceilingText(state.ceiling);
 
   setBadge($('bLink'), lift.link === 'ok' ? '' : 'ng', lift.link === 'ok' ? '昇降部' : '昇降部 切断');
   setBadge($('bCeil'), ceiling.cls, ceiling.text);
@@ -705,7 +719,7 @@ if (typeof document !== 'undefined') initApp();
 if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, zoomMessage, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
-    formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
+    formatSpeed, streamUrl, reasonText, ceilingText, standaloneCeilingText, heightText, holdBlocked, stateStale,
     topDetectText, ownerText, armText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,
   };
