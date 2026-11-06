@@ -90,6 +90,15 @@
 | `probeOutcome`・`video_probe_failures` | `camera/web/app.js` | 映像の確かめの結果から、続けて失敗した回数と「映像がありません」を出すかを決める（`WP-UI-03`。[DetailedDesign.md](DetailedDesign.md) §4.4.1） |
 | `bOwner`・`bLiftUi`・`bLiftLink`・`snapBtn`・`snapshot`・`snapImage`・`snapMsg`・`snapClose` ／ `.snapbtn`・`.snapshot`・`.snapmsg`・`.snapclose`・`.badge.link` | `camera/web/index.html`・`style.css` | 上の表示の DOM の id と CSS のクラス |
 
+### 1.5 昇降部の画面の名前（`WP-LIFTUI-03` で足した。2026-11-06 に管理担当が登録）
+
+| 名前 | 置き場 | 中身 |
+| --- | --- | --- |
+| **`ownerText`** | `firmware/lift/web/app.js` | 持ち主の文言。`owner_name` と、その接続の `busy_label` を優先して出す（`owner == "module"` を「上部モジュール」と決め打ちしない） |
+| **`ownerBusyLabel`** | 同 | `state.modules` から持ち主（`owner_name`）の `busy_label` を引く |
+| **`modulesText`** | 同 | `state.modules` の一覧（名前・IP・人か自動か・役割・距離計の有無）を 1 行にする |
+| **`armNoticeText`** | 同 | `arm.out` が `true` のときだけ「腕が出ています」を返す（`null`・`false` では出さない） |
+
 ### 1.2 `cam_io` の実物の名前（`WP-IO-02` で足した。2026-10-07 に管理担当が登録）
 
 | 名前 | 置き場 | 中身 |
