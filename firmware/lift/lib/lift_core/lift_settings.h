@@ -22,24 +22,31 @@ struct LiftSettings {
   LiftAxisSettings down;
   int motor_max_pct = LIFT_MOTOR_MAX_PCT_DEFAULT;  // モータへの出力の上限 [%]（Spec-ui §2.1）
   bool ceiling_standalone = LIFT_CEILING_STANDALONE_DEFAULT;  // 単体の操作でも天井で止めるか
+  int ceiling_margin_mm = CEILING_MARGIN_MM_DEFAULT;  // 天井の閾値 [mm]（Spec-ui §2.3）
 };
 
 // 検証（protocol §3）: 3 項目が揃うのは構造体が保証する。
 // min ≦ init ≦ max・0〜LIFT_SPEED_ABS_MAX_MM_S の整数、motor_max_pct は
-// LIFT_MOTOR_MAX_PCT_MIN〜LIFT_DUTY_ABS_MAX_PCT の整数なら true
+// LIFT_MOTOR_MAX_PCT_MIN〜LIFT_DUTY_ABS_MAX_PCT の整数、ceiling_margin_mm は
+// CEILING_MARGIN_MM_MIN〜CEILING_MARGIN_MM_MAX なら true
 bool validate_lift_settings(const LiftSettings& settings);
 
 // JSON ⇔ 構造体。形は {"lift_up":{"min":..,"max":..,"init":..},"lift_down":{...},"motor_max_pct":50,
-// "ceiling_standalone":true}。読めない JSON・欠けた項目（motor_max_pct を含む）・型の違う値・
+// "ceiling_standalone":true,"ceiling_margin_mm":500}。読めない JSON・欠けた項目（motor_max_pct を含む）・型の違う値・
 // 検証に通らない値は false。
 // ceiling_standalone だけは欠けていてもよく、そのときは ceiling_standalone_if_missing を使う
 // （ほかの項目は捨てない）。NVS は既定（true）、PUT は「いま保存している値」を渡す。
-// 真偽値でない ceiling_standalone は false（検証の誤り）
+// 真偽値でない ceiling_standalone は false（検証の誤り）。
+// ceiling_margin_mm も欠けていてもよく、そのときは ceiling_margin_mm_if_missing を使う
+// （NVS は既定の 500、PUT は「いま保存している値」）。整数でない（小数・文字列・真偽値）・
+// 範囲の外は false（検証の誤り）
 bool lift_settings_from_json(const char* text, LiftSettings* out,
-                             bool ceiling_standalone_if_missing = LIFT_CEILING_STANDALONE_DEFAULT);
+                             bool ceiling_standalone_if_missing = LIFT_CEILING_STANDALONE_DEFAULT,
+                             int ceiling_margin_mm_if_missing = CEILING_MARGIN_MM_DEFAULT);
 
 // PUT /api/settings 用の読み方。ceiling_standalone が本文に無ければ、いま保存している値
-// （current.ceiling_standalone）を保つ（true に戻さない。古いカメラモジュールからの中継）
+// （current.ceiling_standalone）を保つ（true に戻さない。古いカメラモジュールからの中継）。
+// ceiling_margin_mm も同じ（current.ceiling_margin_mm を保つ）
 bool lift_settings_from_put(const char* text, const LiftSettings& current, LiftSettings* out);
 
 // 起動時に NVS から読んだ文字列（無ければ nullptr か空）から設定を決める。

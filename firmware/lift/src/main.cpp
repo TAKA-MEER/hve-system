@@ -393,7 +393,7 @@ void serve_web(AsyncWebServerRequest* request, const char* path) {
 void load_settings() {
   // NVS の文字列から設定を決める（読めない・検証を通らないときは既定値で動き、using_defaults を
   // 立てる。motor_max_pct が無い古い形は全体が既定値、ceiling_standalone が無い古い形は
-  // true で読む。protocol §3）。決め方は lift_settings_from_saved（native で試験する）
+  // true で、ceiling_margin_mm が無い古い形は 500 で読む。protocol §3）。決め方は lift_settings_from_saved（native で試験する）
   String saved;
   Preferences prefs;
   if (prefs.begin(LIFT_NVS_NAMESPACE, true)) {
@@ -401,7 +401,7 @@ void load_settings() {
     prefs.end();
   }
   g_settings = lift_settings_from_saved(saved.c_str(), &g_using_defaults);
-  // 起動時に設定を LiftController へ効かせる（motor_max_pct・ceiling_standalone）
+  // 起動時に設定を LiftController へ効かせる（motor_max_pct・ceiling_standalone・ceiling_margin_mm）
   controller.apply_settings(g_settings);
 }
 
@@ -447,12 +447,13 @@ void apply_settings_put(AsyncWebServerRequest* request, const char* body_text) {
     return;
   }
   LiftSettings parsed;
-  // ceiling_standalone が無い PUT は、いま保存している値を保つ（true に戻さない）
+  // ceiling_standalone・ceiling_margin_mm が無い PUT は、いま保存している値を保つ（既定に戻さない）
   if (!lift_settings_from_put(body_text, g_settings, &parsed)) {
     send_settings_error(request, 400,
                         "下限 ≦ 初期値 ≦ 上限・0〜100（mm/s）の整数・"
                         "モータへの出力の上限 10〜100（%）の整数・"
-                        "単体の操作でも天井で止めるは真偽値にしてください");
+                        "単体の操作でも天井で止めるは真偽値・"
+                        "天井の閾値は 150〜3000（mm）の整数にしてください");
     return;
   }
   if (!store_settings(parsed)) {
