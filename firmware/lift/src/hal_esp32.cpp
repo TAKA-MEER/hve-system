@@ -149,3 +149,4 @@ int LiftEsp32Hal::height_mm() const { return height_mm_; }
 bool LiftEsp32Hal::height_ok() const { return height_ok_; }
 
 uint32_t LiftEsp32Hal::height_at_ms() const { return height_at_ms_; }
+bool LiftEsp32Hal::homed() const { return encoder_.homed(); }

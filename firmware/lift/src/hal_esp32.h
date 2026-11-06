@@ -30,6 +30,8 @@ class LiftEsp32Hal : public LiftHal {
   int height_mm() const override;
   bool height_ok() const override;
   uint32_t height_at_ms() const override;
+  // 原点を取ったか（EncoderHeight から）
+  bool homed() const override;
 
  private:
   EncoderHeight encoder_;

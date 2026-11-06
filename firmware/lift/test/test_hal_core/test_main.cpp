@@ -67,6 +67,18 @@ void test_pressed_at_boot_takes_home() {
   TEST_ASSERT_EQUAL_INT(0, h.height_mm());
 }
 
+// state.homed の元。原点を一度でも取ったか（高さが読めなくなっても真のまま）
+void test_homed_is_false_until_first_landing() {
+  EncoderHeight h;
+  TEST_ASSERT_FALSE(h.homed());
+  release(&h, 1234);
+  TEST_ASSERT_FALSE(h.homed());
+  press(&h, 1234);
+  TEST_ASSERT_TRUE(h.homed());
+  release(&h, 5000);  // 離れても取った原点は残る
+  TEST_ASSERT_TRUE(h.homed());
+}
+
 // --- 押された瞬間に原点を取り直す ---
 
 void test_second_landing_retakes_home() {
@@ -483,6 +495,7 @@ int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
   RUN_TEST(test_not_pressed_at_boot_is_unknown);
   RUN_TEST(test_pressed_at_boot_takes_home);
+  RUN_TEST(test_homed_is_false_until_first_landing);
   RUN_TEST(test_second_landing_retakes_home);
   RUN_TEST(test_height_grows_when_raising_after_release);
   RUN_TEST(test_one_encoder_revolution_is_37_mm);

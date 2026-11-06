@@ -19,6 +19,8 @@ class FakeHal : public LiftHal {
   bool height_ok() const override { return height_ok_; }
   uint32_t height_at_ms() const override { return height_at_ms_; }
   int32_t encoder_count() const override { return encoder_count_; }
+  bool homed() const override { return homed_; }
+  void set_homed(bool homed) { homed_ = homed; }
 
   // 試験が使う設定
   void set_bottom(bool pressed) { bottom_ = pressed; }
@@ -43,6 +45,7 @@ class FakeHal : public LiftHal {
   int height_mm_ = 0;
   bool height_ok_ = false;
   uint32_t height_at_ms_ = 0;
+  bool homed_ = false;
 };
 
 // 実物（LiftEsp32Hal）と同じ作りの偽物。高さと「読めるか」は EncoderHeight が決め、
@@ -60,6 +63,7 @@ class EncoderFakeHal : public LiftHal {
   bool height_ok() const override { return height_ok_; }
   uint32_t height_at_ms() const override { return height_at_ms_; }
   int32_t encoder_count() const override { return count_; }
+  bool homed() const override { return encoder_.homed(); }
 
   // 試験が使う設定
   void set_raw_pressed(bool pressed) { raw_pressed_ = pressed; }

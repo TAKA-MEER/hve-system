@@ -102,6 +102,8 @@ class EncoderHeight {
   // up_sign に既定値を置かない: 時刻を渡し忘れても up_sign が now_ms に入って通ってしまうため。
   void update(int32_t count, bool bottom_pressed_raw, uint32_t now_ms, int up_sign);
   bool ok() const { return has_home_ && !fault_ && !rejected_; }
+  // 原点を一度でも取ったか（故障・拒否で ok が偽でも真のまま。state.homed の元）
+  bool homed() const { return has_home_; }
   // 原点を取ったあとの高さ [mm]。原点より下（ずれ）は負のまま出す。丸めない。
   int height_mm() const;
 
