@@ -170,6 +170,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | --- | --- |
 | **`LiftSettings::ceiling_standalone`** / 設定の JSON の **`ceiling_standalone`** | 単体の操作でも天井で止めるか（真偽値。既定 `true`。NVS に保存） |
 | **`LIFT_CEILING_STANDALONE_DEFAULT`** | `lift_settings.h`。`true`（spec [Spec-ui.md](../spec/Spec-ui.md) §2.2） |
+| **`LiftSettings::ceiling_margin_mm`** / 設定の JSON の **`ceiling_margin_mm`** | 天井の閾値 [mm]（2026-11-06。spec Spec-ui §2.3。`WP-LIFT-16`）。`ceiling_check` の引数で渡す（`LiftController::apply_settings` が持たせる） |
 | **`LiftController::set_ceiling_standalone`** | 設定を `LiftController` に持たせる（`set_motor_max_pct` と同じく、起動時と `PUT` 成功時に `main.cpp` が呼ぶ） |
 | **`StandaloneCeiling`** / `state` の **`ceiling.standalone`** | `USE` / `SETTING_OFF` / `NO_SOURCE` |
 | **`LiftController::apply_settings`** | `lift_controller.h`。設定（`motor_max_pct`・`ceiling_standalone`）をまとめて効かせる。`main.cpp` は起動時と `PUT` 成功時にこれを呼ぶ（`WP-LIFT-15`） |
@@ -198,7 +199,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`LIFT_MOTOR_MAX_PCT_DEFAULT`** / **`LIFT_MOTOR_MAX_PCT_MIN`** | `lift_decide.h` | 50 / 10 | spec [Spec-ui.md](../spec/Spec-ui.md) §2.1（定格 12 V ÷ 電源 24 V）。設定の `motor_max_pct` の既定値と下限（2026-10-16） |
 | **`LiftSettings::motor_max_pct`** / JSON の **`motor_max_pct`** | `lift_settings.h` | モータへの出力の上限 [%]（設定。NVS に保存） | 同上 |
 | **`LiftController::set_motor_max_pct`** | `lift_controller.h` | 上限を `SpeedLoop` へ渡すために持たせる | [DetailedDesign.md](DetailedDesign.md) §4.1.2 |
-| **`CEILING_MARGIN_MM`** | `ceiling_check.h` | 500 | **仮**（`H-V8`。v1 の `ceiling_margin_mm` を昇降部へ移した。spec `H-M4`） |
+| **`CEILING_MARGIN_MM_DEFAULT`**（2026-11-06 に `CEILING_MARGIN_MM` から改名）/ **`CEILING_MARGIN_MM_MIN`** / **`CEILING_MARGIN_MM_MAX`** | `ceiling_check.h` | 500 / 150 / 3000 | 既定は**仮**（`H-V8`。v1 の `ceiling_margin_mm` を昇降部へ移した。spec `H-M4`）。2026-11-06 から設定 `ceiling_margin_mm` の既定値と範囲（spec Spec-ui §2.3）。判定は設定の値を使う |
 | **`CEILING_STALE_MS`** | `ceiling_check.h` | 600 | **仮**（`H-V8`。v1 の `ceiling_stale_ms` を昇降部へ移した） |
 | 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}`（**mm/s**。spec 2026-10-15 で % から替えた） | **仮**（数だけ旧版の例の値。`H-V3`） |
 | **`LIFT_SPEED_ABS_MAX_MM_S`** | `lift_decide.h` | 100 | **仮**（設定の検証の上限・命令の丸め。`H-V3`） |

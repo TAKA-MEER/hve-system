@@ -80,7 +80,7 @@
 | メソッド | パス | 中身 |
 | --- | --- | --- |
 | `GET` | `/` と画面のファイル | 昇降部の画面（埋め込み。[DetailedDesign.md](DetailedDesign.md) §4.2） |
-| `GET` | `/api/settings` | `{"settings":{"lift_up":{…},"lift_down":{…},"motor_max_pct":50,"ceiling_standalone":true},"using_defaults":false}` |
+| `GET` | `/api/settings` | `{"settings":{"lift_up":{…},"lift_down":{…},"motor_max_pct":50,"ceiling_standalone":true,"ceiling_margin_mm":500},"using_defaults":false}` |
 | `PUT` | `/api/settings` | `{"lift_up":{"min":10,"max":60,"init":30},"lift_down":{…},"motor_max_pct":50}`（速度は **mm/s**、`motor_max_pct` は %）をまるごと置き換える（**3 つとも必須**）。検証に通らなければ `400` と `errors` を返し、**保存しない** |
 
 検証（`lift_settings`）: 3 項目が揃う／`min ≦ init ≦ max`／0〜`LIFT_SPEED_ABS_MAX_MM_S` の整数（mm/s）／`motor_max_pct` は `LIFT_MOTOR_MAX_PCT_MIN`（10）〜`LIFT_DUTY_ABS_MAX_PCT`（100）の整数（2026-10-16。spec [Spec-ui.md](../spec/Spec-ui.md) §2.1）。**昇降部が自分で検証する**（カメラモジュール側の検証は便宜のため）。
@@ -91,12 +91,18 @@
 - **NVS に保存した形に無い**（このファームより前に保存した）→ **`true` として読み、ほかの項目はそのまま使う**（`using_defaults` にしない）。新しい欄を足しただけで、保存してある速さ・出力の上限を既定値に戻さないため。
 - **`PUT` の本文に無い**（`WP-CAM-11` より前のカメラモジュールからの中継）→ **いま保存している値を保つ**（`true` に戻さない）。真偽値でない値は `400`。
 
+**`ceiling_margin_mm`**（整数 mm。天井の閾値。既定 `CEILING_MARGIN_MM_DEFAULT` = 500・`CEILING_MARGIN_MM_MIN` 150〜`CEILING_MARGIN_MM_MAX` 3000。2026-11-06。spec [Spec-ui.md](../spec/Spec-ui.md) §2.3）も `ceiling_standalone` と同じく**欠けていてもよい**:
+- **NVS に無い** → **500 として読み、ほかの項目はそのまま使う**（`using_defaults` にしない）。
+- **`PUT` の本文に無い**（`WP-CAM-12` より前のカメラモジュール・`WP-LIFTUI-05` より前の画面）→ **いまの値を保つ**。整数でない・範囲の外は `400`（`true`・`500.5`・`"500"` も誤り）で、**ほかの項目も保存しない**。
+- 判定（`ceiling_check`）は固定の `CEILING_MARGIN_MM` ではなく、**設定の値**を使う（`MEASURED` で `mm ≦ ceiling_margin_mm` → `CEILING_NEAR`）。上部モジュールからの命令・単体の操作の両方。**`PUT` が通った次の周期から**新しい値で判定する（動いている最中に大きくしたら、その場で止まりうる）。
+- `state.provisional` から `CEILING_MARGIN_MM` を外す（設定で変えられる値になったため。既定の値を実測で決めることは spec `H-V8` に残る）。
+
 ## 4. カメラモジュールの HTTP・WS（旧版からの変更だけ）
 
 | 変更 | 中身 |
 | --- | --- |
 | `GET /api/settings` | 自分のピッチ・ヨーの設定と、**昇降部から取った**昇降の設定をまとめて返す（4 軸 ＋ 昇降部の `motor_max_pct`）。昇降部に繋がらないときは `503` |
-| `PUT /api/settings` | 4 軸と `motor_max_pct`・`ceiling_standalone`（2026-11-06。`GET` でも昇降部の値を載せる）をまとめて受ける。**先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`）→ 成功したら自分の 2 軸を保存**（`motor_max_pct` は自分では保存しない。持ち主は昇降部）。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
+| `PUT /api/settings` | 4 軸と `motor_max_pct`・`ceiling_standalone`・`ceiling_margin_mm`（2026-11-06。`GET` でも昇降部の値を載せる。後ろの 2 つは昇降部が対応しているときだけ中継する）をまとめて受ける。**先に全部自分で検証 → 昇降部へ `PUT`（昇降の 2 軸と `motor_max_pct`）→ 成功したら自分の 2 軸を保存**（`motor_max_pct` は自分では保存しない。持ち主は昇降部）。昇降部が `400` ならその `errors` を返し、自分も保存しない。昇降部に繋がらなければ `503` で何も保存しない |
 | `state.lift` | 昇降部の `state` のうち `dir`・`duty`・`speed`・`speed_meas`・`reason`・`bottom`・`height_mm`・`height_ok`・`top_detect`・`owner`・`ui_clients` を載せる。**昇降部の IP**（`lift_ip`）も載せる（画面に昇降部へのリンクを出す。[DetailedDesign.md](DetailedDesign.md) §4.6） |
 | `state.ceiling` | 自分で測った値（`status`・`mm`・`age_ms`）と、**昇降部が返した判定**（`ok`・`reason`）。カメラモジュールは許可を計算しない。**判定は、カメラモジュールが持ち主で昇降部が判定を返しているときだけ載せ、それ以外（止まっている・別の画面が持ち主・昇降部が `ceiling` を返さない）は `ok`・`reason` を `null` にする**（昇降部と切れているときは `ok: false`・`reason: LINK_LOST`）。2026-10-07 実機: 判定が無いのに `CEILING_STALE` を入れていたので、止まっている間ずっと画面が「天井 値なし」になり、上昇ボタンも薄くなっていた |
 | 画面の天井のバッジ | **判定（`reason`）があればそれで出す。無ければ自分で測った `status` で出す**（`MEASURED` → 距離・`TOO_NEAR` → 近すぎ・`NO_ECHO` → 範囲外・`READ_ERROR`／値が無い → 値なし）。**上昇ボタンを薄くするのは、昇降部と切れているときと、判定が `ok: false` のときだけ**（判定が無いだけでは薄くしない。上昇してよいかは昇降部が決める） |

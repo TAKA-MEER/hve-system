@@ -65,6 +65,9 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-15` | 7 | **単体の操作でも天井で止める**（2026-11-06。設定 `ceiling_standalone`・単体の操作の天井の判定・`state.ceiling.standalone`） | LIFT-13 | 不要（実機の確認は管理担当） |
 | `WP-LIFTUI-04` | 7 | 昇降部の画面・偽の昇降部に `ceiling_standalone`（設定画面の切り替え・天井の扱いの表示） | LIFT-15（取り決め）・LIFTUI-03 | 不要 |
 | `WP-CAM-11` | 7 | カメラモジュールに `ceiling_standalone`（設定の中継・設定画面の切り替え） | LIFT-15（取り決め）・CAM-10 | 不要（偽物のモード） |
+| `WP-LIFT-16` | 8 | **天井の閾値を設定に**（2026-11-06。`ceiling_margin_mm`・判定に設定の値・`provisional` から外す） | LIFT-15 | 不要（実機の確認は管理担当） |
+| `WP-LIFTUI-05` | 8 | 昇降部の画面・偽の昇降部に `ceiling_margin_mm`（設定画面の欄・偽の昇降部の判定） | LIFT-16（取り決め）・LIFTUI-04 | 不要 |
+| `WP-CAM-12` | 8 | カメラモジュールに `ceiling_margin_mm`（設定の中継・設定画面の欄・偽物の昇降部） | LIFT-16（取り決め）・CAM-11 | 不要（偽物のモード） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -75,6 +78,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **揃うまで、fk-system・ss-system は今の昇降部へ繋いで上昇させない**（今のファームは、距離計を持たない接続の上昇に天井を使わない。fk・ss に伝え済み）。
 
 **段階 7（2026-11-06。単体の操作でも天井で止める。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5）**: 段階 6 の 3 つ（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`）のあと。単体の操作で使う天井の値は、`WP-LIFT-13` の出どころと `WP-CAM-10` の止まっている間の `ceiling` が無いと届かない。`ceiling_standalone` は設定 API で欠けてもよい（[-protocol.md](DetailedDesign-protocol.md) §3）ので、**3 つは互換を崩さず別々に入れてよい**（`WP-CAM-11` の前のカメラモジュールは設定を中継しないだけ）。
+
+**段階 8（2026-11-06。天井の閾値を設定に。[-protocol.md](DetailedDesign-protocol.md) §3）**: 3 つは互換を崩さず別々に入れてよい（`ceiling_margin_mm` は設定 API で欠けてもよい）。**3 つとも、設定画面に行が 1 つ増えるので背の低い画面のスクロール検査に気をつける**（spec のモックアップは、背の低い画面で仮値の一覧を省いて収めた）。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -410,6 +415,33 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§2・§2.2、[-protocol.md](DetailedDesign-protocol.md) §3・§4
 - 作るもの: `camera/hve_camera/settings.py`（真偽値の検証）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部へ中継し、自分では保存しない。`motor_max_pct` と同じ）・偽物のモードの昇降部の設定・`camera/web/settings.js` ほか（設定画面の切り替え）・`state.lift` に昇降部の `ceiling.standalone` を載せ、天井のバッジは**昇降部の画面・物理ボタンが持ち主で `USE` でないとき**「天井: 使わない（設定が切／通信なし）」と出す・**`docs/使い方.md`**
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests` と画面の試験・スクロールの検査が通る。**変異**: `PUT` で昇降部へ `ceiling_standalone` を送らない／自分で保存する／検証が `"yes"` を通す／`GET` が `ceiling_standalone` を落とす → 赤
+
+### `WP-LIFT-16` 天井の閾値を設定に
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §2・§2.3・[Spec-safety.md](../spec/Spec-safety.md) §2 #3、[-protocol.md](DetailedDesign-protocol.md) §3（`ceiling_margin_mm`）、[-names.md](DetailedDesign-names.md) の `CEILING_MARGIN_MM_*`・`LiftSettings::ceiling_margin_mm`
+- 作るもの: `ceiling_check.h` の定数（改名と範囲）・`ceiling_check` に閾値の引数（呼び出し側すべてに設定の値を渡す。単体の操作の出どころ選び〈`pick_source`〉の判定も同じ値）・`lift_settings`（欄・検証・NVS に無ければ 500・`PUT` に無ければ今の値）・`LiftController::apply_settings` で持たせる・`cmd_codec` の `provisional` から外す・`main.cpp`（`GET` に載せる）・**`docs/使い方.md`** の設定の節（L-5）・`lift_core_version` を上げる
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL を通した試験）
+  1. ※ 判定が設定ではなく固定の 500 を使う（閾値 1000 にして、カメラモジュールが 800 mm を送っている間に `fk` の上昇が止まらない）
+  2. ※ 単体の操作（`ui`）の判定だけ固定の 500 を使う
+  3. ※ `apply_settings` が閾値を渡さない
+  4. 検証が 149・3001・小数・文字列・真偽値を通す
+  5. NVS に欄が無いと全体が既定値になる・500 以外で読む
+  6. 欄の無い `PUT` で保存してある 1000 が 500 に戻る
+  7. 範囲の外の `PUT` で、ほかの項目だけ保存される
+  8. `provisional` に `CEILING_MARGIN_MM` が残る
+- **実機で管理担当が確かめる**: 設定で 1000 にすると、カメラモジュールの天井まで 1000 mm で `CEILING_NEAR` ／電源を入れ直しても残る
+
+### `WP-LIFTUI-05` 昇降部の画面・偽の昇降部に `ceiling_margin_mm`
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§0.2・§2・§2.3、[-protocol.md](DetailedDesign-protocol.md) §3
+- 作るもの: 昇降部の画面の設定画面に欄（mm・150〜3000 の整数の検証・添え書き）・偽の昇降部 `tools/fake_lift_server.py`（欄・検証・欠けた `PUT` は今の値・判定に設定の値・`provisional` から外す）・`tools/lift_probe.py` のコメント・**`docs/使い方.md`** の昇降部の設定の節
+- 受け入れ: `.venv/bin/python -m pytest tools/tests`・`node firmware/lift/web/tests/web.test.js`・スクロール検査・`browser_paths.js` が通る。**変異**: 画面が保存で `ceiling_margin_mm` を送らない（`browser_paths.js` で縛る）／画面の検証が 149 を通す／偽の昇降部が固定の 500 で判定する／偽の昇降部が欠けた `PUT` で 500 に戻す → 赤
+
+### `WP-CAM-12` カメラモジュールに `ceiling_margin_mm`
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§2・§2.3、[-protocol.md](DetailedDesign-protocol.md) §3・§4
+- 作るもの: `camera/hve_camera/settings.py`（検証）・`app.py`（`GET` で昇降部の値を載せる・`PUT` で昇降部が対応しているときだけ中継・自分では保存しない。`ceiling_standalone` と同じ）・偽物のモードの昇降部（`hw/fake_lift.py` の判定に設定の値）・`camera/web/settings.js` ほか（設定画面の欄）・**`docs/使い方.md`**
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests`・`node --test camera/web/tests/web.test.js`・スクロール検査・`browser_paths.js`（9 は前から失敗）が通る。**変異**: `PUT` で昇降部へ送らない（偽の昇降部へ繋いだ経路で縛る）／自分で保存する／検証が 3001 を通す／`GET` が落とす／偽物の昇降部が固定の 500 で判定する → 赤
 
 ### `WP-LIFT-12` 点検用の物理ボタン
 
