@@ -175,6 +175,86 @@ bool has_type(JsonObject obj, const char* type) {
   return obj["t"].is<const char*>() && std::strcmp(obj["t"].as<const char*>(), type) == 0;
 }
 
+// 名前は英小文字・数字・`-` の 1〜16 文字だけ（protocol-modules §1.1）。
+// 形に合わなければ名前無しとして扱う（置き換えの対象にしない）
+bool valid_module_name(const char* text) {
+  if (text == nullptr) {
+    return false;
+  }
+  const size_t len = std::strlen(text);
+  if (len < 1 || len > 16) {
+    return false;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    const char c = text[i];
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+// busy_label は UTF-8 で 1〜48 バイト。超えた・空・文字列でないときは無しとして扱い、
+// 切り詰めない（マルチバイトの途中で切ると state に壊れた UTF-8 が載る）
+void copy_busy_label(char* out, size_t out_size, JsonVariantConst value) {
+  if (out_size == 0) {
+    return;
+  }
+  out[0] = '\0';
+  if (!value.is<const char*>()) {
+    return;
+  }
+  const char* text = value.as<const char*>();
+  if (text == nullptr) {
+    return;
+  }
+  const size_t len = std::strlen(text);
+  if (len < 1 || len > 48) {
+    return;
+  }
+  std::strncpy(out, text, out_size - 1);
+  out[out_size - 1] = '\0';
+}
+
+const char* module_role_name(ModuleRole role) {
+  return role == ModuleRole::OBSERVE ? "observe" : "control";
+}
+
+const char* module_operator_name(ModuleOperator op) {
+  return op == ModuleOperator::AUTO ? "auto" : "human";
+}
+
+// ceiling の中身（status・mm・age_ms）を読む。読めなければ false。
+// 呼び出し側は false のとき MISSING のままにする
+bool read_ceiling(JsonVariantConst value, CeilingReport* out, uint32_t received_at_ms) {
+  out->status = CeilingStatus::MISSING;
+  out->mm = 0;
+  out->age_ms = 0;
+  out->received_at_ms = received_at_ms;
+  if (!value.is<JsonObjectConst>()) {
+    return false;
+  }
+  JsonObjectConst ceiling = value.as<JsonObjectConst>();
+  CeilingStatus status = CeilingStatus::MISSING;
+  if (!ceiling["status"].is<const char*>() ||
+      !ceiling_status_from_name(ceiling["status"].as<const char*>(), &status)) {
+    return false;
+  }
+  if (!ceiling["age_ms"].is<int>() || ceiling["age_ms"].as<int>() < 0) {
+    return false;
+  }
+  if (status == CeilingStatus::MEASURED) {
+    if (!ceiling["mm"].is<int>() || ceiling["mm"].as<int>() < 0) {
+      return false;
+    }
+    out->mm = ceiling["mm"].as<int>();
+  }
+  out->status = status;
+  out->age_ms = static_cast<uint32_t>(ceiling["age_ms"].as<int>());
+  return true;
+}
+
 }  // namespace
 
 bool decode_hello(const char* text, HelloMsg* out) {
@@ -184,10 +264,28 @@ bool decode_hello(const char* text, HelloMsg* out) {
   if (!read_object(text, &doc, &obj) || !has_type(obj, "hello")) {
     return false;
   }
-  // ceiling_sensor は欠けている・真偽値でないとき true とみなす（§3.1）
+  // ceiling_sensor は欠けている・真偽値でないとき true とみなす（§3.1）。
+  // ほかの接続に貸す値の出どころにできるのは、true を明示した接続だけ（§2.3）
   out->has_sensor = !obj["ceiling_sensor"].is<bool>() || obj["ceiling_sensor"].as<bool>();
-  copy_text_field(out->name, sizeof(out->name), obj["name"]);
+  out->sensor_explicit = obj["ceiling_sensor"].is<bool>();
+  // role は欠けていれば control、知らない値は observe（命じられない側に倒す）
+  if (obj["role"].is<const char*>()) {
+    out->role = std::strcmp(obj["role"].as<const char*>(), "control") == 0
+                    ? ModuleRole::CONTROL
+                    : ModuleRole::OBSERVE;
+  } else {
+    out->role = ModuleRole::CONTROL;
+  }
+  // operator は欠けている・知らない値を human（自動と名乗っていないものは人として扱う）
+  out->op = (obj["operator"].is<const char*>() &&
+             std::strcmp(obj["operator"].as<const char*>(), "auto") == 0)
+                ? ModuleOperator::AUTO
+                : ModuleOperator::HUMAN;
+  if (obj["name"].is<const char*>() && valid_module_name(obj["name"].as<const char*>())) {
+    copy_text_field(out->name, sizeof(out->name), obj["name"]);
+  }
   copy_text_field(out->fw, sizeof(out->fw), obj["fw"]);
+  copy_busy_label(out->busy_label, sizeof(out->busy_label), obj["busy_label"]);
   return true;
 }
 
@@ -217,32 +315,20 @@ bool decode_hold(const char* text, HoldMsg* out, uint32_t received_at_ms) {
   // ceiling は距離計を持つ接続の hold だけ意味を持つ。
   // 欠けている・読めない・知らない status・型の違う中身は hold を捨てずに
   // MISSING として受け取る（捨てると前の hold の値で動き続けるので、その場で止める）
-  parsed.has_ceiling = false;
-  parsed.ceiling.status = CeilingStatus::MISSING;
-  if (obj["ceiling"].is<JsonObject>()) {
-    JsonObject ceiling = obj["ceiling"].as<JsonObject>();
-    CeilingStatus status = CeilingStatus::MISSING;
-    bool status_ok = ceiling["status"].is<const char*>() &&
-                     ceiling_status_from_name(ceiling["status"].as<const char*>(), &status);
-    const bool age_ok = ceiling["age_ms"].is<int>() && ceiling["age_ms"].as<int>() >= 0;
-    if (status_ok && age_ok) {
-      if (status == CeilingStatus::MEASURED) {
-        if (ceiling["mm"].is<int>() && ceiling["mm"].as<int>() >= 0) {
-          parsed.has_ceiling = true;
-          parsed.ceiling.status = status;
-          parsed.ceiling.mm = ceiling["mm"].as<int>();
-          parsed.ceiling.age_ms = static_cast<uint32_t>(ceiling["age_ms"].as<int>());
-        }
-      } else {
-        parsed.has_ceiling = true;
-        parsed.ceiling.status = status;
-        parsed.ceiling.mm = 0;
-        parsed.ceiling.age_ms = static_cast<uint32_t>(ceiling["age_ms"].as<int>());
-      }
-    }
-  }
+  parsed.has_ceiling = read_ceiling(obj["ceiling"], &parsed.ceiling, received_at_ms);
   *out = parsed;
   return true;
+}
+
+bool decode_ceiling(const char* text, CeilingReport* out, uint32_t received_at_ms) {
+  *out = CeilingReport();
+  out->received_at_ms = received_at_ms;
+  JsonDocument doc;
+  JsonObject obj;
+  if (!read_object(text, &doc, &obj) || !has_type(obj, "ceiling")) {
+    return false;
+  }
+  return read_ceiling(obj, out, received_at_ms);
 }
 
 bool decode_release(const char* text, ReleaseMsg* out) {
@@ -288,6 +374,12 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
     ceiling["age_ms"] = state.ceiling_age_ms;
     ceiling["ok"] = state.ceiling_ok;
     ceiling["reason"] = reason_name(state.ceiling_reason);
+    // 判定に使った値を送ってきた上部モジュールの名前（無ければ null）
+    if (state.ceiling_from[0] != '\0') {
+      ceiling["from"] = state.ceiling_from;
+    } else {
+      ceiling["from"] = nullptr;
+    }
   } else {
     obj["ceiling"] = nullptr;
   }
@@ -296,18 +388,49 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
   } else {
     obj["owner"] = nullptr;
   }
-  obj["ui_clients"] = state.ui_clients;
-  JsonObject module = obj["module"].to<JsonObject>();
-  module["connected"] = state.module_connected;
-  if (state.module_connected) {
-    module["ceiling_sensor"] = state.module_has_sensor;
-    module["ip"] = state.module_ip;
-    module["name"] = state.module_name;
+  // 持ち主の名前（module のときだけ）と、人か自動か（持ち主がいるときだけ）
+  if (state.has_owner && state.owner_kind == 1 && state.owner_name[0] != '\0') {
+    obj["owner_name"] = state.owner_name;
   } else {
-    module["ceiling_sensor"] = nullptr;
-    module["ip"] = nullptr;
-    module["name"] = nullptr;
+    obj["owner_name"] = nullptr;
   }
+  if (state.has_owner) {
+    obj["owner_operator"] = module_operator_name(state.owner_operator);
+  } else {
+    obj["owner_operator"] = nullptr;
+  }
+  obj["homed"] = state.homed;
+  obj["ui_clients"] = state.ui_clients;
+  JsonArray modules = obj["modules"].to<JsonArray>();
+  const int module_count = state.module_count < LIFT_MODULE_LIST_MAX ? state.module_count
+                                                                      : LIFT_MODULE_LIST_MAX;
+  for (int i = 0; i < module_count; ++i) {
+    const ModuleInfo& info = state.modules[i];
+    JsonObject item = modules.add<JsonObject>();
+    item["name"] = info.name;
+    item["role"] = module_role_name(info.role);
+    item["operator"] = module_operator_name(info.op);
+    item["ceiling_sensor"] = info.ceiling_sensor;
+    if (info.busy_label[0] != '\0') {
+      item["busy_label"] = info.busy_label;
+    } else {
+      item["busy_label"] = nullptr;
+    }
+    if (info.ip[0] != '\0') {
+      item["ip"] = info.ip;
+    } else {
+      item["ip"] = nullptr;
+    }
+    item["fw"] = info.fw;
+  }
+  // 測定機構（spec §3）。中身はアームの制御器とのつなぎ方（spec H-M7）が決まるまで、
+  // すべて null（「付いていない」と読まれないように。false を出さない）
+  JsonObject arm = obj["arm"].to<JsonObject>();
+  arm["attached"] = nullptr;
+  arm["link"] = nullptr;
+  arm["confirm"] = nullptr;
+  arm["out"] = nullptr;
+  arm["drum"] = nullptr;
   JsonArray provisional = obj["provisional"].to<JsonArray>();
   for (size_t i = 0; i < sizeof(kProvisional) / sizeof(kProvisional[0]); ++i) {
     provisional.add(kProvisional[i]);
@@ -334,7 +457,8 @@ bool state_decode(const char* text, LiftState* out) {
       !obj["reason"].is<const char*>() || !obj["bottom"].is<bool>() ||
       !obj["height_mm"].is<int>() || !obj["height_ok"].is<bool>() ||
       !obj["top_detect"].is<bool>() || !obj["ui_clients"].is<int>() ||
-      !obj["module"].is<JsonObject>() || !obj["cmd_age_ms"].is<int>()) {
+      !obj["modules"].is<JsonArray>() || !obj["homed"].is<bool>() ||
+      !obj["cmd_age_ms"].is<int>()) {
     return false;
   }
   if (!dir_from_name(obj["dir"].as<const char*>(), &out->dir)) {
@@ -379,6 +503,11 @@ bool state_decode(const char* text, LiftState* out) {
     out->ceiling_used = ceiling["used"].as<bool>();
     out->ceiling_age_ms = static_cast<uint32_t>(ceiling["age_ms"].as<int>());
     out->ceiling_ok = ceiling["ok"].as<bool>();
+    if (ceiling["from"].is<const char*>()) {
+      copy_text_field(out->ceiling_from, sizeof(out->ceiling_from), ceiling["from"]);
+    } else if (!ceiling["from"].isNull()) {
+      return false;
+    }
     out->ceiling_present = true;
   } else if (!obj["ceiling"].isNull()) {
     return false;
@@ -404,19 +533,58 @@ bool state_decode(const char* text, LiftState* out) {
     return false;
   }
 
-  JsonObject module = obj["module"].as<JsonObject>();
-  if (!module["connected"].is<bool>()) {
+  out->homed = obj["homed"].as<bool>();
+  if (obj["owner_name"].is<const char*>()) {
+    copy_text_field(out->owner_name, sizeof(out->owner_name), obj["owner_name"]);
+  } else if (!obj["owner_name"].isNull()) {
     return false;
   }
-  out->module_connected = module["connected"].as<bool>();
-  if (out->module_connected) {
-    if (!module["ceiling_sensor"].is<bool>() || !module["ip"].is<const char*>() ||
-        !module["name"].is<const char*>()) {
+  if (obj["owner_operator"].is<const char*>()) {
+    const char* op = obj["owner_operator"].as<const char*>();
+    if (std::strcmp(op, "auto") == 0) {
+      out->owner_operator = ModuleOperator::AUTO;
+    } else if (std::strcmp(op, "human") == 0) {
+      out->owner_operator = ModuleOperator::HUMAN;
+    } else {
       return false;
     }
-    out->module_has_sensor = module["ceiling_sensor"].as<bool>();
-    copy_text_field(out->module_ip, sizeof(out->module_ip), module["ip"]);
-    copy_text_field(out->module_name, sizeof(out->module_name), module["name"]);
+  } else if (!obj["owner_operator"].isNull()) {
+    return false;
+  }
+
+  JsonArray modules = obj["modules"].as<JsonArray>();
+  if (modules.size() > static_cast<size_t>(LIFT_MODULE_LIST_MAX)) {
+    return false;
+  }
+  for (JsonObject item : modules) {
+    if (!item["name"].is<const char*>() || !item["role"].is<const char*>() ||
+        !item["operator"].is<const char*>() || !item["ceiling_sensor"].is<bool>() ||
+        !item["fw"].is<const char*>()) {
+      return false;
+    }
+    ModuleInfo& info = out->modules[out->module_count];
+    copy_text_field(info.name, sizeof(info.name), item["name"]);
+    const char* role = item["role"].as<const char*>();
+    if (std::strcmp(role, "control") == 0) {
+      info.role = ModuleRole::CONTROL;
+    } else if (std::strcmp(role, "observe") == 0) {
+      info.role = ModuleRole::OBSERVE;
+    } else {
+      return false;
+    }
+    const char* op = item["operator"].as<const char*>();
+    if (std::strcmp(op, "auto") == 0) {
+      info.op = ModuleOperator::AUTO;
+    } else if (std::strcmp(op, "human") == 0) {
+      info.op = ModuleOperator::HUMAN;
+    } else {
+      return false;
+    }
+    info.ceiling_sensor = item["ceiling_sensor"].as<bool>();
+    copy_text_field(info.busy_label, sizeof(info.busy_label), item["busy_label"]);
+    copy_text_field(info.ip, sizeof(info.ip), item["ip"]);
+    copy_text_field(info.fw, sizeof(info.fw), item["fw"]);
+    out->module_count++;
   }
   return true;
 }

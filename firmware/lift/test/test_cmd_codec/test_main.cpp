@@ -42,11 +42,46 @@ LiftState moving_state() {
   state.has_owner = true;
   state.owner_kind = 1;
   state.ui_clients = 1;
-  state.module_connected = true;
-  state.module_has_sensor = true;
-  std::strncpy(state.module_ip, "192.168.5.23", sizeof(state.module_ip) - 1);
-  std::strncpy(state.module_name, "hve-cam", sizeof(state.module_name) - 1);
+  std::strncpy(state.owner_name, "hve-cam", sizeof(state.owner_name) - 1);
+  state.owner_operator = ModuleOperator::HUMAN;
+  state.homed = true;
+  std::strncpy(state.ceiling_from, "hve-cam", sizeof(state.ceiling_from) - 1);
+  state.module_count = 1;
+  std::strncpy(state.modules[0].name, "hve-cam", sizeof(state.modules[0].name) - 1);
+  state.modules[0].role = ModuleRole::CONTROL;
+  state.modules[0].op = ModuleOperator::HUMAN;
+  state.modules[0].ceiling_sensor = true;
+  std::strncpy(state.modules[0].ip, "192.168.5.23", sizeof(state.modules[0].ip) - 1);
+  std::strncpy(state.modules[0].fw, "0.2.0", sizeof(state.modules[0].fw) - 1);
   state.cmd_age_ms = 35;
+  return state;
+}
+
+// modules を上限まで並べ、busy_label・name・ip・fw を最大にした state（最悪の長さの見積り）
+LiftState worst_case_state() {
+  LiftState state = moving_state();
+  state.owner_kind = 1;
+  std::memset(state.owner_name, 'a', 16);
+  std::memset(state.ceiling_from, 'b', 16);
+  state.seq = 2147483647;
+  state.height_mm = -2147483647;
+  state.ceiling_age_ms = 2147483647u;  // 10 桁（uint32 の最大も 10 桁。state_decode は int で読む）
+  state.cmd_age_ms = 2147483647u;  // 10 桁（uint32 の最大も 10 桁。state_decode は int で読む）
+  state.module_count = LIFT_MODULE_LIST_MAX;
+  for (int i = 0; i < LIFT_MODULE_LIST_MAX; ++i) {
+    ModuleInfo& info = state.modules[i];
+    std::memset(info.name, 'a' + i, 16);
+    info.role = ModuleRole::CONTROL;
+    info.op = ModuleOperator::AUTO;
+    info.ceiling_sensor = false;
+    // 日本語 16 文字（48 バイト）。UTF-8 は ArduinoJson がそのまま出す
+    for (int k = 0; k < 16; ++k) {
+      std::memcpy(info.busy_label + k * 3, "\xe6\xb8\xac", 3);
+    }
+    info.busy_label[48] = '\0';
+    std::strncpy(info.ip, "255.255.255.255", sizeof(info.ip) - 1);
+    std::memset(info.fw, '9', 15);
+  }
   return state;
 }
 
@@ -91,6 +126,121 @@ void test_decode_unreadable_hello_is_true_but_rejected() {
   TEST_ASSERT_TRUE(hello.has_sensor);
   TEST_ASSERT_FALSE(decode_hello(nullptr, &hello));
   TEST_ASSERT_TRUE(hello.has_sensor);
+}
+
+
+// --- hello の新しい欄（protocol-modules §1.1） ---
+
+void test_decode_hello_new_fields() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello(
+      "{\"t\":\"hello\",\"name\":\"fk\",\"role\":\"control\",\"operator\":\"auto\","
+      "\"ceiling_sensor\":false,\"busy_label\":\"\xe6\xb8\xac\xe5\xae\x9a\",\"fw\":\"0.1.0\"}",
+      &hello));
+  TEST_ASSERT_EQUAL_STRING("fk", hello.name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::CONTROL), static_cast<int>(hello.role));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(hello.op));
+  TEST_ASSERT_FALSE(hello.has_sensor);
+  TEST_ASSERT_TRUE(hello.sensor_explicit);
+  TEST_ASSERT_EQUAL_STRING("\xe6\xb8\xac\xe5\xae\x9a", hello.busy_label);
+}
+
+void test_decode_hello_role_defaults() {
+  HelloMsg hello;
+  // 欠けていれば control（今のカメラモジュールは送らない）
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::CONTROL), static_cast<int>(hello.role));
+  TEST_ASSERT_FALSE(hello.sensor_explicit);
+  // 知らない値は observe（命じられない側に倒す）
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"role\":\"admin\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::OBSERVE), static_cast<int>(hello.role));
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"role\":\"observe\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::OBSERVE), static_cast<int>(hello.role));
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"role\":7}", &hello));  // 型違いも欠けと同じ
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::CONTROL), static_cast<int>(hello.role));
+}
+
+void test_decode_hello_operator_defaults_to_human() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN), static_cast<int>(hello.op));
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"operator\":\"robot\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN), static_cast<int>(hello.op));
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"operator\":\"human\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN), static_cast<int>(hello.op));
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"operator\":\"auto\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(hello.op));
+}
+
+void test_decode_hello_bad_name_is_nameless() {
+  HelloMsg hello;
+  const char* bad[] = {
+      "{\"t\":\"hello\",\"name\":\"\"}",
+      "{\"t\":\"hello\",\"name\":\"FK\"}",                // 大文字
+      "{\"t\":\"hello\",\"name\":\"f k\"}",               // 空白
+      "{\"t\":\"hello\",\"name\":\"f_k\"}",               // 下線
+      "{\"t\":\"hello\",\"name\":\"abcdefghijklmnopq\"}",  // 17 文字
+      "{\"t\":\"hello\",\"name\":5}",
+  };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+    TEST_ASSERT_TRUE(decode_hello(bad[i], &hello));
+    TEST_ASSERT_EQUAL_STRING("", hello.name);
+  }
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"name\":\"abcdefghijklmnop\"}", &hello));  // 16 文字
+  TEST_ASSERT_EQUAL_STRING("abcdefghijklmnop", hello.name);
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"name\":\"ss-2\"}", &hello));
+  TEST_ASSERT_EQUAL_STRING("ss-2", hello.name);
+}
+
+void test_decode_hello_busy_label_limits() {
+  HelloMsg hello;
+  // a + 日本語 16 文字 = 49 バイト。切ると文字の途中で切れるので、切り詰めずに無しとして扱う
+  std::string text = "{\"t\":\"hello\",\"busy_label\":\"a";
+  for (int i = 0; i < 16; ++i) {
+    text += "\xe6\xb8\xac";
+  }
+  text += "\"}";
+  TEST_ASSERT_TRUE(decode_hello(text.c_str(), &hello));
+  TEST_ASSERT_EQUAL_STRING("", hello.busy_label);
+  // ちょうど 48 バイトは通る（日本語 16 文字）
+  text = "{\"t\":\"hello\",\"busy_label\":\"";
+  for (int i = 0; i < 16; ++i) {
+    text += "\xe6\xb8\xac";
+  }
+  text += "\"}";
+  TEST_ASSERT_TRUE(decode_hello(text.c_str(), &hello));
+  TEST_ASSERT_EQUAL_INT(48, static_cast<int>(std::strlen(hello.busy_label)));
+  // 空・文字列でないものは無し
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"busy_label\":\"\"}", &hello));
+  TEST_ASSERT_EQUAL_STRING("", hello.busy_label);
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"busy_label\":12}", &hello));
+  TEST_ASSERT_EQUAL_STRING("", hello.busy_label);
+}
+
+// --- ceiling ---
+
+void test_decode_ceiling_message() {
+  CeilingReport report;
+  TEST_ASSERT_TRUE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"MEASURED\",\"mm\":1450,\"age_ms\":80}",
+                                  &report, 1234));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MEASURED), static_cast<int>(report.status));
+  TEST_ASSERT_EQUAL_INT(1450, report.mm);
+  TEST_ASSERT_EQUAL_INT(80, report.age_ms);
+  TEST_ASSERT_EQUAL_INT(1234, report.received_at_ms);
+  TEST_ASSERT_TRUE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"NO_ECHO\",\"age_ms\":10}", &report, 5));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::NO_ECHO), static_cast<int>(report.status));
+}
+
+void test_decode_ceiling_rejects_broken() {
+  CeilingReport report;
+  TEST_ASSERT_FALSE(decode_ceiling("not json", &report, 0));
+  TEST_ASSERT_FALSE(decode_ceiling("{\"t\":\"hold\",\"status\":\"MEASURED\",\"mm\":1,\"age_ms\":1}", &report, 0));
+  TEST_ASSERT_FALSE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"MEASURED\",\"age_ms\":1}", &report, 0));
+  TEST_ASSERT_FALSE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"WHAT\",\"age_ms\":1}", &report, 0));
+  TEST_ASSERT_FALSE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"MEASURED\",\"mm\":1}", &report, 0));
+  TEST_ASSERT_FALSE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"MEASURED\",\"mm\":-1,\"age_ms\":1}", &report, 0));
+  TEST_ASSERT_FALSE(decode_ceiling("{\"t\":\"ceiling\",\"status\":\"MEASURED\",\"mm\":1,\"age_ms\":-1}", &report, 0));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(CeilingStatus::MISSING), static_cast<int>(report.status));
 }
 
 // --- hold ---
@@ -213,7 +363,12 @@ void test_state_encode_contains_v2_fields() {
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"ceiling\":{"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"status\":\"MEASURED\""));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner\":\"module\""));
-  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"module\":{"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"modules\":[{"));
+  TEST_ASSERT_NULL(std::strstr(json, "\"module\":"));  // 今の module は消えた
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_name\":\"hve-cam\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_operator\":\"human\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"homed\":true"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"from\":\"hve-cam\""));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "\"provisional\":["));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "CEILING_MARGIN_MM"));
   TEST_ASSERT_NOT_NULL(std::strstr(json, "LIFT_MAX_RUN_PCT"));
@@ -241,10 +396,18 @@ void test_state_encode_contains_v2_fields() {
   TEST_ASSERT_TRUE(back.has_owner);
   TEST_ASSERT_EQUAL_INT(1, back.owner_kind);
   TEST_ASSERT_EQUAL_INT(1, back.ui_clients);
-  TEST_ASSERT_TRUE(back.module_connected);
-  TEST_ASSERT_TRUE(back.module_has_sensor);
-  TEST_ASSERT_EQUAL_STRING("192.168.5.23", back.module_ip);
-  TEST_ASSERT_EQUAL_STRING("hve-cam", back.module_name);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", back.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::HUMAN),
+                        static_cast<int>(back.owner_operator));
+  TEST_ASSERT_TRUE(back.homed);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", back.ceiling_from);
+  TEST_ASSERT_EQUAL_INT(1, back.module_count);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", back.modules[0].name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::CONTROL), static_cast<int>(back.modules[0].role));
+  TEST_ASSERT_TRUE(back.modules[0].ceiling_sensor);
+  TEST_ASSERT_EQUAL_STRING("", back.modules[0].busy_label);
+  TEST_ASSERT_EQUAL_STRING("192.168.5.23", back.modules[0].ip);
+  TEST_ASSERT_EQUAL_STRING("0.2.0", back.modules[0].fw);
   TEST_ASSERT_EQUAL_INT(35, back.cmd_age_ms);
 }
 
@@ -273,7 +436,69 @@ void test_state_encode_writes_nulls_when_no_owner_or_module() {
   TEST_ASSERT_TRUE(state_decode(json, &back));
   TEST_ASSERT_FALSE(back.ceiling_present);
   TEST_ASSERT_FALSE(back.has_owner);
-  TEST_ASSERT_FALSE(back.module_connected);
+  TEST_ASSERT_EQUAL_INT(0, back.module_count);
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"modules\":[]"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_name\":null"));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_operator\":null"));
+}
+
+void test_state_arm_is_all_null() {
+  // 測定機構の中身は決まるまで null（false を出すと fk が「付いていない」と読んで動かす）
+  const LiftState state = moving_state();
+  char json[2048];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(
+      json, "\"arm\":{\"attached\":null,\"link\":null,\"confirm\":null,\"out\":null,\"drum\":null}"));
+  TEST_ASSERT_NULL(std::strstr(json, "\"attached\":false"));
+}
+
+void test_state_owner_auto_and_modules_round_trip() {
+  LiftState state = moving_state();
+  std::strncpy(state.owner_name, "fk", sizeof(state.owner_name));
+  state.owner_operator = ModuleOperator::AUTO;
+  state.module_count = 2;
+  ModuleInfo& fk = state.modules[1];
+  std::strncpy(fk.name, "fk", sizeof(fk.name));
+  fk.op = ModuleOperator::AUTO;
+  fk.ceiling_sensor = false;
+  std::strncpy(fk.busy_label, "\xe6\xb8\xac\xe5\xae\x9a", sizeof(fk.busy_label));
+  std::strncpy(fk.fw, "0.1.0", sizeof(fk.fw));
+  state.modules[1].role = ModuleRole::OBSERVE;
+  char json[2048];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_name\":\"fk\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_operator\":\"auto\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"role\":\"observe\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"busy_label\":null"));  // hve-cam は無し
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_EQUAL_STRING("fk", back.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(back.owner_operator));
+  TEST_ASSERT_EQUAL_INT(2, back.module_count);
+  TEST_ASSERT_EQUAL_STRING("fk", back.modules[1].name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::OBSERVE), static_cast<int>(back.modules[1].role));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleOperator::AUTO), static_cast<int>(back.modules[1].op));
+  TEST_ASSERT_FALSE(back.modules[1].ceiling_sensor);
+  TEST_ASSERT_EQUAL_STRING("\xe6\xb8\xac\xe5\xae\x9a", back.modules[1].busy_label);
+}
+
+void test_state_worst_case_fits_text_max() {
+  // modules を上限まで並べ busy_label を最大にした state を実際に作って測る。
+  // LIFT_STATE_TEXT_MAX は、それに余裕を持たせた値（測った長さ 1770 バイトの約 1.3 倍）
+  const LiftState state = worst_case_state();
+  static char json[8192];
+  const size_t written = state_encode(state, json, sizeof(json));
+  TEST_ASSERT_GREATER_THAN(0, written);
+  TEST_ASSERT_TRUE(written < LIFT_STATE_TEXT_MAX);
+  TEST_ASSERT_TRUE(written * 3 >= LIFT_STATE_TEXT_MAX * 2);  // 大きすぎる値のまま放置しない（1.5 倍まで）
+  // 実際のバッファの大きさでも書ける
+  static char exact[LIFT_STATE_TEXT_MAX];
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(written),
+                        static_cast<int>(state_encode(state, exact, sizeof(exact))));
+  // 戻して読める（途中で切れていない）
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(exact, &back));
+  TEST_ASSERT_EQUAL_INT(LIFT_MODULE_LIST_MAX, back.module_count);
 }
 
 void test_state_encode_reports_every_stop_reason() {
@@ -312,8 +537,7 @@ void test_state_decode_rejects_broken_input() {
                                  "\"bottom\":false,\"height_mm\":0,\"height_ok\":false,"
                                  "\"top_detect\":false,\"ceiling\":null,\"owner\":null,"
                                  "\"ui_clients\":0,"
-                                 "\"module\":{\"connected\":false,\"ceiling_sensor\":null,"
-                                 "\"ip\":null,\"name\":null}}",
+                                 "\"modules\":[],\"homed\":false}",
                                  &state));
   TEST_ASSERT_FALSE(state_decode(nullptr, &state));
 }
@@ -326,6 +550,14 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_decode_hello_missing_sensor_is_true);
   RUN_TEST(test_decode_hello_wrong_typed_sensor_is_true);
   RUN_TEST(test_decode_unreadable_hello_is_true_but_rejected);
+  RUN_TEST(test_decode_hello_new_fields);
+  RUN_TEST(test_decode_hello_role_defaults);
+  RUN_TEST(test_decode_hello_operator_defaults_to_human);
+  RUN_TEST(test_decode_hello_bad_name_is_nameless);
+  RUN_TEST(test_decode_hello_busy_label_limits);
+
+  RUN_TEST(test_decode_ceiling_message);
+  RUN_TEST(test_decode_ceiling_rejects_broken);
 
   RUN_TEST(test_decode_valid_hold);
   RUN_TEST(test_decode_broken_hold_is_dropped);
@@ -340,6 +572,9 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_state_encode_contains_v2_fields);
   RUN_TEST(test_state_owner_button_round_trips);
   RUN_TEST(test_state_encode_writes_nulls_when_no_owner_or_module);
+  RUN_TEST(test_state_arm_is_all_null);
+  RUN_TEST(test_state_owner_auto_and_modules_round_trip);
+  RUN_TEST(test_state_worst_case_fits_text_max);
   RUN_TEST(test_state_encode_reports_every_stop_reason);
   RUN_TEST(test_state_encode_reports_zero_when_buffer_is_short);
   RUN_TEST(test_state_decode_rejects_broken_input);
