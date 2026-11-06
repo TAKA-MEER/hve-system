@@ -135,6 +135,7 @@ th:first-child,td:first-child{width:4.2em;white-space:nowrap} th:last-child,td:l
 td.wrapcell{white-space:normal}
 td input{width:100%;padding:6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
 td input.bad{border-color:var(--ng)}
+td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
 .err{color:var(--ng-tx);font-size:12px;min-height:1.4em}
 .row-actions{display:flex;gap:8px;justify-content:flex-end}
 .primary{background:var(--brand);border-color:var(--brand);color:#fff}
@@ -144,7 +145,7 @@ td input.bad{border-color:var(--ng)}
 /* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう。
    4 項目＋上限で昇降部の画面より行が多いので、境目は 700px） */
 @media (max-height:700px){
-  .sheet{padding:8px 12px;gap:4px} .sheet h1{font-size:15px} .note{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
+  .sheet{padding:8px 12px;gap:4px} .sheet h1{font-size:15px} .note{display:none} .cdesc{display:none} td input{padding:3px 6px} th,td{padding:2px 4px}
   .prov{font-size:11px;padding:4px 8px} .err{min-height:0}
 }
 /* さらに低い画面では表とボタンも詰める（横長・低丈の端末用） */
@@ -305,6 +306,7 @@ td input.bad{border-color:var(--ng)}
     lift_up:{min:10,max:60,init:30}, lift_down:{min:10,max:60,init:30},
     pitch:{min:1,max:30,init:10},    yaw:{min:1,max:30,init:10},
     motor_max_pct:50,
+    ceil_standalone:true,  // 単体の操作でも天井で止める（Spec-ui.md §2.2。既定は入）
   };
   // 仮値で動作中のパラメータ（実装は state.provisional。camera/config/params.toml の provisional）
   const PROVISIONAL = ['hold_timeout_ms','lift_cmd_period_ms','lift_state_timeout_ms','state_period_ms',
@@ -597,7 +599,9 @@ td input.bad{border-color:var(--ng)}
       ['min','max','init'].map(f => `<td><input type="number" inputmode="decimal" data-f="${f}" value="${draft[a.key][f]}"></td>`).join('') +
       `<td>${a.unit}</td></tr>`).join('') +
       `<tr data-key="${MOTOR.key}"><td class="wrapcell">${MOTOR.name}</td>` +
-      `<td colspan="3"><input type="number" inputmode="decimal" data-f="motor" value="${draft[MOTOR.key]}"></td><td>${MOTOR.unit}</td></tr>`;
+      `<td colspan="3"><input type="number" inputmode="decimal" data-f="motor" value="${draft[MOTOR.key]}"></td><td>${MOTOR.unit}</td></tr>` +
+      `<tr data-key="ceil_standalone"><td colspan="5" class="wrapcell">` +
+      `<label><input type="checkbox" data-f="ceil"${draft.ceil_standalone ? ' checked' : ''}>単体の操作でも天井で止める<span class="cdesc">（昇降部の画面・物理ボタンでも、通信できていれば天井で止める）</span></label></td></tr>`;
     $('stBody').querySelectorAll('input').forEach(i => i.addEventListener('input', validate));
     $('stProv').textContent = `仮値で動作中（実測で確定するまで。ここでは変えられない）: ${PROVISIONAL.join(' / ')}`;
     validate();
@@ -624,6 +628,7 @@ td input.bad{border-color:var(--ng)}
     else if (mv < MOTOR.abs[0] || mv > MOTOR.abs[1]) merr = `${MOTOR.abs[0]}〜${MOTOR.abs[1]} ${MOTOR.unit} の整数にしてください`;
     mi.classList.toggle('bad', !!merr);
     if (merr) msgs.push(`${MOTOR.name}: ${merr}`); else draft[MOTOR.key] = mv;
+    draft.ceil_standalone = $('stBody').querySelector('input[data-f=ceil]').checked;
     // エラーは 1 行にまとめる（行を増やして画面からはみ出さないように）
     $('stErr').textContent = msgs.length ? msgs[0] + (msgs.length > 1 ? `（ほか ${msgs.length - 1} 件）` : '') : '';
     $('stSave').disabled = msgs.length > 0;
