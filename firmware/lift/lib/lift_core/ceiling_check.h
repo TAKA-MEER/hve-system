@@ -51,6 +51,10 @@ struct CeilingVerdict {
   StopReason reason = StopReason::CEILING_STALE;
 };
 
+// 値が古いか（age_ms ＋受け取ってからの経過が CEILING_STALE_MS を超えた）。
+// ceiling_check の「古い」と、単体の操作で出どころを選ぶときの「古い」は、ここだけを共有する
+bool ceiling_is_stale(const CeilingReport& report, uint32_t now_ms);
+
 // 天井の値・古さ・その接続が距離計を持つか → (ok, 理由)（DetailedDesign.md §3.2）。
 // 距離計を持たない接続なら常に ok。古さは age_ms ＋受け取ってからの経過時間。
 CeilingVerdict ceiling_check(const CeilingReport& report, uint32_t now_ms,
