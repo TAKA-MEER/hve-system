@@ -26,6 +26,12 @@ const SETTING_MOTOR = {
 /* 単体の操作でも天井で止めるか（spec Spec-ui.md §2.2。真偽値。昇降部が持つ）。
    昇降部が対応していない（GET に無い）ときは欄を無効にし、PUT にも載せない */
 const SETTING_CEILING = {key: 'ceiling_standalone', name: '単体の操作でも天井で止める'};
+/* 天井の閾値 [mm]（spec Spec-ui.md §2.3。150〜3000 の整数。昇降部が持つ）。
+   上部モジュールの距離計から天井までこの距離以下なら上昇しない。
+   昇降部が対応していない（GET に無い）ときは欄を無効にし、PUT にも載せない */
+const SETTING_CEILING_MARGIN = {
+  key: 'ceiling_margin_mm', name: '天井の閾値', unit: 'mm', abs_low: 150, abs_high: 3000, step: 1,
+};
 const CEILING_UNSUPPORTED_TEXT = '昇降部が対応していません';
 /* 設定画面の添え書き（spec §2.1 の「モータの定格電圧 ÷ 電源電圧」） */
 const MOTOR_NOTE = 'モータの定格電圧 ÷ 電源電圧（12 V のモータを 24 V で回すなら 50）';
@@ -101,6 +107,19 @@ function validateSettingsDraft(draft) {
   if (standalone !== undefined && typeof standalone !== 'boolean') {
     errors.push({key: SETTING_CEILING.key, text: `${SETTING_CEILING.name}: 入り切りにしてください`});
   }
+  // 天井の閾値（無くてもよい。あれば 150〜3000 の整数。小数・文字列・真偽値は不可）
+  const margin = draft[SETTING_CEILING_MARGIN.key];
+  if (margin !== undefined) {
+    const marginValue = Number(margin);
+    const m = SETTING_CEILING_MARGIN;
+    if (margin === '' || margin === null || typeof margin === 'boolean' || !isFinite(marginValue)) {
+      errors.push({key: m.key, text: `${m.name}: 数値を入れてください`});
+    } else if (!Number.isInteger(marginValue)) {
+      errors.push({key: m.key, text: `${m.name}: 整数にしてください`});
+    } else if (marginValue < m.abs_low || marginValue > m.abs_high) {
+      errors.push({key: m.key, text: `${m.name}: ${m.abs_low}〜${m.abs_high} ${m.unit} の整数にしてください`});
+    }
+  }
   return {ok: errors.length === 0, errors};
 }
 
@@ -154,6 +173,19 @@ function standaloneRowHtml() {
     `${SETTING_CEILING.name}${note}</label></td></tr>`;
 }
 
+/* 「天井の閾値」の行。対応していない昇降部では無効にして理由を出す（1 行に収める） */
+function ceilingMarginRowHtml() {
+  const m = SETTING_CEILING_MARGIN;
+  const value = settings_draft[m.key];
+  const supported = value !== undefined;
+  const attrs = supported
+    ? ` value="${value}" min="${m.abs_low}" max="${m.abs_high}" step="${m.step}"`
+    : ` disabled placeholder="${CEILING_UNSUPPORTED_TEXT}"`;
+  return `<tr data-key="${m.key}"><td class="wrapcell">${m.name}</td>` +
+    `<td colspan="3"><input type="number" inputmode="numeric" data-axis="${m.key}"${attrs}></td>` +
+    `<td>${m.unit}</td></tr>`;
+}
+
 /* 設定画面を開く。現在の設定を下書きにしてから出す。 */
 function openSettingsOverlay(settings, provisional) {
   settings_draft = {};
@@ -170,6 +202,8 @@ function openSettingsOverlay(settings, provisional) {
   // 昇降部が対応していなければ `undefined` のまま（欄を無効にし、PUT に載せない）
   const standaloneCurrent = (settings || {})[SETTING_CEILING.key];
   if (typeof standaloneCurrent === 'boolean') settings_draft[SETTING_CEILING.key] = standaloneCurrent;
+  const marginCurrent = (settings || {})[SETTING_CEILING_MARGIN.key];
+  if (typeof marginCurrent === 'number') settings_draft[SETTING_CEILING_MARGIN.key] = marginCurrent;
 
   const body = document.getElementById('stBody');
   body.innerHTML = SETTING_AXES.map((axis) => {
@@ -185,7 +219,8 @@ function openSettingsOverlay(settings, provisional) {
     `<tr data-key="${SETTING_MOTOR.key}"><td class="wrapcell">${SETTING_MOTOR.name}</td>` +
     `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_MOTOR.key}"` +
     ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>` +
-    standaloneRowHtml();
+    standaloneRowHtml() +
+    ceilingMarginRowHtml();
 
   body.querySelectorAll('input').forEach((input) => {
     if (input.dataset.axis === SETTING_CEILING.key) {
@@ -198,6 +233,8 @@ function openSettingsOverlay(settings, provisional) {
     input.addEventListener('input', () => {
       if (input.dataset.axis === SETTING_MOTOR.key) {
         settings_draft[SETTING_MOTOR.key] = input.value;
+      } else if (input.dataset.axis === SETTING_CEILING_MARGIN.key) {
+        settings_draft[SETTING_CEILING_MARGIN.key] = input.value;
       } else {
         settings_draft[input.dataset.axis][input.dataset.f] = input.value;
       }
@@ -220,6 +257,7 @@ function closeSettingsOverlay() {
  * 下書きから `PUT /api/settings` の本文を作る。
  * `ceiling_standalone` は昇降部が対応している（下書きが真偽値を持つ）ときだけ載せる
  * （対応していない昇降部へ送らない。昇降部は無ければ今の値を保つ）。
+ * `ceiling_margin_mm` も同じく、下書きに値があるときだけ載せる。
  */
 function buildSettingsPayload(draft) {
   const payload = {};
@@ -234,6 +272,9 @@ function buildSettingsPayload(draft) {
   payload[SETTING_MOTOR.key] = Number(draft[SETTING_MOTOR.key]);
   if (typeof draft[SETTING_CEILING.key] === 'boolean') {
     payload[SETTING_CEILING.key] = draft[SETTING_CEILING.key];
+  }
+  if (draft[SETTING_CEILING_MARGIN.key] !== undefined) {
+    payload[SETTING_CEILING_MARGIN.key] = Number(draft[SETTING_CEILING_MARGIN.key]);
   }
   return payload;
 }
@@ -288,5 +329,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module === 'object' && module !== null) {
-  module.exports = {SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, MOTOR_NOTE, buildSettingsPayload, validateSettingsDraft, settingsErrorText};
+  module.exports = {SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, SETTING_CEILING_MARGIN, MOTOR_NOTE, buildSettingsPayload, validateSettingsDraft, settingsErrorText};
 }

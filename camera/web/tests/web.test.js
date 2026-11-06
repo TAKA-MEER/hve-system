@@ -285,6 +285,25 @@ test('PUT の本文は ceiling_standalone を、昇降部が対応している�
   assert.equal(settings.buildSettingsPayload(draft({})).motor_max_pct, 50);
 });
 
+test('天井の閾値: 無くてもよい・あれば 150〜3000 の整数（spec §2.3）', () => {
+  const withMargin = (value) => Object.assign(JSON.parse(JSON.stringify(GOOD)), {ceiling_margin_mm: value});
+  for (const ok of [150, 500, 3000, '500']) {
+    assert.equal(settings.validateSettingsDraft(withMargin(ok)).ok, true, String(ok));
+  }
+  for (const bad of [149, 3001, 0, 500.5, '', null, 'abc', true]) {
+    const result = settings.validateSettingsDraft(withMargin(bad));
+    assert.equal(result.ok, false, String(bad));
+    assert.equal(result.errors[0].key, 'ceiling_margin_mm');
+  }
+});
+
+test('PUT の本文は ceiling_margin_mm を数にして、昇降部が対応しているときだけ載せる', () => {
+  const draft = (extra) => Object.assign(JSON.parse(JSON.stringify(GOOD)), extra);
+  assert.strictEqual(settings.buildSettingsPayload(draft({ceiling_margin_mm: 800})).ceiling_margin_mm, 800);
+  assert.strictEqual(settings.buildSettingsPayload(draft({ceiling_margin_mm: '1200'})).ceiling_margin_mm, 1200);
+  assert.equal('ceiling_margin_mm' in settings.buildSettingsPayload(draft({})), false);
+});
+
 test('単体の操作が持ち主で天井を使わないときだけ、その理由をバッジに出す', () => {
   const off = {owner: 'ui', ceiling_standalone: 'SETTING_OFF'};
   assert.deepEqual(app.standaloneCeilingText(off), {cls: 'warn', text: '天井: 使わない（設定が切）'});
