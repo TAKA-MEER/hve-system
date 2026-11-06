@@ -995,3 +995,97 @@ async def test_ws_goto_over_websocket(aiohttp_client, tmp_path):
     assert state["goto"]["by"] == "ss" and state["dir"] == "up"
     assert state["modules"][0]["busy_label"] == "画像認識で操作中"
     await ws.close()
+
+
+# --- 天井の閾値 ceiling_margin_mm（spec Spec-ui §2.3・protocol §3。WP-LIFTUI-05）---
+
+
+def test_ceiling_check_uses_the_given_margin():
+    from fake_lift_server import CeilingReport
+
+    rep = CeilingReport("MEASURED", 800, 50, 1000)
+    assert ceiling_check(rep, 1050, True) == (True, "NONE")  # 既定 500 なら通る
+    assert ceiling_check(rep, 1050, True, 800) == (False, "CEILING_NEAR")  # 以下は止める
+    assert ceiling_check(rep, 1050, True, 799) == (True, "NONE")
+
+
+def test_settings_validation_ceiling_margin_mm_is_optional_but_150_to_3000_int():
+    for good in (150, 500, 3000):
+        body = good_settings()
+        body["ceiling_margin_mm"] = good
+        assert validate_settings(body) == []
+    for bad in (149, 3001, 500.5, "500", True, False, None, 0, -1):
+        body = good_settings()
+        body["ceiling_margin_mm"] = bad
+        assert validate_settings(body) != [], bad
+
+
+async def test_settings_ceiling_margin_mm_round_trip(aiohttp_client, tmp_path):
+    """既定 500。変えたあと、欠けた PUT は今の値を保つ。範囲の外は 400 でほかの項目も保存しない。"""
+    app = fake.make_app(tmp_path, FakeLift())
+    client = await aiohttp_client(app)
+    body = await (await client.get("/api/settings")).json()
+    assert body["settings"]["ceiling_margin_mm"] == 500
+    put = good_settings()
+    put["ceiling_margin_mm"] = 1000
+    assert (await client.put("/api/settings", json=put)).status == 200
+    saved = await (await client.get("/api/settings")).json()
+    assert saved["settings"]["ceiling_margin_mm"] == 1000
+    assert (await client.put("/api/settings", json=good_settings())).status == 200  # 欠けた PUT
+    kept = await (await client.get("/api/settings")).json()
+    assert kept["settings"]["ceiling_margin_mm"] == 1000
+    bad = good_settings()
+    bad["ceiling_margin_mm"] = 149
+    bad["motor_max_pct"] = 80
+    assert (await client.put("/api/settings", json=bad)).status == 400
+    kept = await (await client.get("/api/settings")).json()
+    assert kept["settings"]["ceiling_margin_mm"] == 1000
+    assert kept["settings"]["motor_max_pct"] == 50
+
+
+def measured(mm: int) -> dict:
+    return {"status": "MEASURED", "mm": mm, "age_ms": 50}
+
+
+def test_margin_applies_to_module_commands():
+    """閾値 1000 にすると、800 mm を送っている間は上部モジュールの上昇が止まる（固定 500 なら通る）。"""
+    lift = FakeLift()
+    lift.settings["ceiling_margin_mm"] = 1000
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, measured(800), 1000)
+    fk = named_conn(lift, name="fk", sensor=False)
+    go(lift, fk, 1000)
+    assert lift.step(1050)["reason"] == "CEILING_NEAR"
+    lift.settings["ceiling_margin_mm"] = 500
+    assert lift.step(1100)["dir"] == "up"
+
+
+def test_margin_applies_to_own_ceiling_of_a_sensor_module():
+    lift = FakeLift()
+    lift.settings["ceiling_margin_mm"] = 1000
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    go(lift, cam, 1000, ceiling=measured(800))
+    assert lift.step(1050)["reason"] == "CEILING_NEAR"
+
+
+@pytest.mark.parametrize("kind", ["ui", "button"])
+def test_margin_applies_to_standalone(kind):
+    lift = FakeLift()
+    lift.settings["ceiling_margin_mm"] = 1000
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, measured(800), 1000)
+    ui_up(lift, 1000, kind)
+    assert lift.step(1050)["reason"] == "CEILING_NEAR"
+
+
+def test_margin_applies_to_the_ceiling_shown_without_an_owner():
+    lift = FakeLift()
+    lift.settings["ceiling_margin_mm"] = 1000
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, measured(800), 1000)
+    shown = lift.step(1050)["ceiling"]
+    assert (shown["ok"], shown["reason"]) == (False, "CEILING_NEAR")
+
+
+def test_provisional_no_longer_has_ceiling_margin_mm():
+    assert "CEILING_MARGIN_MM" not in fake.PROVISIONAL

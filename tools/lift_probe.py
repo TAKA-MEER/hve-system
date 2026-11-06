@@ -42,7 +42,7 @@ lift_probe_period_ms = 100
 lift_probe_speed_mm_s = 40
 # `+` / `-` で 1 回に変える量 [mm/s]
 lift_probe_speed_step_mm_s = 5
-# `c` で遠い側にしたときの天井の値（CEILING_MARGIN_MM=500 より十分遠い）
+# `c` で遠い側にしたときの天井の値（設定 ceiling_margin_mm の既定 500 より十分遠い。設定を 2000 以上にすると近い側になる）
 lift_probe_far_mm = 2000
 # 送る `hello` の名前（protocol §2.1。判定には使わない）
 lift_probe_name = "lift-probe"

@@ -21,6 +21,10 @@
   設定が false・出どころが無い／全部古いときは天井を使わない（`CEILING_STALE` にしない）。
   `state.ceiling.standalone`（`USE` / `SETTING_OFF` / `NO_SOURCE`）は持ち主がいなくても毎回出す
   （protocol-modules §2.5）
+- **天井の閾値は設定 `ceiling_margin_mm`（既定 500・150〜3000 の整数）**。判定はすべてこの値を使い
+  （上部モジュールからの命令・単体の操作の両方）、`PUT` が通った次の周期から効く。
+  欠けた `PUT` は今の値を保つ（500 に戻さない）。整数でない・範囲の外は `400` で何も保存しない。
+  `state.provisional` に `CEILING_MARGIN_MM` は出さない（protocol §3）
 - 持ち主でない接続の古い `press` の `hold`・`goto` は無視する。止まったあとは
   より新しい `press` でなければ持ち主になれない
 - 持ち主の接続が閉じたらその場で止める（`OWNER_GONE`）
@@ -47,7 +51,9 @@ from aiohttp import WSMsgType, web
 
 # --- 定数（DetailedDesign-names.md §5.1。仮のものはそのまま）---
 LIFT_CMD_TIMEOUT_MS = 600
-CEILING_MARGIN_MM = 500  # 仮
+CEILING_MARGIN_MM_DEFAULT = 500  # 設定 ceiling_margin_mm の既定（spec Spec-ui §2.3。実測で見直す H-V8）
+CEILING_MARGIN_MM_MIN = 150
+CEILING_MARGIN_MM_MAX = 3000
 CEILING_STALE_MS = 600  # 仮
 LIFT_MAX_RUN_PCT = 150  # 仮（連続駆動の上限 = 全行程の何 % か。spec #4b）
 LIFT_TOP_MM = 1800  # 偽物は上端の判定を持たないので、連続駆動の上限の全行程はこれで数える
@@ -62,7 +68,7 @@ LIFT_MODULE_MAX_CONN = 6  # 仮（/ws/module の上限。超えた新しい接�
 LIFT_WS_UI_PATH = "/ws/ui"
 LIFT_WS_MODULE_PATH = "/ws/module"
 FW = "fake-0.3.0"
-PROVISIONAL = ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"]
+PROVISIONAL = ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"]
 
 DEFAULT_SETTINGS = {
     "lift_up": {"min": 10, "max": 60, "init": 30},
@@ -70,6 +76,8 @@ DEFAULT_SETTINGS = {
     "motor_max_pct": LIFT_MOTOR_MAX_PCT_DEFAULT,
     # 単体の操作（昇降部の画面・物理ボタン）でも天井で止めるか（spec Spec-ui §2.2。既定は入）
     "ceiling_standalone": True,
+    # 天井の閾値 [mm]（spec Spec-ui §2.3。既定 500・150〜3000 の整数）
+    "ceiling_margin_mm": CEILING_MARGIN_MM_DEFAULT,
 }
 
 CEILING_KNOWN = ("MEASURED", "TOO_NEAR", "NO_ECHO", "READ_ERROR")
@@ -114,7 +122,13 @@ def validate_settings(body: dict) -> list[str]:
     # ceiling_standalone は欠けていてよい（欠ければ今の値を保つ）。あれば真偽値だけ
     if "ceiling_standalone" in body and not isinstance(body["ceiling_standalone"], bool):
         errors.append("ceiling_standalone: true か false にしてください")
-    if set(body.keys()) - {"ceiling_standalone"} != {"lift_up", "lift_down", "motor_max_pct"}:
+    # ceiling_margin_mm も欠けていてよい。あれば 150〜3000 の整数（true・小数・文字列は誤り）
+    if "ceiling_margin_mm" in body:
+        margin = body["ceiling_margin_mm"]
+        if (not isinstance(margin, int) or isinstance(margin, bool)
+                or not CEILING_MARGIN_MM_MIN <= margin <= CEILING_MARGIN_MM_MAX):
+            errors.append(f"ceiling_margin_mm: {CEILING_MARGIN_MM_MIN}〜{CEILING_MARGIN_MM_MAX}（mm）の整数にしてください")
+    if set(body.keys()) - {"ceiling_standalone", "ceiling_margin_mm"} != {"lift_up", "lift_down", "motor_max_pct"}:
         errors.append("lift_up と lift_down と motor_max_pct をまるごと送ってください")
     return errors
 
@@ -127,7 +141,8 @@ class CeilingReport:
         self.received_at_ms = received_at_ms
 
 
-def ceiling_check(report: CeilingReport, now: int, has_sensor: bool) -> tuple[bool, str]:
+def ceiling_check(report: CeilingReport, now: int, has_sensor: bool,
+                  margin_mm: int = CEILING_MARGIN_MM_DEFAULT) -> tuple[bool, str]:
     """lift_core/ceiling_check.cpp と同じ規則。→ (ok, reason)。"""
     if not has_sensor:
         return True, "NONE"
@@ -135,7 +150,7 @@ def ceiling_check(report: CeilingReport, now: int, has_sensor: bool) -> tuple[bo
     if age > CEILING_STALE_MS:
         return False, "CEILING_STALE"
     if report.status == "MEASURED":
-        if report.mm <= CEILING_MARGIN_MM:
+        if report.mm <= margin_mm:
             return False, "CEILING_NEAR"
     elif report.status == "TOO_NEAR":
         return False, "CEILING_NEAR"
@@ -460,7 +475,7 @@ class FakeLift:
             rep = info["ceiling"]
             if rep is None or not self._is_source(info):
                 continue
-            ok, reason = ceiling_check(rep, now, True)
+            ok, reason = ceiling_check(rep, now, True, self.settings["ceiling_margin_mm"])
             results.append((ok, reason, rep, self.name_of(conn_id)))
         if not results:
             return False, "CEILING_STALE", None, None
@@ -502,7 +517,7 @@ class FakeLift:
             # 通信なし: 天井を使わずに許す。CEILING_STALE にしない（上部モジュールと逆）
             return "NO_SOURCE", True, "NONE", None, None
         rep, src = min(fresh, key=lambda f: self._closeness(f[0]))
-        ok, reason = ceiling_check(rep, now, True)  # READ_ERROR・MISSING は止める
+        ok, reason = ceiling_check(rep, now, True, self.settings["ceiling_margin_mm"])  # READ_ERROR・MISSING は止める
         return "USE", ok, reason, rep, src
 
     def _owner_ceiling(self, now: int) -> tuple[bool, str, CeilingReport | None, str | None]:
@@ -516,7 +531,7 @@ class FakeLift:
         info = self._conns.get(conn_id)
         if info is None or info["has_sensor"]:
             rep = self._owner_cmd["ceiling"]
-            ok, reason = ceiling_check(rep, now, True)
+            ok, reason = ceiling_check(rep, now, True, self.settings["ceiling_margin_mm"])
             return ok, reason, rep, self.name_of(conn_id)
         return self._source_ceiling(now)
 
@@ -639,7 +654,7 @@ class FakeLift:
             else:
                 rep, src = None, None
             if rep is not None:
-                ok2, reason2 = ceiling_check(rep, now, True)
+                ok2, reason2 = ceiling_check(rep, now, True, self.settings["ceiling_margin_mm"])
                 shown = {"used": False, "from": src, "status": rep.status,
                          "mm": rep.mm if rep.status == "MEASURED" else None,
                          "age_ms": rep.age_ms + max(0, now - rep.received_at_ms),
@@ -703,7 +718,10 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
                          "motor_max_pct": int(body["motor_max_pct"]),
                          # 欠けた PUT は今の値を保つ（true に戻さない）
                          "ceiling_standalone": body.get(
-                             "ceiling_standalone", lift.settings.get("ceiling_standalone", True))}
+                             "ceiling_standalone", lift.settings.get("ceiling_standalone", True)),
+                         # 欠けた PUT は今の値を保つ（500 に戻さない）
+                         "ceiling_margin_mm": body.get(
+                             "ceiling_margin_mm", lift.settings["ceiling_margin_mm"])}
         lift.using_defaults = False
         return web.json_response({"settings": lift.settings})
 
