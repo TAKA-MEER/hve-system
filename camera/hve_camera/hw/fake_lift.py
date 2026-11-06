@@ -76,6 +76,10 @@ class FakeLift(LiftPort):
         self.release_history: List[Dict[str, Any]] = []
         #: 受けた `ceiling` の履歴（試験用）
         self.ceiling_history: List[Dict[str, Any]] = []
+        #: ほかの上部モジュールが持ち主のふり（`(name, busy_label)`）。`None` なら演じない
+        self._other_owner: Optional[tuple] = None
+        #: `arm.out` に出す値（`True`＝腕が出ている・`None`＝分からない）
+        self._arm_out: Optional[bool] = None
 
     # --- 外から偽の値を変える ---------------------------------------------------------------------
 
@@ -84,6 +88,13 @@ class FakeLift(LiftPort):
 
     def set_bottom(self, pressed: bool) -> None:
         self._bottom = bool(pressed)
+
+    def set_other_owner(self, name: Optional[str], busy_label: Optional[str] = None) -> None:
+        """`fk`・`ss` のような別の上部モジュールが持ち主のふりをする（`None` でやめる）。"""
+        self._other_owner = None if name is None else (str(name), busy_label)
+
+    def set_arm_out(self, out: Optional[bool]) -> None:
+        self._arm_out = out
 
     @property
     def height_mm(self) -> float:
@@ -259,7 +270,31 @@ class FakeLift(LiftPort):
             int(self._ceiling.get("age_ms", 0)),
         )
         self._seq += 1
+        other = self._other_owner
         owner = self._owner_press is not None
+        modules = [
+            {
+                "name": "hve-cam",
+                "role": "control",
+                "operator": "human",
+                "ceiling_sensor": True,
+                "busy_label": None,
+                "ip": None,
+                "fw": "fake-0.2.0",
+            }
+        ]
+        if other is not None:
+            modules.append(
+                {
+                    "name": other[0],
+                    "role": "control",
+                    "operator": "auto",
+                    "ceiling_sensor": False,
+                    "busy_label": other[1],
+                    "ip": None,
+                    "fw": "fake-0.2.0",
+                }
+            )
         self._state = {
             "t": "state",
             "seq": self._seq,
@@ -274,7 +309,7 @@ class FakeLift(LiftPort):
             "height_ok": True,
             "top_detect": False,
             "ceiling": {
-                "used": owner,
+                "used": owner and other is None,
                 "from": "hve-cam",
                 "status": self._ceiling.get("status", "MISSING"),
                 "mm": self._ceiling.get("mm"),
@@ -283,23 +318,21 @@ class FakeLift(LiftPort):
                 "reason": ceiling_reason,
                 "standalone": "USE",
             },
-            "owner": "module" if owner else None,
-            "owner_name": "hve-cam" if owner else None,
-            "owner_operator": "human" if owner else None,
+            "owner": "module" if (owner or other is not None) else None,
+            "owner_name": other[0] if other is not None else ("hve-cam" if owner else None),
+            "owner_operator": (
+                "auto" if other is not None else ("human" if owner else None)
+            ),
             "homed": True,
-            "modules": [
-                {
-                    "name": "hve-cam",
-                    "role": "control",
-                    "operator": "human",
-                    "ceiling_sensor": True,
-                    "busy_label": None,
-                    "ip": None,
-                    "fw": "fake-0.2.0",
-                }
-            ],
+            "modules": modules,
             "goto": None,
-            "arm": {"attached": None, "link": None, "confirm": None, "out": None, "drum": None},
+            "arm": {
+                "attached": None,
+                "link": None,
+                "confirm": None,
+                "out": self._arm_out,
+                "drum": None,
+            },
             "ui_clients": 0,
             "provisional": ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],
             "fw": "fake-0.2.0",

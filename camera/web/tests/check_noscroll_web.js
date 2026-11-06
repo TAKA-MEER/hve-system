@@ -20,10 +20,12 @@ const sizes = [
 
 // 状態は偽物 API（POST /api/fake）で作る。実装の画面は URL 引数では状態を切り替えない
 const states = [
-  {name: '通常', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200}},
-  {name: '天井の値なし', fake: {ceiling: {status: 'READ_ERROR'}, height_mm: 1200}},
-  {name: '設定画面', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200}, settings: true},
-  {name: '静止画の重ね表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200}, snapshot: true},
+  {name: '通常', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}},
+  {name: '天井の値なし', fake: {ceiling: {status: 'READ_ERROR'}, height_mm: 1200, arm_out: null, other_owner: null}},
+  {name: '設定画面', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true},
+  {name: '静止画の重ね表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, snapshot: true},
+  // 別の上部モジュールが持ち主（長い busy_label）＋腕が出ている（WP-CAM-10）
+  {name: '別の上部モジュール操作中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: true, other_owner: {name: 'ss', busy_label: '画像認識で操作中（長い表示の確認）'}}},
 ];
 
 async function setFake(fake) {

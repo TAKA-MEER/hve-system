@@ -171,12 +171,33 @@ function topDetectText(lift) {
   return value.top_detect === true ? null : TOP_DETECT_OFF_TEXT;
 }
 
-/** 昇降の操作の持ち主の表示。`module`＝この画面（カメラモジュール）・`ui`＝昇降部の画面・`null`＝なし */
-function ownerText(owner) {
-  if (owner === 'module') return '持ち主 カメラモジュール';
+/** 自分（カメラモジュール）の名前。`hello` の `name`・`params.toml` の `module_name` と同じ（names.md） */
+const OWN_MODULE_NAME = 'hve-cam';
+
+/** 昇降の操作の持ち主の表示。`module`＝上部モジュール（名前は `ownerName`。`hve-cam` は自分）・
+    `ui`＝昇降部の画面・`button`＝物理ボタン・`null`＝なし。
+    他の上部モジュールは、`modules` にある自分の `busy_label` を出し、無ければ名前を出す
+    （名前を決め打ちで持たない。protocol-modules §1.1） */
+function ownerText(owner, ownerName, modules) {
+  if (owner === 'module') {
+    if (ownerName === undefined || ownerName === null || ownerName === OWN_MODULE_NAME) {
+      return '持ち主 カメラモジュール';
+    }
+    const list = Array.isArray(modules) ? modules : [];
+    const found = list.find((m) => m && m.name === ownerName);
+    const label = found && typeof found.busy_label === 'string' && found.busy_label !== ''
+      ? found.busy_label : ownerName;
+    return `持ち主 ${label}`;
+  }
   if (owner === 'ui') return '持ち主 昇降部の画面';
   if (owner === 'button') return '持ち主 物理ボタン（点検）';
   return '持ち主 なし';
+}
+
+/** 測定機構の腕が格納位置にないとき（`arm.out === true`）だけ出す。出さないときは `null`
+    （`false`・`null`＝分からないは出さない。Spec-ui §1.6） */
+function armText(arm) {
+  return arm && arm.out === true ? '腕が出ています' : null;
 }
 
 /** 物理ボタンが持ち主の間だけ出す注意（遠隔からは動かせない。Spec-ui §0.3）。出さないときは `null` */
@@ -548,7 +569,7 @@ function render() {
   const topText = topDetectText(lift);
   $('bTop').style.display = topText ? '' : 'none';
   if (topText) $('bTop').lastElementChild.textContent = topText;
-  $('bOwner').lastElementChild.textContent = ownerText(lift.owner);
+  $('bOwner').lastElementChild.textContent = ownerText(lift.owner, lift.owner_name, state.modules);
   $('bLiftUi').lastElementChild.textContent = liftUiText(lift.ui_clients);
   const link = liftLink(lift.lift_ip);
   $('bLiftLink').style.display = link ? '' : 'none';
@@ -562,7 +583,8 @@ function render() {
   $('osdP').textContent = `ピッチ ${Number(state.pitch_deg).toFixed(1)}°`;
   $('cP').textContent = `↕ ${Math.round(Number(state.pitch_deg))}°`;
 
-  const note = buttonNoteText(lift.owner);
+  // 注意の帯は 1 本（物理ボタンの注意と腕の警告を並べる。ヘッダを伸ばさない）
+  const note = [buttonNoteText(lift.owner), armText(state.arm)].filter(Boolean).join(' ／ ') || null;
   $('buttonNote').className = note ? 'stopbar top show' : 'stopbar top';
   $('buttonNote').textContent = note || '';
 
@@ -684,7 +706,7 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, zoomMessage, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, heightText, holdBlocked, stateStale,
-    topDetectText, ownerText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
+    topDetectText, ownerText, armText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,
   };
 }

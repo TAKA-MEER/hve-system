@@ -135,6 +135,26 @@ test('持ち主・昇降部の画面の数・昇降部へのリンク', () => {
   assert.equal(app.ownerText('ui'), '持ち主 昇降部の画面');
   assert.equal(app.ownerText('button'), '持ち主 物理ボタン（点検）');
   assert.equal(app.ownerText(null), '持ち主 なし');
+  // 複数の上部モジュール（protocol-modules §1.1）。自分（hve-cam）は今のまま
+  assert.equal(app.ownerText('module', 'hve-cam', []), '持ち主 カメラモジュール');
+  // 変異 5 の芯: 別の上部モジュールは名乗った busy_label を出す（名前の決め打ちを持たない）
+  const mods = [
+    {name: 'hve-cam', busy_label: null},
+    {name: 'fk', busy_label: '測定操作中'},
+    {name: 'ss', busy_label: '画像認識で操作中'},
+    {name: 'xx', busy_label: null},
+  ];
+  assert.equal(app.ownerText('module', 'fk', mods), '持ち主 測定操作中');
+  assert.equal(app.ownerText('module', 'ss', mods), '持ち主 画像認識で操作中');
+  assert.equal(app.ownerText('module', 'xx', mods), '持ち主 xx', 'busy_label が無ければ名前');
+  assert.equal(app.ownerText('module', 'fk', undefined), '持ち主 fk');
+  assert.equal(app.ownerText('ui', null, mods), '持ち主 昇降部の画面');
+  // 腕: true のときだけ（false・null＝分からないは出さない）
+  assert.equal(app.armText({out: true}), '腕が出ています');
+  assert.equal(app.armText({out: false}), null);
+  assert.equal(app.armText({out: null}), null);
+  assert.equal(app.armText(null), null);
+  assert.equal(app.armText(undefined), null);
   assert.equal(app.buttonNoteText('button'), '物理ボタンで操作中（遠隔からは動かせません）');
   assert.equal(app.buttonNoteText('ui'), null);
   assert.equal(app.buttonNoteText('module'), null);

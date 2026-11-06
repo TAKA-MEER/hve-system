@@ -440,6 +440,32 @@ class CameraApp:
                     else:
                         lift.set_bottom(value)
 
+        errors += self._apply_fake_modules(data)
+        return errors
+
+    def _apply_fake_modules(self, data: Mapping[str, Any]) -> list[str]:
+        """`arm_out`（腕が出ている）・`other_owner`（`{name, busy_label}`。別の上部モジュールが持ち主）。"""
+        if "arm_out" not in data and "other_owner" not in data:
+            return []
+        lift = self._fake_lift()
+        if lift is None or not hasattr(lift, "set_arm_out"):
+            return ["arm_out・other_owner: 昇降部が偽物でない"]
+        errors: list[str] = []
+        if "arm_out" in data:
+            value = data["arm_out"]
+            if value is not None and not isinstance(value, bool):
+                errors.append("arm_out: 真偽値か null でない")
+            else:
+                lift.set_arm_out(value)
+        if "other_owner" in data:
+            value = data["other_owner"]
+            if value is None:
+                lift.set_other_owner(None)
+            elif isinstance(value, dict) and isinstance(value.get("name"), str):
+                label = value.get("busy_label")
+                lift.set_other_owner(value["name"], label if isinstance(label, str) else None)
+            else:
+                errors.append("other_owner: null か {name, busy_label} でない")
         return errors
 
     def _fake_lift(self) -> Any:
