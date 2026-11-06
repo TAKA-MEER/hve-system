@@ -11,6 +11,11 @@
 // 4. 設定で不正値（下限 > 上限）を入れると PUT を出さず、サーバーの値も変わらない
 // 5. 上部モジュールが名乗った busy_label が「持ち主」に出る・繋がっているものが一覧に並ぶ・
 //    arm.out が true のときだけ「腕が出ています」が出る（render の呼び出し側を縛る）
+// 6. ceiling.standalone の理由（通信なし・設定が切）が天井のバッジに出る（render の呼び出し側）。
+//    設定画面のチェックを切って保存すると PUT に ceiling_standalone: false が載り、開き直すと
+//    反映されている
+// 7. 画面の上昇が、距離計を持つ上部モジュールの新しい近い値で CEILING_NEAR で止まり、
+//    その上部モジュールが切れる（出どころ無し）と天井を使わずに上がる
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -300,6 +305,99 @@ test('5 持ち主に busy_label・一覧に繋いだ全部・腕は true のと�
   } finally {
     for (const ws of sockets) { clearInterval(ws.timer); ws.close(); }
     await postFake({arm: {out: null}});
+    await cleanup();
+  }
+});
+
+/** 距離計を持つ上部モジュール（出どころ）として繋ぎ、天井の値を送り続ける */
+function openSource(ceiling) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://${new URL(BASE).host}/ws/module`);
+    ws.addEventListener('error', reject);
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({t: 'hello', name: 'hve-cam', role: 'control', operator: 'human',
+        ceiling_sensor: true}));
+      const msg = JSON.stringify({t: 'ceiling', ...ceiling});
+      ws.send(msg);
+      ws.timer = setInterval(() => ws.send(msg), 100);
+      resolve(ws);
+    });
+  });
+}
+
+/* --- 6. 単体の操作の天井の表示と設定 ------------------------------------------ */
+test('6 天井のバッジに使わない理由が出る・設定の切り替えが PUT に載る', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, ceiling: null, arm: {out: null}});
+  const {page, errors, cleanup} = await openScreen(browser);
+  const badge = () => page.evaluate(() => document.getElementById('bCeil').textContent.trim());
+  const waitBadge = (want) => page.waitForFunction(
+    (w) => document.getElementById('bCeil').textContent.includes(w), want, {timeout: 3000});
+  let source = null;
+  try {
+    await waitBadge('天井: 使わない（通信なし）');
+    source = await openSource({status: 'MEASURED', mm: 2000, age_ms: 0});
+    await waitBadge('天井 2000 mm');
+
+    const puts = [];
+    page.on('request', (request) => {
+      if (request.method() === 'PUT') puts.push(request.postData());
+    });
+    await page.click('#openSettings');
+    await page.waitForSelector('#settings.show');
+    const box = page.locator('#stBody input[data-axis="ceiling_standalone"]');
+    assert.equal(await box.isChecked(), true, '既定は入');
+    await box.uncheck();
+    await page.click('#stSave');
+    await waitBadge('天井: 使わない（設定が切）');
+    assert.equal(puts.length, 1, `PUT が 1 回（${JSON.stringify(puts)}）`);
+    assert.equal(JSON.parse(puts[0]).ceiling_standalone, false, 'PUT に ceiling_standalone: false が載る');
+    const saved = await (await fetch(`${BASE}/api/settings`)).json();
+    assert.equal(saved.settings.ceiling_standalone, false, 'サーバーに保存された');
+
+    await page.click('#openSettings');
+    await page.waitForSelector('#settings.show');
+    assert.equal(await box.isChecked(), false, '開き直すと切のまま');
+    await box.check();
+    await page.click('#stSave');
+    await waitBadge('天井 2000 mm');
+    assert.equal(JSON.parse(puts[1]).ceiling_standalone, true, '入に戻す PUT');
+    assert.ok((await badge()).length > 0);
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    if (source) { clearInterval(source.timer); source.close(); }
+    const now = await (await fetch(`${BASE}/api/settings`)).json();
+    await fetch(`${BASE}/api/settings`, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...now.settings, ceiling_standalone: true})});
+    await cleanup();
+  }
+});
+
+/* --- 7. 画面の上昇が天井で止まる -------------------------------------------- */
+test('7 画面の上昇は近い天井で止まり、出どころが切れると天井を使わずに上がる', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, ceiling: null, arm: {out: null}});
+  const {page, errors, cleanup} = await openScreen(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  let source = await openSource({status: 'MEASURED', mm: 100, age_ms: 0});
+  try {
+    await page.waitForFunction(() => document.getElementById('bCeil').textContent.includes('100 mm'),
+      null, {timeout: 3000});
+    await pressUp(page);
+    const stopped = await watcher.waitFor((s) => s.owner === 'ui' && s.reason === 'CEILING_NEAR',
+      1500, '近い天井で止まる');
+    assert.equal(stopped.dir, 'stop');
+    await page.mouse.up();
+    // 出どころが切れた（通信なし）→ 天井を使わずに上がる。CEILING_STALE で止めない
+    clearInterval(source.timer); source.close(); source = null;
+    await page.waitForFunction(
+      () => document.getElementById('bCeil').textContent.includes('通信なし'), null, {timeout: 3000});
+    await pressUp(page);
+    await watcher.waitFor((s) => s.owner === 'ui' && s.dir === 'up', 1500, '出どころが無いと上がる');
+    await page.mouse.up();
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    if (source) { clearInterval(source.timer); source.close(); }
+    watcher.close();
     await cleanup();
   }
 });

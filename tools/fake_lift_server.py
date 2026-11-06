@@ -16,6 +16,11 @@
 - **距離計を持たない上部モジュールの上昇は、`hello` で `ceiling_sensor: true` を
   明示した `role: control` の接続が送る最新の天井で判定する。無い・古い・
   `READ_ERROR` は `CEILING_STALE`**（protocol-modules §2.3・§2.4）
+- **画面・物理ボタンの上昇（単体の操作）は、設定 `ceiling_standalone`（既定 true）が true で、
+  出どころの新しい値があるときだけ、その中で近い方で判定する**（`READ_ERROR` は止める）。
+  設定が false・出どころが無い／全部古いときは天井を使わない（`CEILING_STALE` にしない）。
+  `state.ceiling.standalone`（`USE` / `SETTING_OFF` / `NO_SOURCE`）は持ち主がいなくても毎回出す
+  （protocol-modules §2.5）
 - 持ち主でない接続の古い `press` の `hold`・`goto` は無視する。止まったあとは
   より新しい `press` でなければ持ち主になれない
 - 持ち主の接続が閉じたらその場で止める（`OWNER_GONE`）
@@ -63,6 +68,8 @@ DEFAULT_SETTINGS = {
     "lift_up": {"min": 10, "max": 60, "init": 30},
     "lift_down": {"min": 10, "max": 60, "init": 30},
     "motor_max_pct": LIFT_MOTOR_MAX_PCT_DEFAULT,
+    # 単体の操作（昇降部の画面・物理ボタン）でも天井で止めるか（spec Spec-ui §2.2。既定は入）
+    "ceiling_standalone": True,
 }
 
 CEILING_KNOWN = ("MEASURED", "TOO_NEAR", "NO_ECHO", "READ_ERROR")
@@ -104,7 +111,10 @@ def validate_settings(body: dict) -> list[str]:
     if (not isinstance(motor, int) or isinstance(motor, bool)
             or not LIFT_MOTOR_MAX_PCT_MIN <= motor <= LIFT_DUTY_ABS_MAX_PCT):
         errors.append("motor_max_pct: モータへの出力の上限 10〜100（%）の整数にしてください")
-    if set(body.keys()) != {"lift_up", "lift_down", "motor_max_pct"}:
+    # ceiling_standalone は欠けていてよい（欠ければ今の値を保つ）。あれば真偽値だけ
+    if "ceiling_standalone" in body and not isinstance(body["ceiling_standalone"], bool):
+        errors.append("ceiling_standalone: true か false にしてください")
+    if set(body.keys()) - {"ceiling_standalone"} != {"lift_up", "lift_down", "motor_max_pct"}:
         errors.append("lift_up と lift_down と motor_max_pct をまるごと送ってください")
     return errors
 
@@ -459,10 +469,49 @@ class FakeLift:
                 return item
         return results[0]
 
+    @staticmethod
+    def _closeness(rep: CeilingReport) -> int:
+        """近さの順（小さいほど厳しい）。読めない・近すぎ → 反射なしの順に緩くなる。"""
+        if rep.status in ("READ_ERROR", "MISSING"):
+            return -2
+        if rep.status == "TOO_NEAR":
+            return -1
+        if rep.status == "NO_ECHO":
+            return 1 << 30
+        return rep.mm
+
+    def _standalone_ceiling(
+        self, now: int
+    ) -> tuple[str, bool, str, CeilingReport | None, str | None]:
+        """単体の操作（昇降部の画面・物理ボタン）の天井（protocol-modules §2.5）。
+
+        → (standalone, ok, reason, 使った値, 出どころの名前)。`standalone` は
+        `USE` / `SETTING_OFF` / `NO_SOURCE`。持ち主がいなくても毎回求める。
+        """
+        if not self.settings.get("ceiling_standalone", True):
+            return "SETTING_OFF", True, "NONE", None, None
+        fresh = []
+        for conn_id, info in self._conns.items():
+            rep = info["ceiling"]
+            if rep is None or not self._is_source(info):
+                continue
+            if rep.age_ms + max(0, now - rep.received_at_ms) > CEILING_STALE_MS:
+                continue  # 古い出どころは無視する（新しい出どころが別にあればそちらを使う）
+            fresh.append((rep, self.name_of(conn_id)))
+        if not fresh:
+            # 通信なし: 天井を使わずに許す。CEILING_STALE にしない（上部モジュールと逆）
+            return "NO_SOURCE", True, "NONE", None, None
+        rep, src = min(fresh, key=lambda f: self._closeness(f[0]))
+        ok, reason = ceiling_check(rep, now, True)  # READ_ERROR・MISSING は止める
+        return "USE", ok, reason, rep, src
+
     def _owner_ceiling(self, now: int) -> tuple[bool, str, CeilingReport | None, str | None]:
         """持ち主の命令に使う天井。→ (ok, reason, 値, 出どころ)。使わないときは値が None。"""
+        if self._owner and self._owner_cmd and self._owner[1] in ("ui", "button"):
+            _st, ok, reason, rep, src = self._standalone_ceiling(now)
+            return ok, reason, rep, src
         if not self._owner or not self._owner_cmd or self._owner[1] != "module":
-            return True, "NONE", None, None  # 画面・物理ボタンは天井を使わない（WP-LIFTUI-04 まで）
+            return True, "NONE", None, None
         conn_id = self._owner[0]
         info = self._conns.get(conn_id)
         if info is None or info["has_sensor"]:
@@ -595,6 +644,11 @@ class FakeLift:
                          "mm": rep.mm if rep.status == "MEASURED" else None,
                          "age_ms": rep.age_ms + max(0, now - rep.received_at_ms),
                          "ok": ok2, "reason": reason2}
+        if shown is None:
+            # 値が無くても standalone は毎回出す（画面が押す前から理由を出せるように）
+            shown = {"used": False, "from": None, "status": None, "mm": None,
+                     "age_ms": None, "ok": None, "reason": None}
+        shown["standalone"] = self._standalone_ceiling(now)[0]
         modules = [{"name": self.name_of(cid), "role": c["role"], "operator": c["operator"],
                     "ceiling_sensor": c["has_sensor"], "busy_label": c["busy_label"],
                     "ip": c["ip"], "fw": c["fw"]}
@@ -646,7 +700,10 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
             return web.json_response({"errors": errors}, status=400)
         lift.settings = {"lift_up": {k: int(body["lift_up"][k]) for k in ("min", "max", "init")},
                          "lift_down": {k: int(body["lift_down"][k]) for k in ("min", "max", "init")},
-                         "motor_max_pct": int(body["motor_max_pct"])}
+                         "motor_max_pct": int(body["motor_max_pct"]),
+                         # 欠けた PUT は今の値を保つ（true に戻さない）
+                         "ceiling_standalone": body.get(
+                             "ceiling_standalone", lift.settings.get("ceiling_standalone", True))}
         lift.using_defaults = False
         return web.json_response({"settings": lift.settings})
 

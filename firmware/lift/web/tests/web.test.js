@@ -92,6 +92,41 @@ test('天井のバッジは距離・値なし・範囲外を出す（#3b）', ()
   assert.deepEqual(app.ceilingText(null), {cls: '', text: '天井 —'});
 });
 
+test('天井のバッジは単体の操作で使わない理由を出す（Spec-ui §2.2・WP-LIFTUI-04）', () => {
+  const idle = (standalone) => ({used: false, from: null, status: null, mm: null, age_ms: null,
+    ok: null, reason: null, standalone});
+  // 持ち主なし・画面・物理ボタンで、理由を文言にする
+  for (const owner of [null, undefined, 'ui', 'button']) {
+    assert.deepEqual(app.ceilingText(idle('SETTING_OFF'), owner),
+      {cls: 'warn', text: '天井: 使わない（設定が切）'});
+    assert.deepEqual(app.ceilingText(idle('NO_SOURCE'), owner),
+      {cls: 'warn', text: '天井: 使わない（通信なし）'});
+  }
+  // 値があっても使っていない（used が偽）なら理由を優先する
+  assert.deepEqual(app.ceilingText({used: false, status: 'MEASURED', mm: 1450, reason: 'NONE', ok: true,
+    standalone: 'NO_SOURCE'}, null), {cls: 'warn', text: '天井: 使わない（通信なし）'});
+  // 使っている（USE・used が真）なら距離をそのまま出す
+  assert.deepEqual(app.ceilingText({used: true, status: 'MEASURED', mm: 1450, reason: 'NONE', ok: true,
+    standalone: 'USE'}, 'ui'), {cls: '', text: '天井 1450 mm'});
+  // 値が無く standalone が USE のときは「—」（値なしの異常にしない）
+  assert.deepEqual(app.ceilingText(idle('USE'), null), {cls: '', text: '天井 —'});
+  // 上部モジュールが持ち主のときは設定を見ない（上部モジュールからの命令には効かない）
+  assert.deepEqual(app.ceilingText({used: true, status: 'MEASURED', mm: 300, reason: 'CEILING_NEAR',
+    ok: false, standalone: 'SETTING_OFF'}, 'module'), {cls: 'warn', text: '天井 300 mm'});
+  // standalone の無い古い昇降部の state は今までどおり
+  assert.deepEqual(app.ceilingText({mm: 1450, reason: 'NONE', ok: true}, 'ui'), {cls: '', text: '天井 1450 mm'});
+});
+
+test('設定の ceiling_standalone は真偽値だけ通し、欠けていてもよい', () => {
+  assert.equal(app.SETTING_CEILING.key, 'ceiling_standalone');
+  assert.equal(app.validateSettingsDraft({...GOOD, ceiling_standalone: true}).ok, true);
+  assert.equal(app.validateSettingsDraft({...GOOD, ceiling_standalone: false}).ok, true);
+  assert.equal(app.validateSettingsDraft(GOOD).ok, true);
+  for (const bad of ['true', 1, 0, null]) {
+    assert.equal(app.validateSettingsDraft({...GOOD, ceiling_standalone: bad}).ok, false);
+  }
+});
+
 test('高さは読めない値と値なしを区別する', () => {
   assert.equal(app.heightText(102, true), '高さ 102 mm');
   assert.equal(app.heightText(102, false), '高さ 読めない');

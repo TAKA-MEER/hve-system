@@ -340,6 +340,18 @@ def test_settings_validation():
     assert validate_settings(bad_axis) != []
 
 
+def test_settings_validation_ceiling_standalone_is_optional_but_must_be_bool():
+    assert validate_settings(good_settings()) == []
+    for good in (True, False):
+        body = good_settings()
+        body["ceiling_standalone"] = good
+        assert validate_settings(body) == []
+    for bad in ("true", 1, 0, None, "yes"):
+        body = good_settings()
+        body["ceiling_standalone"] = bad
+        assert validate_settings(body) != []
+
+
 def test_settings_validation_rejects_missing_or_out_of_range_motor_max_pct():
     """`motor_max_pct` の欠けた PUT・9・101 は通さない（protocol §3）。"""
     missing = {"lift_up": {"min": 10, "max": 60, "init": 30},
@@ -378,6 +390,27 @@ async def test_settings_round_trip(aiohttp_client, tmp_path):
     assert ok.status == 200
     saved = await (await client.get("/api/settings")).json()
     assert saved["settings"]["motor_max_pct"] == 50
+
+
+async def test_settings_ceiling_standalone_round_trip(aiohttp_client, tmp_path):
+    """既定 true。false を保存したあと、欠けた PUT は今の値を保つ（true に戻さない）。"""
+    app = fake.make_app(tmp_path, FakeLift())
+    client = await aiohttp_client(app)
+    body = await (await client.get("/api/settings")).json()
+    assert body["settings"]["ceiling_standalone"] is True
+    put = good_settings()
+    put["ceiling_standalone"] = False
+    assert (await client.put("/api/settings", json=put)).status == 200
+    saved = await (await client.get("/api/settings")).json()
+    assert saved["settings"]["ceiling_standalone"] is False
+    assert (await client.put("/api/settings", json=good_settings())).status == 200  # 欠けた PUT
+    kept = await (await client.get("/api/settings")).json()
+    assert kept["settings"]["ceiling_standalone"] is False
+    bad = good_settings()
+    bad["ceiling_standalone"] = "no"
+    assert (await client.put("/api/settings", json=bad)).status == 400
+    kept = await (await client.get("/api/settings")).json()
+    assert kept["settings"]["ceiling_standalone"] is False
 
 
 async def test_module_hold_over_websocket(aiohttp_client, tmp_path):
@@ -654,14 +687,111 @@ def test_nearest_of_two_sources_is_used():
     assert lift.step(1050)["reason"] == "CEILING_NEAR"
 
 
-def test_ui_still_does_not_use_the_ceiling_in_this_packet():
-    """画面の単体の操作は今のまま天井を使わない（§2.5 は WP-LIFTUI-04）。"""
+# --- 単体の操作の天井（protocol-modules §2.5。WP-LIFTUI-04）---
+
+
+def ui_up(lift: FakeLift, now: int, kind="ui") -> None:
+    conn = lift.add_conn(kind)
+    lift.on_hold(conn, kind, decode_hold(hold_text(), now), now)
+
+
+@pytest.mark.parametrize("kind", ["ui", "button"])
+def test_standalone_stops_at_a_fresh_near_ceiling(kind):
+    """設定が入で、距離計を持つ上部モジュールの新しい値が近いなら、画面・物理ボタンの上昇も止める。"""
     lift = FakeLift()
     cam = named_conn(lift, name="hve-cam", sensor=True)
     lift.on_ceiling(cam, dict(NEAR), 1000)
-    ui = lift.add_conn("ui")
-    lift.on_hold(ui, "ui", decode_hold(hold_text(), 1000), 1000)
-    assert lift.step(1050)["dir"] == "up"
+    ui_up(lift, 1000, kind)
+    state = lift.step(1050)
+    assert (state["dir"], state["reason"]) == ("stop", "CEILING_NEAR")
+    assert state["ceiling"]["standalone"] == "USE" and state["ceiling"]["used"] is True
+    assert state["ceiling"]["from"] == "hve-cam"
+
+
+def test_standalone_setting_off_does_not_use_the_ceiling():
+    lift = FakeLift()
+    lift.settings["ceiling_standalone"] = False
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, dict(NEAR), 1000)
+    ui_up(lift, 1000)
+    state = lift.step(1050)
+    assert state["dir"] == "up" and state["reason"] == "NONE"
+    assert state["ceiling"]["standalone"] == "SETTING_OFF"
+
+
+def test_standalone_no_source_allows_without_stale_stop():
+    """出どころが無い・全部古いときは天井を使わず許す（CEILING_STALE にしない）。"""
+    lift = FakeLift()
+    ui_up(lift, 1000)
+    state = lift.step(1050)
+    assert (state["dir"], state["reason"]) == ("up", "NONE")
+    assert state["ceiling"]["standalone"] == "NO_SOURCE"
+    # 値はあるが古い
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, dict(NEAR), 1000)
+    ui_up(lift, 1000 + 2000)
+    state = lift.step(1000 + 2050)
+    assert (state["dir"], state["reason"]) == ("up", "NONE")
+    assert state["ceiling"]["standalone"] == "NO_SOURCE"
+
+
+def test_standalone_ignores_a_stale_source_when_another_is_fresh():
+    """古い出どころは無視し、新しい値の中で判定する（どちらの向きの取り違えも赤）。"""
+    lift = FakeLift()
+    a = named_conn(lift, name="cam-a", sensor=True)
+    b = named_conn(lift, name="cam-b", sensor=True)
+    lift.on_ceiling(a, dict(NEAR), 1000)  # 古くなる
+    lift.on_ceiling(b, dict(FAR), 3000)   # 新しい
+    ui_up(lift, 3000)
+    state = lift.step(3050)
+    assert (state["dir"], state["reason"]) == ("up", "NONE")
+    assert state["ceiling"]["standalone"] == "USE" and state["ceiling"]["from"] == "cam-b"
+
+    lift = FakeLift()
+    a = named_conn(lift, name="cam-a", sensor=True)
+    b = named_conn(lift, name="cam-b", sensor=True)
+    lift.on_ceiling(a, dict(FAR), 1000)   # 古くなる
+    lift.on_ceiling(b, dict(NEAR), 3000)  # 新しい
+    ui_up(lift, 3000)
+    state = lift.step(3050)
+    assert (state["dir"], state["reason"]) == ("stop", "CEILING_NEAR")
+    assert state["ceiling"]["from"] == "cam-b"
+
+
+def test_standalone_uses_the_nearer_of_fresh_sources():
+    lift = FakeLift()
+    a = named_conn(lift, name="cam-a", sensor=True)
+    b = named_conn(lift, name="cam-b", sensor=True)
+    lift.on_ceiling(a, {"status": "MEASURED", "mm": 2000, "age_ms": 50}, 1000)
+    lift.on_ceiling(b, {"status": "MEASURED", "mm": 300, "age_ms": 50}, 1000)
+    ui_up(lift, 1000)
+    state = lift.step(1050)
+    assert (state["dir"], state["reason"]) == ("stop", "CEILING_NEAR")
+    assert state["ceiling"]["from"] == "cam-b"
+
+
+def test_standalone_read_error_stops_with_ceiling_stale():
+    lift = FakeLift()
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, {"status": "READ_ERROR", "age_ms": 50}, 1000)
+    ui_up(lift, 1000)
+    state = lift.step(1050)
+    assert (state["dir"], state["reason"]) == ("stop", "CEILING_STALE")
+    assert state["ceiling"]["standalone"] == "USE"
+
+
+def test_standalone_is_reported_without_an_owner_and_does_not_affect_modules():
+    lift = FakeLift()
+    assert lift.step(1000)["ceiling"]["standalone"] == "NO_SOURCE"
+    lift.settings["ceiling_standalone"] = False
+    assert lift.step(1010)["ceiling"]["standalone"] == "SETTING_OFF"
+    # 上部モジュールからの命令には設定が効かない（いつも天井を使う）
+    cam = named_conn(lift, name="hve-cam", sensor=True)
+    lift.on_ceiling(cam, dict(NEAR), 1100)
+    fk = named_conn(lift, name="fk", sensor=False)
+    go(lift, fk, 1100)
+    assert lift.step(1150)["reason"] == "CEILING_NEAR"
 
 
 # --- goto（§2.2）---

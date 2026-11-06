@@ -40,6 +40,12 @@ const SETTING_MOTOR = {
 /* 設定画面の添え書き（spec §2.1 の「モータの定格電圧 ÷ 電源電圧」） */
 const MOTOR_NOTE = 'モータの定格電圧 ÷ 電源電圧（12 V のモータを 24 V で回すなら 50）';
 
+/* 単体の操作でも天井で止めるか（Spec-ui §2.2）。真偽値 1 つ。欠けていれば true（既定） */
+const SETTING_CEILING = {
+  key: 'ceiling_standalone', name: '単体の操作でも天井で止める',
+  note: '（昇降部の画面・物理ボタンでも、通信できていれば天井で止める）',
+};
+
 /* 停止理由の文言（names §3。**文言は仮**） */
 const REASON_TEXT = {
   CEILING_NEAR: ['ng', '天井が近いため上昇できません'],
@@ -101,10 +107,32 @@ function reasonText(reason) {
   return {cls: 'warn', text: `止まりました（理由が分かりません: ${reason}）`};
 }
 
-/** 天井のバッジの `{色, 文言}`。持ち主がいないとき（`null`）は値なしではなく「—」 */
-function ceilingText(ceiling) {
+/** `ceiling.standalone` の使わない理由（Spec-ui §2.2・protocol-modules §2.5） */
+const STANDALONE_OFF_TEXT = {
+  SETTING_OFF: '天井: 使わない（設定が切）',
+  NO_SOURCE: '天井: 使わない（通信なし）',
+};
+
+/**
+ * 天井のバッジの `{色, 文言}`。持ち主がいないとき（`null`）は値なしではなく「—」。
+ * 単体の操作（持ち主が `ui`・`button`、または持ち主なし）で、天井の値を使っていない
+ * （`ceiling.used` が真でない）ときは、`ceiling.standalone` の理由を出す。
+ * 上部モジュールが持ち主のときは standalone を見ない（上部モジュールからの命令には効かない）。
+ * @param {object|null} ceiling `state.ceiling`
+ * @param {string|null} [owner] `state.owner`
+ */
+function ceilingText(ceiling, owner) {
   if (ceiling === null || ceiling === undefined) return {cls: '', text: '天井 —'};
   const value = ceiling || {};
+  const standaloneOwner = owner === undefined || owner === null || owner === 'ui' || owner === 'button';
+  if (standaloneOwner && value.used !== true && STANDALONE_OFF_TEXT[value.standalone]) {
+    return {cls: 'warn', text: STANDALONE_OFF_TEXT[value.standalone]};
+  }
+  // 値が無い（standalone だけの空の ceiling）ときは持ち主がいないときと同じ「—」
+  if (value.used !== true && (value.status === null || value.status === undefined)
+      && (value.reason === null || value.reason === undefined)) {
+    return {cls: '', text: '天井 —'};
+  }
   if (value.reason === 'OUT_OF_RANGE') return {cls: '', text: '天井 範囲外'};
   if (value.reason === 'CEILING_STALE' || value.status === 'MISSING'
       || value.mm === null || value.mm === undefined) {
@@ -238,6 +266,11 @@ function validateSettingsDraft(draft) {
       key: SETTING_MOTOR.key,
       text: `${SETTING_MOTOR.name}: ${SETTING_MOTOR.abs_low}〜${SETTING_MOTOR.abs_high} ${SETTING_MOTOR.unit} の整数にしてください`,
     });
+  }
+  // 単体の操作でも天井で止めるか（真偽値。欠けていてもよい＝既定 true）
+  const ceilingValue = draft[SETTING_CEILING.key];
+  if (ceilingValue !== undefined && typeof ceilingValue !== 'boolean') {
+    errors.push({key: SETTING_CEILING.key, text: `${SETTING_CEILING.name}: 入か切にしてください`});
   }
   return {ok: errors.length === 0, errors};
 }
@@ -409,7 +442,7 @@ function render() {
   const state = last_state;
   if (!state) return;
 
-  const ceiling = ceilingText(state.ceiling === undefined ? null : state.ceiling);
+  const ceiling = ceilingText(state.ceiling === undefined ? null : state.ceiling, state.owner);
   setBadge($('bCeil'), ceiling.cls, ceiling.text);
   const modules = Array.isArray(state.modules) ? state.modules : [];
   const clientsText = `端末 ${state.ui_clients}・上部 ${modules.length}`;
@@ -498,6 +531,8 @@ function openSettingsOverlay(settings, provisional) {
   }
   const motorCurrent = (settings || {})[SETTING_MOTOR.key];
   settings_draft[SETTING_MOTOR.key] = motorCurrent === undefined ? '' : motorCurrent;
+  // 欠けていれば true（昇降部も欠けた形は true として読む）
+  settings_draft[SETTING_CEILING.key] = (settings || {})[SETTING_CEILING.key] !== false;
 
   const body = document.getElementById('stBody');
   body.innerHTML = SETTING_AXES.map((axis) => {
@@ -512,11 +547,17 @@ function openSettingsOverlay(settings, provisional) {
   }).join('') +
     `<tr data-key="${SETTING_MOTOR.key}"><td class="wrapcell">${SETTING_MOTOR.name}</td>` +
     `<td colspan="3"><input type="number" inputmode="decimal" data-axis="${SETTING_MOTOR.key}"` +
-    ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>`;
+    ` value="${settings_draft[SETTING_MOTOR.key]}"></td><td>${SETTING_MOTOR.unit}</td></tr>` +
+    `<tr data-key="${SETTING_CEILING.key}"><td colspan="5" class="wrapcell">` +
+    `<label><input type="checkbox" data-axis="${SETTING_CEILING.key}"` +
+    `${settings_draft[SETTING_CEILING.key] ? ' checked' : ''}>${SETTING_CEILING.name}` +
+    `<span class="cdesc">${SETTING_CEILING.note}</span></label></td></tr>`;
 
   body.querySelectorAll('input').forEach((input) => {
     input.addEventListener('input', () => {
-      if (input.dataset.axis === SETTING_MOTOR.key) {
+      if (input.dataset.axis === SETTING_CEILING.key) {
+        settings_draft[SETTING_CEILING.key] = input.checked;
+      } else if (input.dataset.axis === SETTING_MOTOR.key) {
         settings_draft[SETTING_MOTOR.key] = input.value;
       } else {
         settings_draft[input.dataset.axis][input.dataset.f] = input.value;
@@ -550,6 +591,7 @@ async function saveSettingsOverlay() {
     };
   }
   payload[SETTING_MOTOR.key] = Number(settings_draft[SETTING_MOTOR.key]);
+  payload[SETTING_CEILING.key] = settings_draft[SETTING_CEILING.key] !== false;
 
   const save = document.getElementById('stSave');
   save.disabled = true;
@@ -630,6 +672,6 @@ if (typeof module === 'object' && module !== null) {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
     formatSpeed, reasonText, ceilingText, heightText, ownerText, buttonNoteText, moveText, stateStale,
     ownerBusyLabel, modulesText, armNoticeText,
-    validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, MOTOR_NOTE,
+    validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, MOTOR_NOTE,
   };
 }
