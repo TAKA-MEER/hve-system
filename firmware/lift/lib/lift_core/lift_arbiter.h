@@ -48,9 +48,13 @@ class LiftArbiter {
  private:
   // WTO: 接続ごとの「前に見た press」。止まったあとに遅れて届いた古い hold が
   // 持ち主にならないようにする（§3.3）。接続は画面が数個なので固定長の表で足りる。
-  static constexpr int kMaxConns = 8;
+  // 画面＋上部モジュール＋物理ボタンが入る数（LIFT_CONN_SLOTS）。閉じた接続の欄は、
+  // 空きが無くなったときに再利用する（接続の番号は増え続けるので、使い捨てると
+  // 何度か繋ぎ直すだけで hold を受け付けられなくなる）
+  static constexpr int kMaxConns = LIFT_CONN_SLOTS;
   struct Seen {
     bool used = false;
+    bool closed = false;  // 接続が閉じた（再利用してよい）
     int id = 0;
     int32_t last_press = INT32_MIN;
   };
