@@ -130,12 +130,47 @@ function moveText(dir, speed, speed_meas, bottom) {
   return bottom ? '停止中・下端' : '停止中';
 }
 
-/** 持ち主の文言（spec §1.6。最後の操作が勝つことを気づけるように出す） */
-function ownerText(owner) {
+/**
+ * 持ち主の文言（spec §1.6。最後の操作が勝つことを気づけるように出す）。
+ * 上部モジュールは名前を決め打ちせず、名乗った `busy_label` → `owner_name` の順に出す。
+ */
+function ownerText(owner, owner_name, busy_label) {
   if (owner === 'ui') return 'この画面';
-  if (owner === 'module') return '上部モジュール';
+  if (owner === 'module') {
+    if (busy_label) return busy_label;
+    if (owner_name) return owner_name;
+    return '上部モジュール';
+  }
   if (owner === 'button') return '物理ボタン（点検）';
+  if (owner === 'arm') return 'アームの制御器';
   return 'なし';
+}
+
+/** 持ち主（`owner_name`）の接続の `busy_label` を `state.modules` から引く。無ければ `null` */
+function ownerBusyLabel(modules, owner_name) {
+  if (!owner_name || !Array.isArray(modules)) return null;
+  const found = modules.find((m) => m && m.name === owner_name);
+  return found ? found.busy_label : null;
+}
+
+/** 繋がっている上部モジュールの一覧（名前・IP・人か自動か・役割・距離計の有無） */
+function modulesText(modules) {
+  if (!Array.isArray(modules) || modules.length === 0) return '未接続';
+  return modules.map((m) => {
+    const item = m || {};
+    const name = item.name || '名前なし';
+    const who = item.operator === 'auto' ? '自動'
+      : item.operator === 'human' ? '人' : '不明';
+    const role = item.role === 'observe' ? '状態のみ' : '操作可';
+    const sensor = item.ceiling_sensor ? '距離計あり' : '距離計なし';
+    const ip = item.ip ? ` ${item.ip}` : '';
+    return `${name}${ip}（${who}・${role}・${sensor}）`;
+  }).join('、');
+}
+
+/** 腕が出ている注意（spec §1.6）。`arm.out` が `true` と知らされたときだけ出す */
+function armNoticeText(arm) {
+  return arm && arm.out === true ? '腕が出ています' : null;
 }
 
 /** 物理ボタンが持ち主の間だけ出す注意（遠隔からは動かせない。Spec-ui §0.3）。出さないときは `null` */
@@ -376,10 +411,8 @@ function render() {
 
   const ceiling = ceilingText(state.ceiling === undefined ? null : state.ceiling);
   setBadge($('bCeil'), ceiling.cls, ceiling.text);
-  const module = state.module || {};
-  const clientsText = module.connected
-    ? `端末 ${state.ui_clients}・上部あり`
-    : `端末 ${state.ui_clients}`;
+  const modules = Array.isArray(state.modules) ? state.modules : [];
+  const clientsText = `端末 ${state.ui_clients}・上部 ${modules.length}`;
   $('bClients').lastElementChild.textContent = clientsText;
   $('bProv').style.display = state.provisional && state.provisional.length ? '' : 'none';
   // 上端の検知が有効なら「上端が未設定」の帯は消す（LIFT_TOP_MM が -1 のときだけ出る。#2a）
@@ -387,13 +420,18 @@ function render() {
 
   $('stHeight').textContent = heightText(state.height_mm, state.height_ok);
   $('stBottom').textContent = state.bottom ? '押されている' : '離れている';
-  $('stOwner').textContent = ownerText(state.owner);
+  $('stOwner').textContent = ownerText(
+    state.owner, state.owner_name, ownerBusyLabel(modules, state.owner_name));
   const note = buttonNoteText(state.owner);
   $('buttonNote').className = note ? 'stopbar show' : 'stopbar';
   $('buttonNote').textContent = note || '';
-  $('stModule').textContent = module.connected
-    ? `接続中（距離計${module.ceiling_sensor ? 'あり' : 'なし'}）` : '未接続';
+  $('stModule').textContent = modulesText(modules);
+  $('stModule').title = modulesText(modules);
   $('stReason').textContent = state.reason || 'NONE';
+
+  const armNote = armNoticeText(state.arm);
+  $('armNote').className = armNote ? 'stopbar show' : 'stopbar';
+  $('armNote').textContent = armNote || '';
 
   const reason = reasonText(state.reason);
   const bar = $('stopbar');
@@ -591,6 +629,7 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
     formatSpeed, reasonText, ceilingText, heightText, ownerText, buttonNoteText, moveText, stateStale,
+    ownerBusyLabel, modulesText, armNoticeText,
     validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, MOTOR_NOTE,
   };
 }

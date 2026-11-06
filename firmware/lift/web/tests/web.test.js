@@ -111,13 +111,51 @@ test('動いている間の表示は目標と測った速さ（§1）', () => {
 
 test('持ち主の文言（最後の操作が勝つことを気づけるように出す。§1.6）', () => {
   assert.equal(app.ownerText('ui'), 'この画面');
-  assert.equal(app.ownerText('module'), '上部モジュール');
+  // 名前を決め打ちせず、名乗った busy_label → owner_name の順に出す
+  assert.equal(app.ownerText('module', 'fk', '測定操作中'), '測定操作中');
+  assert.equal(app.ownerText('module', 'fk', null), 'fk');
+  assert.equal(app.ownerText('module', null, null), '上部モジュール');
   assert.equal(app.ownerText('button'), '物理ボタン（点検）');
+  assert.equal(app.ownerText('arm'), 'アームの制御器');
   assert.equal(app.ownerText(null), 'なし');
   assert.equal(app.buttonNoteText('button'), '物理ボタンで操作中（遠隔からは動かせません）');
   assert.equal(app.buttonNoteText('ui'), null);
   assert.equal(app.buttonNoteText('module'), null);
   assert.equal(app.buttonNoteText(null), null);
+});
+
+test('持ち主の busy_label は state.modules から名前で引く（§1.6）', () => {
+  const modules = [
+    {name: 'hve-cam', operator: 'human', busy_label: null},
+    {name: 'fk', operator: 'auto', busy_label: '測定操作中'},
+  ];
+  assert.equal(app.ownerBusyLabel(modules, 'fk'), '測定操作中');
+  assert.equal(app.ownerBusyLabel(modules, 'hve-cam'), null);
+  assert.equal(app.ownerBusyLabel(modules, 'ss'), null);
+  assert.equal(app.ownerBusyLabel(null, 'fk'), null);
+});
+
+test('繋がっている上部モジュールの一覧（名前・IP・人か自動か）', () => {
+  assert.equal(app.modulesText([]), '未接続');
+  assert.equal(app.modulesText(null), '未接続');
+  const line = app.modulesText([
+    {name: 'hve-cam', ip: '192.168.5.23', operator: 'human', role: 'control', ceiling_sensor: true},
+    {name: 'fk', ip: '192.168.5.10', operator: 'auto', role: 'control', ceiling_sensor: false},
+    {name: 'ss', ip: null, operator: 'auto', role: 'observe', ceiling_sensor: false},
+  ]);
+  for (const want of ['hve-cam', '192.168.5.23', 'fk', '192.168.5.10', 'ss', '人', '自動', '状態のみ', '距離計あり']) {
+    assert.ok(line.includes(want), `${want} が一覧に無い（${line}）`);
+  }
+  // 1 つだけにしない（3 つ並べる）
+  assert.equal(line.split('、').length, 3);
+});
+
+test('腕が出ていますは arm.out が true のときだけ出す（§1.6）', () => {
+  assert.equal(app.armNoticeText({out: true}), '腕が出ています');
+  assert.equal(app.armNoticeText({out: false}), null);
+  assert.equal(app.armNoticeText({out: null}), null);
+  assert.equal(app.armNoticeText({}), null);
+  assert.equal(app.armNoticeText(null), null);
 });
 
 test('state が ui_state_timeout_ms 届かないとき「接続切れ」', () => {
