@@ -8,13 +8,20 @@
 （同 §3.1〜§3.3・§4.1 の表。定数は DetailedDesign-names.md §5.1）:
 
 - `/ws/ui` で `hello` を受けたらその接続を閉じる
+- `hello` の `name`・`role`・`operator`・`ceiling_sensor`・`busy_label` を読む。
+  `role: observe` の接続からは命令を受けない。同じ名前で繋ぎ直したら古い接続を閉じる
 - `ceiling_sensor` は接続ごとに 1 度だけ受け付ける。欠け・非真偽値・
-  `hello` 未受信の `/ws/module` は「持つ」とみなす
+  `hello` 未受信の `/ws/module` は「持つ」とみなす（自分の命令を縛る側）
 - 天井の古さは `age_ms` ＋受け取ってからの経過。`TOO_NEAR` で上昇を止める
-- 持ち主でない接続の古い `press` の `hold` は無視する。止まったあとは
+- **距離計を持たない上部モジュールの上昇は、`hello` で `ceiling_sensor: true` を
+  明示した `role: control` の接続が送る最新の天井で判定する。無い・古い・
+  `READ_ERROR` は `CEILING_STALE`**（protocol-modules §2.3・§2.4）
+- 持ち主でない接続の古い `press` の `hold`・`goto` は無視する。止まったあとは
   より新しい `press` でなければ持ち主になれない
 - 持ち主の接続が閉じたらその場で止める（`OWNER_GONE`）
-- 型の違う `ceiling` は `hold` を捨てず `MISSING` として受け取る
+- 型の違う `ceiling` は `hold`・`goto` を捨てず `MISSING` として受け取る
+- `goto` は目標の高さまで動かし、着いたら `state.goto.status` を `ARRIVED` にする。
+  着いたあと同じ `press` では動き出さない。安全の判定は `hold` と同じ
 
 `POST /api/fake` は試験用の裏口（names §4）。`height_mm`・`bottom`・
 `height_ok`・`stall` と、持ち主がいないときに表示する天井（`ceiling`）を変えられる。
@@ -28,6 +35,7 @@ import argparse
 import asyncio
 import json
 import pathlib
+import re
 import time
 
 from aiohttp import WSMsgType, web
@@ -44,9 +52,11 @@ LIFT_STALL_MS = 500  # 仮（spec #4d。動き出しの遅れより長く）
 LIFT_STATE_PERIOD_MS = 100  # 仮
 LIFT_MOTOR_MAX_PCT_DEFAULT = 50  # モータへの出力の上限の既定値 [%]（Spec-ui §2.1）
 LIFT_MOTOR_MAX_PCT_MIN = 10  # 同・下限（上限は LIFT_DUTY_ABS_MAX_PCT）
+LIFT_GOTO_TOL_MM = 10  # 仮（目標に着いたとみなす幅。spec H-M6）
+LIFT_MODULE_MAX_CONN = 6  # 仮（/ws/module の上限。超えた新しい接続は閉じる）
 LIFT_WS_UI_PATH = "/ws/ui"
 LIFT_WS_MODULE_PATH = "/ws/module"
-FW = "fake-0.2.0"
+FW = "fake-0.3.0"
 PROVISIONAL = ["CEILING_MARGIN_MM", "CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"]
 
 DEFAULT_SETTINGS = {
@@ -56,6 +66,9 @@ DEFAULT_SETTINGS = {
 }
 
 CEILING_KNOWN = ("MEASURED", "TOO_NEAR", "NO_ECHO", "READ_ERROR")
+
+#: `hello` の `name` の形（英小文字・数字・`-` の 1〜16 文字）
+NAME_RE = re.compile(r"^[a-z0-9-]{1,16}$")
 
 
 def now_ms() -> int:
@@ -164,36 +177,95 @@ def decode_hold(body: dict, received_at: int):
 
 
 def decode_hello(body: dict):
-    """→ (ok, has_sensor, name)。読めない hello は「持つ」として扱う（protocol §2.1）。"""
+    """→ (ok, info)。読めない hello は「持つ」既定として扱う（protocol-modules §1.1）。
+
+    info は name / role / operator / has_sensor / explicit_sensor /
+    busy_label / fw。`name` が形に合わないときは空（名前無し）にする。
+    """
     if not isinstance(body, dict) or body.get("t") != "hello":
-        return False, True, ""
+        return False, default_hello()
+    raw_name = body.get("name")
+    name = raw_name if isinstance(raw_name, str) and NAME_RE.fullmatch(raw_name) else ""
+
+    raw_role = body.get("role")
+    if raw_role is None:
+        role = "control"
+    else:
+        role = raw_role if raw_role in ("control", "observe") else "observe"
+
+    operator = "auto" if body.get("operator") == "auto" else "human"
+
     sensor = body.get("ceiling_sensor")
     has_sensor = sensor if isinstance(sensor, bool) else True
-    name = body.get("name") if isinstance(body.get("name"), str) else ""
-    return True, has_sensor, name
+    explicit_sensor = sensor is True
+
+    raw_label = body.get("busy_label")
+    busy_label = None
+    if isinstance(raw_label, str):
+        # UTF-8 で 1〜48 バイト。超えた・空は無し（切り詰めない）
+        if 1 <= len(raw_label.encode("utf-8")) <= 48:
+            busy_label = raw_label
+
+    fw = body.get("fw") if isinstance(body.get("fw"), str) else None
+    return True, {"name": name, "role": role, "operator": operator,
+                  "has_sensor": has_sensor, "explicit_sensor": explicit_sensor,
+                  "busy_label": busy_label, "fw": fw}
+
+
+def default_hello() -> dict:
+    return {"name": "", "role": "control", "operator": "human",
+            "has_sensor": True, "explicit_sensor": False,
+            "busy_label": None, "fw": None}
+
+
+def decode_goto(body: dict, received_at: int):
+    """→ goto の辞書。読めない goto は None（捨てる。protocol-modules §2.2）。
+
+    `target_mm` の範囲の判定は受け付けのときに行い、ここでは読める形かだけ見る。
+    """
+    if not isinstance(body, dict) or body.get("t") != "goto":
+        return None
+    press, target, speed = body.get("press"), body.get("target_mm"), body.get("speed")
+    if (not isinstance(press, int) or isinstance(press, bool)
+            or not isinstance(target, int) or isinstance(target, bool)
+            or not isinstance(speed, int) or isinstance(speed, bool)):
+        return None
+    has_ceiling, rep = parse_ceiling(body.get("ceiling"))
+    rep.received_at_ms = received_at
+    return {"press": press, "target_mm": target, "speed": clamp_speed(speed),
+            "has_ceiling": has_ceiling, "ceiling": rep}
 
 
 class FakeLift:
-    """持ち主・判定・状態を 1 か所で持つ（lift_core/LiftController の真似）。"""
+    """持ち主・判定・状態を 1 か所で持つ（lift_core/LiftController の真似）。
+
+    複数の上部モジュールの接続を持つ（protocol-modules §1〜§4）。
+    """
 
     def __init__(self) -> None:
         self.settings = json.loads(json.dumps(DEFAULT_SETTINGS))
         self.using_defaults = False
         self.height_mm = 800
         self.height_ok = True
+        self.homed = True
         self.bottom = False
         self.stall = False  # 真の間は動かそうとすると ENCODER_STALL で止まる（POST /api/fake）
+        self.arm: dict = {"attached": None, "link": None, "confirm": None,
+                          "out": None, "drum": None}  # 分からないときは null（POST /api/fake で変える）
         self.pinned_ceiling: CeilingReport | None = None
         self.seq = 0
-        self._conns: dict[int, dict] = {}  # id → {kind, hello_seen, has_sensor, name}
+        # id → {kind, hello_seen, has_sensor, explicit_sensor, name, role, operator,
+        #       busy_label, fw, ip, ceiling}
+        self._conns: dict[int, dict] = {}
         self._next_id = 1
         self._seen: dict[int, int] = {}  # id → 前に見た press
         self._owner: tuple[int, str, int] | None = None  # (id, kind, press)
         self._owner_at = 0
         self._owner_cmd: dict | None = None
-        self._owner_sensor = False
         self._idle_reason = "CMD_TIMEOUT"
-        self._last_module_ceiling: CeilingReport | None = None
+        self._goto: dict | None = None  # 最後の goto（by・press・target_mm・status・reason）
+        self._goto_live = False  # 持ち主がいま goto を実行しているか
+        self.replaced: list[int] = []  # 同じ名前で置き換えられた接続（呼び出し側が閉じる）
         self._run_ms = 0  # ENCODER_STALL の真似に使う（回していた時間）
         self._run_travel_um = 0  # MAX_RUN 用: 目標の速さで進んだとみなした距離 [µm]
         self._run_speed = 0
@@ -205,27 +277,56 @@ class FakeLift:
 
     # --- 接続の管理 ---
 
-    def add_conn(self, kind: str) -> int:
+    def add_conn(self, kind: str, ip: str | None = None) -> int:
         conn_id = self._next_id
         self._next_id += 1
-        self._conns[conn_id] = {"kind": kind, "hello_seen": False,
-                                "has_sensor": True, "name": ""}
+        self._conns[conn_id] = {"kind": kind, "hello_seen": False, "ip": ip,
+                                "ceiling": None, **default_hello()}
         return conn_id
+
+    def module_count(self) -> int:
+        return sum(1 for c in self._conns.values() if c["kind"] == "module")
+
+    def name_of(self, conn_id: int) -> str:
+        """表示・出どころに使う名前。名前無しは `anon-<接続番号>`（protocol-modules §1.1）。"""
+        info = self._conns.get(conn_id)
+        if info is None:
+            return ""
+        return info["name"] or f"anon-{conn_id}"
+
+    def _lose_owner(self, reason: str) -> None:
+        self._owner = None
+        self._owner_cmd = None
+        self._idle_reason = reason
+        self._end_goto(reason)
+
+    def _end_goto(self, reason: str) -> None:
+        """実行中の goto が着く前に終わった（NOT_ARRIVED と止めた理由）。"""
+        if self._goto_live and self._goto is not None:
+            self._goto["status"] = "NOT_ARRIVED"
+            self._goto["reason"] = reason
+        self._goto_live = False
 
     def drop_conn(self, conn_id: int) -> None:
         self._conns.pop(conn_id, None)
         if self._owner and self._owner[0] == conn_id:
-            self._owner = None
-            self._owner_cmd = None
-            self._idle_reason = "OWNER_GONE"
+            self._lose_owner("OWNER_GONE")
 
     def sensor_of(self, conn_id: int, kind: str) -> bool:
         if kind == "ui":
             return False
         info = self._conns.get(conn_id)
         if info is None:
-            return True  # hello 未受信は持つとみなす
+            return True  # 接続が無い（試験用）は持つとみなす
         return info["has_sensor"]
+
+    def _is_source(self, info: dict) -> bool:
+        """天井の値の出どころになれるか（protocol-modules §2.3）。
+
+        `hello` で `ceiling_sensor: true` を明示した `role: control` の接続だけ。
+        """
+        return (info["kind"] == "module" and info["hello_seen"]
+                and info["explicit_sensor"] and info["role"] == "control")
 
     def on_hello(self, conn_id: int, kind: str, body: dict) -> bool:
         """False なら呼び出し側は接続を閉じること（/ws/ui の hello）。"""
@@ -234,54 +335,141 @@ class FakeLift:
         info = self._conns.get(conn_id)
         if info is None:
             return True
-        ok, has_sensor, name = decode_hello(body)
-        if not info["hello_seen"]:
+        _ok, hello = decode_hello(body)
+        if not info["hello_seen"]:  # 2 度目以降の hello は無視する
             info["hello_seen"] = True
-            info["has_sensor"] = has_sensor
-            info["name"] = name
+            info.update(hello)
+            if info["name"]:
+                # 同じ名前の別の接続があれば古い方を閉じる（§1.2）
+                for other_id, other in list(self._conns.items()):
+                    if (other_id != conn_id and other["kind"] == "module"
+                            and other["hello_seen"] and other["name"] == info["name"]):
+                        self.replaced.append(other_id)
+                        self.drop_conn(other_id)
         return True
+
+    def _may_command(self, conn_id: int) -> bool:
+        info = self._conns.get(conn_id)
+        return info is None or info["role"] != "observe"  # observe からの命令は捨てる
 
     # --- 持ち主（LiftArbiter と同じ規則）---
 
-    def on_hold(self, conn_id: int, kind: str, hold: dict, now: int) -> None:
-        press = hold["press"]
+    def _claim(self, conn_id: int, kind: str, press: int, now: int) -> bool:
+        """`hold`・`goto` 共通の持ち主の規則。受け付けたら True。"""
+        if not self._may_command(conn_id):
+            return False
         last = self._seen.get(conn_id)
         if last is not None and press < last:
-            return
+            return False
         if last is None or press > last:
             self._seen[conn_id] = press
+            if self._owner is not None:
+                self._end_goto("PREEMPTED")  # 取って代わられた
             self._owner = (conn_id, kind, press)
             self._owner_at = now
-        elif self._owner and self._owner[0] == conn_id and self._owner[2] == press:
+            return True
+        if self._owner and self._owner[0] == conn_id and self._owner[2] == press:
             self._owner_at = now
-        else:
+            return True
+        return False
+
+    def _remember_ceiling(self, conn_id: int, report: CeilingReport) -> None:
+        info = self._conns.get(conn_id)
+        if info is not None and self._is_source(info):
+            info["ceiling"] = report
+
+    def on_hold(self, conn_id: int, kind: str, hold: dict, now: int) -> None:
+        if not self._claim(conn_id, kind, hold["press"], now):
             return
-        sensor = self.sensor_of(conn_id, kind)
-        self._owner_cmd = {"dir": hold["dir"], "speed": hold["speed"],
-                           "sensor": sensor, "ceiling": hold["ceiling"],
-                           "has_ceiling": hold["has_ceiling"], "at": now}
-        if not hold["has_ceiling"]:
-            missing = CeilingReport("MISSING", 0, 0, now)
-            self._owner_cmd["ceiling"] = missing
-        self._owner_sensor = sensor
-        if kind == "module":
-            self._last_module_ceiling = self._owner_cmd["ceiling"]
+        if self._goto_live and self._owner_cmd and self._owner_cmd.get("mode") == "goto":
+            self._end_goto("CMD_STOP")  # 同じ持ち主が goto から hold に替えた
+        ceiling = hold["ceiling"] if hold["has_ceiling"] else CeilingReport("MISSING", 0, 0, now)
+        self._owner_cmd = {"mode": "hold", "dir": hold["dir"], "speed": hold["speed"],
+                           "ceiling": ceiling, "at": now}
+        self._remember_ceiling(conn_id, ceiling)
+
+    def on_goto(self, conn_id: int, kind: str, goto: dict, now: int) -> None:
+        """目標の高さへの移動（protocol-modules §2.2）。持ち主の規則は hold と同じ。"""
+        if not self._claim(conn_id, kind, goto["press"], now):
+            return
+        ceiling = goto["ceiling"] if goto["has_ceiling"] else CeilingReport("MISSING", 0, 0, now)
+        self._remember_ceiling(conn_id, ceiling)
+        is_new = not (self._goto_live and self._goto is not None
+                      and self._goto["press"] == goto["press"]
+                      and self._goto["by"] == self.name_of(conn_id))
+        block = None
+        if not self.height_ok:
+            block = "HEIGHT_UNKNOWN"
+        elif goto["target_mm"] < 0 or goto["target_mm"] > LIFT_TOP_MM:
+            block = "TARGET_RANGE"
+        self._owner_cmd = {"mode": "goto", "dir": "stop", "speed": goto["speed"],
+                           "target_mm": goto["target_mm"], "block": block,
+                           "ceiling": ceiling, "at": now}
+        if is_new:
+            self._goto = {"by": self.name_of(conn_id), "press": goto["press"],
+                          "target_mm": goto["target_mm"],
+                          "status": "NOT_ARRIVED" if block else "MOVING",
+                          "reason": block or "NONE"}
+            self._goto_live = block is None
 
     def on_release(self, conn_id: int, press: int) -> None:
+        if not self._may_command(conn_id):
+            return
         if self._owner and self._owner[0] == conn_id and self._owner[2] == press:
-            self._owner = None
-            self._owner_cmd = None
-            self._idle_reason = "CMD_STOP"
+            self._lose_owner("CMD_STOP")
+
+    def on_ceiling(self, conn_id: int, body: dict, now: int) -> None:
+        """昇降を命じていない間も届く天井の値（protocol-modules §2.3）。
+
+        出どころになれない接続（`ceiling_sensor: true` を明示した `control` でない）の
+        値は、ほかの接続の判定に使わない（捨てる）。
+        """
+        info = self._conns.get(conn_id)
+        if info is None or not self._is_source(info):
+            return
+        _has, rep = parse_ceiling(body)  # 読めない値は MISSING（= 止める側）
+        rep.received_at_ms = now
+        info["ceiling"] = rep
 
     def tick(self, now: int) -> None:
         if self._owner and now - self._owner_at > LIFT_CMD_TIMEOUT_MS:
-            self._owner = None
-            self._owner_cmd = None
-            self._idle_reason = "CMD_TIMEOUT"
+            self._lose_owner("CMD_TIMEOUT")
 
     @staticmethod
     def _max_run_um() -> int:
         return LIFT_TOP_MM * 10 * LIFT_MAX_RUN_PCT
+
+    def _source_ceiling(self, now: int) -> tuple[bool, str, CeilingReport | None, str | None]:
+        """距離計を持たない上部モジュールの上昇に使う天井（§2.4）。
+
+        → (ok, reason, 使った値, 出どころの名前)。出どころの値が無い・古いときは
+        `CEILING_STALE`。2 台以上なら厳しい側（止める方）を使う。
+        """
+        results = []
+        for conn_id, info in self._conns.items():
+            rep = info["ceiling"]
+            if rep is None or not self._is_source(info):
+                continue
+            ok, reason = ceiling_check(rep, now, True)
+            results.append((ok, reason, rep, self.name_of(conn_id)))
+        if not results:
+            return False, "CEILING_STALE", None, None
+        for item in results:
+            if not item[0]:
+                return item
+        return results[0]
+
+    def _owner_ceiling(self, now: int) -> tuple[bool, str, CeilingReport | None, str | None]:
+        """持ち主の命令に使う天井。→ (ok, reason, 値, 出どころ)。使わないときは値が None。"""
+        if not self._owner or not self._owner_cmd or self._owner[1] != "module":
+            return True, "NONE", None, None  # 画面・物理ボタンは天井を使わない（WP-LIFTUI-04 まで）
+        conn_id = self._owner[0]
+        info = self._conns.get(conn_id)
+        if info is None or info["has_sensor"]:
+            rep = self._owner_cmd["ceiling"]
+            ok, reason = ceiling_check(rep, now, True)
+            return ok, reason, rep, self.name_of(conn_id)
+        return self._source_ceiling(now)
 
     # --- 判定（lift_decide の表の順）---
 
@@ -293,14 +481,41 @@ class FakeLift:
             # 直前の step で決めた目標の速さ [mm/s] × 経過 [ms] = µm（測った速さは使わない）
             self._run_travel_um = min(self._max_run_um() + 1,
                                       self._run_travel_um + self._run_speed * elapsed)
-        cmd_dir = self._owner_cmd["dir"] if self._owner_cmd else "stop"
+        cmd = self._owner_cmd
+        goto_block = None
+        arrived = False
+        if cmd is not None and cmd["mode"] == "goto":
+            diff = cmd["target_mm"] - float(self.height_mm)
+            if cmd["block"]:
+                cmd_dir, goto_block = "stop", cmd["block"]
+            elif abs(diff) <= LIFT_GOTO_TOL_MM:
+                cmd_dir, arrived = "stop", True
+            else:
+                cmd_dir = "up" if diff > 0 else "down"
+        else:
+            cmd_dir = cmd["dir"] if cmd else "stop"
         if cmd_dir == "stop" or cmd_dir != self._run_dir:
             self._run_ms = 0
             self._run_travel_um = 0
         self._run_dir = cmd_dir
 
-        if not self._owner or not self._owner_cmd:
+        sel_ok, sel_reason, sel_rep, sel_from = self._owner_ceiling(now)
+        if arrived and self._owner is not None:
+            # 着いたら止めて持ち主を離す。同じ press の goto では動き出さない（§2.2）
+            if self._goto is not None:
+                self._goto["status"], self._goto["reason"] = "ARRIVED", "NONE"
+            self._goto_live = False
+            self._owner = None
+            self._owner_cmd = None
+            self._idle_reason = "ARRIVED"
+            cmd = None
+            cmd_dir = "stop"
+        if not self._owner or not cmd:
             out_dir, out_duty, reason = "stop", 0, self._idle_reason
+            ok, ceiling_reason = True, "NONE"
+            cmd_speed = 0
+        elif goto_block:
+            out_dir, out_duty, reason = "stop", 0, goto_block
             ok, ceiling_reason = True, "NONE"
             cmd_speed = 0
         elif cmd_dir == "stop":
@@ -308,9 +523,8 @@ class FakeLift:
             ok, ceiling_reason = True, "NONE"
             cmd_speed = 0
         else:
-            cmd = self._owner_cmd
             cmd_speed = clamp_speed(cmd["speed"])
-            ok, ceiling_reason = ceiling_check(cmd["ceiling"], now, cmd["sensor"])
+            ok, ceiling_reason = sel_ok, sel_reason
             if cmd_dir == "up" and not ok:
                 out_dir, out_duty, reason = "stop", 0, ceiling_reason
             elif cmd_dir == "down" and self.bottom:
@@ -339,40 +553,65 @@ class FakeLift:
             # W-1 の間は昇降部は上昇を止めないので、偽物も止めない。表示だけ
             reason = "HEIGHT_UNKNOWN"
 
+        if self._goto_live and self._goto is not None:
+            # 実行中の goto: 動いている間 MOVING、安全の判定で止まっている間は NOT_ARRIVED と理由
+            stopped_reason = reason if reason != "NONE" else None
+            self._goto["status"] = "NOT_ARRIVED" if stopped_reason else "MOVING"
+            self._goto["reason"] = stopped_reason or "NONE"
+
         ui_clients = sum(1 for c in self._conns.values() if c["kind"] == "ui")
-        module = next((c for c in self._conns.values()
-                       if c["kind"] == "module" and c["hello_seen"]), None)
-        if self._owner_cmd:
-            rep = self._owner_cmd["ceiling"]
-            shown = {"used": self._owner is not None and self._owner_sensor,
-                     "status": rep.status,
+        owner_conn = self._owner[0] if self._owner else None
+        owner_kind = self._owner[1] if self._owner else None
+        owner_info = self._conns.get(owner_conn) if owner_conn is not None else None
+        if owner_kind == "module":
+            owner_name = self.name_of(owner_conn)
+            owner_operator = owner_info["operator"] if owner_info else "human"
+        else:
+            owner_name = None
+            owner_operator = "human" if owner_kind in ("ui", "button") else None
+        if self._owner_cmd and sel_rep is not None:
+            rep = sel_rep
+            shown = {"used": True, "from": sel_from, "status": rep.status,
                      "mm": rep.mm if rep.status == "MEASURED" else None,
                      "age_ms": rep.age_ms + max(0, now - rep.received_at_ms),
                      "ok": ok, "reason": ceiling_reason}
-            present = True
-        elif self._last_module_ceiling or self.pinned_ceiling:
-            rep = self._last_module_ceiling or self.pinned_ceiling
-            assert rep is not None
-            ok2, reason2 = ceiling_check(rep, now, True)
-            shown = {"used": False, "status": rep.status,
-                     "mm": rep.mm if rep.status == "MEASURED" else None,
-                     "age_ms": rep.age_ms + max(0, now - rep.received_at_ms),
-                     "ok": ok2, "reason": reason2}
-            present = True
+        elif self._owner_cmd:
+            shown = None  # 距離計を使わない持ち主（画面・物理ボタン・出どころ無しの上部モジュール）
         else:
-            shown, present = None, False
+            shown = None
+        if shown is None and self._owner_cmd is None:
+            # 持ち主がいないとき: 出どころの最新の値（無ければ試験用の固定値）を参考に出す
+            fresh = [(info["ceiling"], self.name_of(cid)) for cid, info in self._conns.items()
+                     if info["ceiling"] is not None and self._is_source(info)]
+            if fresh:
+                rep, src = max(fresh, key=lambda f: f[0].received_at_ms)
+            elif self.pinned_ceiling:
+                rep, src = self.pinned_ceiling, None
+            else:
+                rep, src = None, None
+            if rep is not None:
+                ok2, reason2 = ceiling_check(rep, now, True)
+                shown = {"used": False, "from": src, "status": rep.status,
+                         "mm": rep.mm if rep.status == "MEASURED" else None,
+                         "age_ms": rep.age_ms + max(0, now - rep.received_at_ms),
+                         "ok": ok2, "reason": reason2}
+        modules = [{"name": self.name_of(cid), "role": c["role"], "operator": c["operator"],
+                    "ceiling_sensor": c["has_sensor"], "busy_label": c["busy_label"],
+                    "ip": c["ip"], "fw": c["fw"]}
+                   for cid, c in self._conns.items() if c["kind"] == "module"]
         self.state = {
             "t": "state", "seq": self.seq, "dir": out_dir, "duty": out_duty,
             "speed": cmd_speed if self._owner_cmd else 0,
             "speed_meas": cmd_speed if moving else 0,
             "reason": reason, "bottom": self.bottom,
             "height_mm": int(round(float(self.height_mm))), "height_ok": self.height_ok,
+            "homed": self.homed,
             "top_detect": False, "ceiling": shown,
-            "owner": self._owner[1] if self._owner else None,
+            "owner": owner_kind, "owner_name": owner_name, "owner_operator": owner_operator,
             "ui_clients": ui_clients,
-            "module": {"connected": module is not None,
-                       "ceiling_sensor": module["has_sensor"] if module else None,
-                       "ip": None, "name": module["name"] if module else None},
+            "modules": modules,
+            "goto": dict(self._goto) if self._goto else None,
+            "arm": dict(self.arm),
             "provisional": list(PROVISIONAL), "cmd_age_ms": 0, "fw": FW,
         }
         if self._owner_cmd:
@@ -384,6 +623,7 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
     app = web.Application()
     app["lift"] = lift
     app["sockets"] = set()
+    app["conn_ws"] = {}
 
     async def index(_request: web.Request) -> web.Response:
         return web.FileResponse(web_dir / "index.html")
@@ -439,6 +679,14 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
             lift.pinned_ceiling = rep
         elif "ceiling" in body:
             lift.pinned_ceiling = None
+        if "homed" in body:
+            lift.homed = bool(body["homed"])
+        arm = body.get("arm")
+        if isinstance(arm, dict):
+            # 腕の状態の試験用の値。null・真偽値・文字列だけ受ける
+            for key in lift.arm:
+                if key in arm and (arm[key] is None or isinstance(arm[key], (bool, str))):
+                    lift.arm[key] = arm[key]
         return web.json_response({"ok": True})
 
     async def websocket(request: web.Request) -> web.WebSocketResponse:
@@ -446,8 +694,13 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
         kind = "ui" if request.path == LIFT_WS_UI_PATH else "module"
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        conn_id = lift.add_conn(kind)
+        if kind == "module" and lift.module_count() >= LIFT_MODULE_MAX_CONN:
+            # 超えた新しい接続は、その場で閉じる（古い方は閉じない。protocol-modules §1.3）
+            await ws.close()
+            return ws
+        conn_id = lift.add_conn(kind, request.remote)
         request.app["sockets"].add(ws)
+        request.app["conn_ws"][conn_id] = ws
         try:
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
@@ -463,10 +716,20 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
                     if not lift.on_hello(conn_id, kind, body):
                         await ws.close()
                         break
+                    while lift.replaced:  # 同じ名前の古い接続を閉じる（§1.2）
+                        old = request.app["conn_ws"].pop(lift.replaced.pop(), None)
+                        if old is not None:
+                            await old.close()
                 elif t == "hold":
                     hold = decode_hold(body, now_ms())
                     if hold is not None:
                         lift.on_hold(conn_id, kind, hold, now_ms())
+                elif t == "goto":
+                    goto = decode_goto(body, now_ms())
+                    if goto is not None:
+                        lift.on_goto(conn_id, kind, goto, now_ms())
+                elif t == "ceiling" and kind == "module":
+                    lift.on_ceiling(conn_id, body, now_ms())
                 elif t == "release":
                     press = body.get("press")
                     if isinstance(press, int) and not isinstance(press, bool):
@@ -474,6 +737,7 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
                 # 知らない t・読めない release は捨てる
         finally:
             request.app["sockets"].discard(ws)
+            request.app["conn_ws"].pop(conn_id, None)
             lift.drop_conn(conn_id)
         return ws
 
