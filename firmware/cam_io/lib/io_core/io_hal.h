@@ -1,7 +1,8 @@
 // ヨー・ピッチのハードウェアの抽象。Arduino.h は include しない（DetailedDesign-names.md §1）。
 // 実物は firmware/cam_io/src/hal_uno（WP-IO-02）。試験では偽物に差し替える。
 // 使い分けは DetailedDesign.md §4.5・DetailedDesign-hardware.md §2.4:
-// 止めている間・指令が途絶えたときはコイルの電流を切る。サーボのパルスは止めない。
+// 止めている間・指令が途絶えたときはコイルの電流を切る。
+// サーボのパルスは止めない（ただし R 行で力を抜くときだけ servo_off で止める）。
 #pragma once
 
 // avr-gcc には C++ 標準ライブラリのヘッダが無いので C のヘッダだけを使う。
@@ -20,4 +21,8 @@ class IoHal {
 
   // ピッチの目標角 [0.1°] のパルスを出す。指令が途絶えても呼び続け、その角度で保つ
   virtual void servo_set_ddeg(int pitch_ddeg) = 0;
+
+  // ピッチのパルスを止める（外力を抜く。R 行。DetailedDesign-power.md §2）。
+  // 次の servo_set_ddeg でまた出す
+  virtual void servo_off() = 0;
 };

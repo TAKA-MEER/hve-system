@@ -20,6 +20,12 @@ class FakeIoHal : public IoHal {
   void servo_set_ddeg(int pitch_ddeg) override {
     pitch_ddeg_ = pitch_ddeg;
     servo_calls_++;
+    servo_on_ = true;
+  }
+
+  void servo_off() override {
+    servo_off_calls_++;
+    servo_on_ = false;
   }
 
   int32_t yaw_hsps() const { return yaw_hsps_; }
@@ -27,10 +33,14 @@ class FakeIoHal : public IoHal {
   bool yaw_moving() const { return coils_on_ && yaw_hsps_ != 0; }
   int pitch_ddeg() const { return pitch_ddeg_; }
   int servo_calls() const { return servo_calls_; }
+  int servo_off_calls() const { return servo_off_calls_; }
+  bool servo_on() const { return servo_on_; }
 
  private:
   int32_t yaw_hsps_ = 0;
   bool coils_on_ = false;
   int pitch_ddeg_ = PITCH_INITIAL_DEG * 10;
   int servo_calls_ = 0;
+  int servo_off_calls_ = 0;
+  bool servo_on_ = false;
 };

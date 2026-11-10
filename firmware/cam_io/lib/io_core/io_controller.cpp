@@ -35,16 +35,36 @@ int32_t clamp_yaw_hsps(int32_t yaw_hsps) {
 }  // namespace
 
 IoController::IoController(IoHal* hal)
-    : hal_(hal), has_cmd_(false), pitch_ddeg_(PITCH_INITIAL_DEG * 10), yaw_hsps_(0), cmd_at_ms_(0) {}
+    : hal_(hal),
+      has_cmd_(false),
+      pitch_ddeg_(PITCH_INITIAL_DEG * 10),
+      yaw_hsps_(0),
+      cmd_at_ms_(0),
+      relaxed_(false) {}
 
 void IoController::on_command(const IoCmd& cmd, uint32_t now_ms) {
   pitch_ddeg_ = clamp_pitch_ddeg(cmd.pitch_ddeg);
   yaw_hsps_ = clamp_yaw_hsps(cmd.yaw_hsps);
   has_cmd_ = true;
   cmd_at_ms_ = now_ms;
+  relaxed_ = false;  // M 行で力を入れる
+}
+
+void IoController::on_relax(uint16_t /*seq*/, uint32_t now_ms) {
+  yaw_hsps_ = 0;  // ヨーは止める
+  has_cmd_ = true;
+  cmd_at_ms_ = now_ms;  // 生存確認も兼ねる
+  relaxed_ = true;
 }
 
 void IoController::tick(uint32_t now_ms) {
+  if (relaxed_) {
+    // 力を抜いた状態。途絶えても戻さない（次の M 行で解ける）。
+    // パルスを止めるのでピッチは力が出ず、ヨーも止めてコイルを切る
+    hal_->yaw_coils_off();
+    hal_->servo_off();
+    return;
+  }
   // ちょうど IO_CMD_TIMEOUT_MS までは動かしてよい（「超」で止める）
   const bool fresh =
       has_cmd_ && elapsed_ms(now_ms, cmd_at_ms_) <= static_cast<int32_t>(IO_CMD_TIMEOUT_MS);
