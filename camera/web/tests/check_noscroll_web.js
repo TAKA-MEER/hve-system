@@ -26,6 +26,9 @@ const states = [
   {name: '設定画面（昇降部が ceiling_standalone に対応していない）', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true, legacy_lift: true},
   {name: '設定画面（昇降部が ceiling_margin_mm に対応していない）', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, settings: true, legacy_margin: true},
   {name: '静止画の重ね表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, snapshot: true},
+  // 省電力の重ね表示（WP-UI-05）。`state.power` は WP-CAM-13 が入れるので、
+  // ここでは画面の state を直接 saving にして見た目だけを作る
+  {name: '省電力中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, power: true},
   // 別の上部モジュールが持ち主（長い busy_label）＋腕が出ている（WP-CAM-10）
   {name: '別の上部モジュール操作中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: true, other_owner: {name: 'ss', busy_label: '画像認識で操作中（長い表示の確認）'}}},
 ];
@@ -113,6 +116,13 @@ const MEASURE = () => {
       await page.goto(base + '/');
       // state が来て、表示が落ち着くまで待つ
       await page.waitForFunction(() => document.getElementById('bClients').textContent.trim() !== '端末 —', null, {timeout: 5000});
+      if (state.power) {
+        // `state.power` は WP-CAM-13 が入れる。ここでは画面の state を直接 saving にして重ね表示を出す
+        await page.evaluate(() => {
+          last_state = Object.assign({}, last_state, {power: {mode: 'saving'}});
+          render();
+        });
+      }
       if (state.settings) {
         await page.click('#openSettings');
         await page.waitForSelector('#settings.show');

@@ -55,6 +55,9 @@ const REASON_TEXT = {
 /* 上端の閾値が未設定のあいだの表示（spec Spec-safety.md §2 #2a。昇降部の画面と同じ文言） */
 const TOP_DETECT_OFF_TEXT = '上端が未設定（開発中）';
 
+/* 省電力中に映像の上へ重ねる文言（spec Spec-power.md §2・DetailedDesign-power.md §6） */
+const POWER_SAVING_TEXT = '省電力中です。操作すると戻ります。機体の無線が無くなると電源を切ります';
+
 /* --- DOM に触れない部分（Node の試験で見る） --- */
 
 /** 送る `hold` の JSON（protocol §2.1） */
@@ -70,6 +73,19 @@ function releaseMessage() {
 /** 送る `zoom` の JSON。**ブラウザ側は拡大しない**（spec §1.5） */
 function zoomMessage(level) {
   return {t: 'zoom', level: Number(level)};
+}
+
+/** 送る `touch` の JSON。**操作したことだけをカメラ部に知らせる**（省電力から戻す。DetailedDesign-power.md §1・§6） */
+function touchMessage() {
+  return {t: 'touch'};
+}
+
+/**
+ * 省電力の重ね表示の文言（DetailedDesign-power.md §6）。
+ * `state.power.mode` が `saving` のときだけ出し、**`state.power` が無い（古いアプリ）ときは何も出さない**
+ */
+function powerText(power) {
+  return power && power.mode === 'saving' ? POWER_SAVING_TEXT : null;
 }
 
 /** 「＋」「−」で次に送る倍率。1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる */
@@ -593,6 +609,10 @@ function render() {
   }
   $('bFake').style.display = state.fake ? '' : 'none';
 
+  const power = powerText(state.power);
+  $('bPower').classList.toggle('show', power !== null);
+  $('bPower').textContent = power || '';
+
   $('osdH').textContent = heightText(lift);
   $('osdP').textContent = `ピッチ ${Number(state.pitch_deg).toFixed(1)}°`;
   $('cP').textContent = `↕ ${Math.round(Number(state.pitch_deg))}°`;
@@ -677,7 +697,13 @@ function initApp() {
     applySettings(event.detail);
   });
 
-  $('snapBtn').addEventListener('click', openSnapshot);
+  // 静止画は hve_video へ直接取りに行くので、カメラ部には `touch` で操作を知らせる
+  $('snapBtn').addEventListener('click', () => {
+    send(touchMessage());
+    openSnapshot();
+  });
+  // 省電力の重ね表示を押したら操作に戻す（戻す操作はそのまま効く。DetailedDesign-power.md §6）
+  $('bPower').addEventListener('click', () => send(touchMessage()));
   $('snapClose').addEventListener('click', closeSnapshot);
   bindSnapshotZoom();
   $('snapImage').addEventListener('load', () => {
@@ -718,7 +744,7 @@ if (typeof document !== 'undefined') initApp();
 
 if (typeof module === 'object' && module !== null) {
   module.exports = {
-    holdMessage, releaseMessage, zoomMessage, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
+    holdMessage, releaseMessage, zoomMessage, touchMessage, powerText, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, standaloneCeilingText, heightText, holdBlocked, stateStale,
     topDetectText, ownerText, armText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,
