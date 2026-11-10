@@ -13,7 +13,7 @@
 
 ## 1. 今どこにいるか
 
-**最終同期: 2026-11-06**（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`・`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`・`WP-LIFT-16`・`WP-LIFTUI-05`・`WP-CAM-12` のマージまで。それ以前: `redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06`・`WP-BASE-02`・`WP-LIFT-03`・`WP-IO-01`・`WP-LIFTUI-01`・`WP-LIFT-04`・`WP-IO-02`・`WP-CAM-04`・`WP-UI-02`・`WP-VIDEO-02`・`WP-CAM-05` まで）。更新のしかたは §2.3「計画書を都度更新する」。
+**最終同期: 2026-11-10**（`WP-IO-03`・`WP-UI-05`・`WP-CAM-13`・`WP-VIDEO-04` のマージまで。それ以前: `WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`・`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`・`WP-LIFT-16`・`WP-LIFTUI-05`・`WP-CAM-12` のマージまで。それ以前: `redesign/v2` = v2 の spec・詳細設計の初版・`WP-MEAS-06`・`WP-BASE-02`・`WP-LIFT-03`・`WP-IO-01`・`WP-LIFTUI-01`・`WP-LIFT-04`・`WP-IO-02`・`WP-CAM-04`・`WP-UI-02`・`WP-VIDEO-02`・`WP-CAM-05` まで）。更新のしかたは §2.3「計画書を都度更新する」。
 
 | | 状態 |
 | --- | --- |
@@ -275,7 +275,7 @@ orca worktree rm --worktree path:<path> --force --json   # 片付け。フォル
 | 8a | **カメラモジュールが ss-system に開く口**（ヨー・ピッチの操作・静止画の要求。spec [Spec-module.md](spec/Spec-module.md) §1。2026-11-05 ユーザー決定で hve が書き ss が確かめる）。**行 8 のあとに案を書く**。ピッチは目標角を渡し、カメラモジュールが再起動したことも読めるようにする（`H-V14`。2026-11-05 ss の決定）。ヨーの向きの欄は名前だけ決め、`H-A11` が決まるまで `null` | 未着手 |
 | 8b | **単体の操作でも天井で止める**（2026-11-06 ユーザー決定。spec [Spec-safety.md](spec/Spec-safety.md) §2 #4c・[Spec-ui.md](spec/Spec-ui.md) §2.2。設計は [detailed/DetailedDesign-protocol-modules.md](detailed/DetailedDesign-protocol-modules.md) §2.5）: `WP-LIFT-15` → `WP-LIFTUI-04` ／ `WP-CAM-11`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 7）。**行 8 の 3 つのあと**（単体の操作で使う天井の値は、行 8 の出どころと止まっている間の `ceiling` が無いと届かない）。設定の欄は欠けてもよいので、3 つは別々に入れてよい。**2026-11-06 に 3 つともマージ**（`b5f3762`・`28dd6bb`・`4784d3c`） | 配線済み（実機確認待ち） |
 | 8c | **天井の閾値を設定に**（2026-11-06 ユーザー決定。spec [Spec-ui.md](spec/Spec-ui.md) §2.3）: `WP-LIFT-16` → `WP-LIFTUI-05` ／ `WP-CAM-12`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 8）。3 つは別々に入れてよい。**2026-11-06 に 3 つともマージ・ESP32 に書き込み**（UnitV2 はまだ） | 配線済み（実機確認待ち） |
-| 9 | **外し忘れの省電力・電源断**（2026-11-10 ユーザー決定。spec [Spec-power.md](spec/Spec-power.md)。設計は [detailed/DetailedDesign-power.md](detailed/DetailedDesign-power.md)）: `WP-IO-03` ／ `WP-VIDEO-04` ／ `WP-CAM-13` ／ `WP-UI-05`（[-packets.md](detailed/DetailedDesign-packets.md) 段階 9。並べてよい・互換は崩れない）→ `WP-MEAS-07`（消費・無線の見え方の実測。`ap_absent_ms`・`power_save_pitch_deg`・提案 `P-15` を決める）。行 8a（ss-system の口）は静止画の要求も `touch()` に数える形で書く | 未着手 |
+| 9 | **外し忘れの省電力・電源断**（2026-11-10 ユーザー決定。spec [Spec-power.md](spec/Spec-power.md)。設計は [detailed/DetailedDesign-power.md](detailed/DetailedDesign-power.md)）: ~~`WP-IO-03`~~ ／ ~~`WP-VIDEO-04`~~ ／ ~~`WP-CAM-13`~~ ／ ~~`WP-UI-05`~~（2026-11-10 に 4 つともマージ。opencode の無料枠が数分で尽き、Sonnet のサブエージェントが引き継いだ。UNO・UnitV2 への書き込みはまだ）（[-packets.md](detailed/DetailedDesign-packets.md) 段階 9。並べてよい・互換は崩れない）→ `WP-MEAS-07`（消費・無線の見え方の実測。`ap_absent_ms`・`power_save_pitch_deg`・提案 `P-15` を決める）。行 8a（ss-system の口）は静止画の要求も `touch()` に数える形で書く | 配線済み（実機確認待ち。`WP-MEAS-07` は未着手） |
 | 随時 | 組み立て用ファーム（`env:esp32dev_manual`。スイッチで回すだけ・台帳 `W-2`。メカ担当向け）。**実機確認はまだ**。組み立てが終わったら本番を書き戻して `W-2` を閉じる | 実装あり（実機確認待ち） |
 | いつでも | 先方・機構側に聞く値（`H-V1`・`H-V2`）／目標 `H-G1` | 未着手 |
 
