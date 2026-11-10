@@ -50,6 +50,7 @@
 | [Spec-module.md](Spec-module.md) | 昇降部と上部モジュールの取り決め | 初版 |
 | [Spec-safety.md](Spec-safety.md) | 上下端と天井（検知手段・止め方） | 初版（上端はエンコーダの高さで検知。実装まで一時無効） |
 | [Spec-ui.md](Spec-ui.md) | 操作画面（カメラモジュールの画面・昇降部の画面） | 初版 |
+| [Spec-power.md](Spec-power.md) | カメラモジュールの電池と外し忘れ（無操作で省電力・電源断） | 初版（2026-11-10） |
 | [mockup/index.html](mockup/index.html) | カメラモジュールの画面の見た目（[GitHub Pages](https://taka-meer.github.io/hve-system/plan/spec/mockup/) で開ける） | v2 の実装に合わせた（2026-10-20）。昇降部の画面のモックアップは無い |
 
 **領域ごとの詳細ファイル（`Spec-<領域>.md`）は、書く内容ができた時点で足す。**
