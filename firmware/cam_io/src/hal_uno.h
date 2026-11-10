@@ -2,6 +2,7 @@
 // io_hal.h の実装に加え、Wire での SRF02 の読み取りを持つ。
 // 決まりごとは DetailedDesign-hardware.md §2.4（止めている間はコイルの電流を切る・
 // サーボのパルスは止めない・I2C に時間切れを付ける）。
+// R 行で力を抜くときだけサーボのパルスを止める（DetailedDesign-power.md §2）。
 // クラス名はファイル名（DetailedDesign-names.md §1）から機械的に対応付けたもの。
 #pragma once
 
@@ -24,6 +25,8 @@ class HalUno : public IoHal {
   void yaw_coils_off() override;
   // 0.1° をパルス幅に直す。SERVO_PULSE_MIN_US〜MAX_US の外へ出さない
   void servo_set_ddeg(int pitch_ddeg) override;
+  // パルスを止める（OC1A を切り離して D9 を Low）。R 行で力を抜くとき。次の servo_set_ddeg で再び出る
+  void servo_off() override;
 
   // SRF02 を SRF02_PERIOD_MS ごとに読む。新しい測定ができたら true を返し、
   // st（0＝読めた・1＝I2C で読めない）・cm（生の値。st が 1 なら 0）を入れる。
