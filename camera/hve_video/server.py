@@ -87,9 +87,14 @@ class Broadcaster:
         try:
             while self._subscribers:
                 try:
-                    # JPEG の処理は重いので、ループを止めないよう別スレッドに任せる
-                    # （Python 3.8 には asyncio.to_thread が無いので run_in_executor を使う）
-                    jpeg = await loop.run_in_executor(None, self._pipeline.jpeg_bytes)
+                    if self._pipeline.capture_wanted:
+                        # JPEG の処理は重いので、ループを止めないよう別スレッドに任せる
+                        # （Python 3.8 には asyncio.to_thread が無いので run_in_executor を使う）
+                        jpeg = await loop.run_in_executor(None, self._pipeline.jpeg_bytes)
+                    else:
+                        # 取り込みを止めている間は 1 枚も送らない（接続は保つ。静止画のために
+                        # 起こしている間も送らない）
+                        jpeg = None
                 except Exception:
                     log.exception("JPEG の作り直しに失敗した")
                     jpeg = None
@@ -216,14 +221,44 @@ async def _zoom(request: web.Request) -> web.Response:
     return web.json_response({"level": pipeline.level})
 
 
+async def _capture(request: web.Request) -> web.Response:
+    """取り込みを止める・戻す（DetailedDesign-power.md §3）。接続元が `127.0.0.1` でなければ 403。"""
+    remote = request.remote
+    if not is_local_peer(remote):
+        log.warning("接続元 %s からの /capture を拒否する", remote)
+        return web.json_response({"error": "forbidden"}, status=403)
+    try:
+        body = await request.json()
+    except ValueError:  # JSON が読めない・Content-Type が JSON でない
+        return web.json_response({"error": "JSON が読めない"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("on"), bool):
+        return web.json_response({"error": "on が真偽値でない"}, status=400)
+    pipeline: VideoPipeline = request.app["pipeline"]
+    loop = asyncio.get_running_loop()
+    # 子プロセスを止めるのは待つことがあるので、ループを止めないよう別スレッドに任せる
+    await loop.run_in_executor(None, pipeline.set_capture, body["on"])
+    return web.json_response({"on": pipeline.capture_wanted})
+
+
 async def _snapshot(request: web.Request) -> web.Response:
     """静止画（spec `H-U9`）。最後に受けたカメラの JPEG をそのまま返す。無ければ 503。
 
     倍率に関わらず、作り直さない・切り出さない。接続元は問わない（外の端末から受ける）。
+    **取り込みを止めている間は古い 1 枚を返さない**: 起こして新しい 1 枚を最大
+    `snapshot_wake_wait_ms` 待ち、来なければ 503。待ち終わったら止めた状態へ戻す。
     """
     pipeline: VideoPipeline = request.app["pipeline"]
     loop = asyncio.get_running_loop()
-    jpeg = await loop.run_in_executor(None, pipeline.latest_jpeg)
+    if pipeline.capture_wanted:
+        jpeg = await loop.run_in_executor(None, pipeline.latest_jpeg)
+    else:
+        wait_s: float = request.app["snapshot_wake_wait"]
+        await loop.run_in_executor(None, pipeline.acquire_wake)
+        try:
+            jpeg = await loop.run_in_executor(None, pipeline.wait_latest_jpeg, wait_s)
+        finally:
+            # 呼び出しが切られても必ず戻す（起こしたままにしない）
+            pipeline.release_wake()
     if jpeg is None:
         return web.json_response({"error": "まだ 1 枚も受けていない"}, status=503)
     return web.Response(
@@ -236,13 +271,17 @@ async def _close_broadcaster(app: web.Application) -> None:
 
 
 def create_app(
-    pipeline: VideoPipeline, video_fps: float, video_send_timeout_ms: float
+    pipeline: VideoPipeline,
+    video_fps: float,
+    video_send_timeout_ms: float,
+    snapshot_wake_wait_ms: float = 3000,
 ) -> web.Application:
-    """`GET /stream`（MJPEG）・`GET /snapshot`・`POST /zoom` を持つアプリを作る。"""
+    """`GET /stream`（MJPEG）・`GET /snapshot`・`POST /zoom`・`POST /capture` を持つアプリを作る。"""
     app = web.Application()
     app["pipeline"] = pipeline
     app["video_fps"] = float(video_fps)
     app["video_send_timeout"] = float(video_send_timeout_ms) / 1000.0
+    app["snapshot_wake_wait"] = float(snapshot_wake_wait_ms) / 1000.0
     app["broadcaster"] = Broadcaster(pipeline, float(video_fps))
     app.on_shutdown.append(_close_broadcaster)
     app.add_routes(
@@ -250,6 +289,7 @@ def create_app(
             web.get("/stream", _stream),
             web.get("/snapshot", _snapshot),
             web.post("/zoom", _zoom),
+            web.post("/capture", _capture),
         ]
     )
     return app

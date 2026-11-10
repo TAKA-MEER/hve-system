@@ -70,7 +70,10 @@ def main(argv: list[str] | None = None) -> int:
         params["video_jpeg_quality"],
     )
     app = create_app(
-        pipeline, params["video_fps"], params["video_send_timeout_ms"]
+        pipeline,
+        params["video_fps"],
+        params["video_send_timeout_ms"],
+        params["snapshot_wake_wait_ms"],
     )
     # aiohttp 3.6.2（UnitV2）の `run_app` には `on_shutdown` 引数が無いので、アプリに登録する
     app.on_shutdown.append(_release_pipeline)

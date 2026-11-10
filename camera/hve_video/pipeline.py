@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import cv2
 import numpy as np
 
@@ -34,6 +36,10 @@ class VideoPipeline:
         self._capture_size: tuple[int, int] | None = None
         # 今の倍率。丸めは crop_rect が行う（hve_camera 側と同じ規則）
         self.level = float(zoom)
+        # 取り込みを止める・戻す（DetailedDesign-power.md §3）。望む値と、静止画のために起こしている数
+        self._capture_lock = threading.Lock()
+        self._capture_wanted = True
+        self._wakers = 0
 
     @property
     def capture_size(self) -> tuple[int, int] | None:
@@ -79,6 +85,36 @@ class VideoPipeline:
     def latest_jpeg(self) -> bytes | None:
         """最後に受けたカメラの JPEG をそのまま返す（作り直さない・切り出さない）。"""
         return self._source.latest_jpeg()
+
+    @property
+    def capture_wanted(self) -> bool:
+        """`/capture` で望まれている値。偽のとき、配信は 1 枚も送らない。"""
+        return self._capture_wanted
+
+    def _apply_capture(self) -> None:
+        self._source.set_capturing(self._capture_wanted or self._wakers > 0)
+
+    def set_capture(self, on: bool) -> None:
+        """`POST /capture` の値を受ける。静止画のために起こしている間は、その終わりまで止めない。"""
+        with self._capture_lock:
+            self._capture_wanted = bool(on)
+            self._apply_capture()
+
+    def acquire_wake(self) -> None:
+        """止めている間の静止画のために取り込みを起こす。`release_wake()` と対で呼ぶ。"""
+        with self._capture_lock:
+            self._wakers += 1
+            self._apply_capture()
+
+    def release_wake(self) -> None:
+        """静止画の待ちが終わった。望む値が偽で、ほかに待つ要求も無ければ止めた状態へ戻す。"""
+        with self._capture_lock:
+            self._wakers -= 1
+            self._apply_capture()
+
+    def wait_latest_jpeg(self, timeout: float) -> bytes | None:
+        """カメラの JPEG を返す。無ければ新しい 1 枚が来るまで最大 `timeout` 秒待つ。"""
+        return self._source.wait_latest_jpeg(timeout)
 
     def release(self) -> None:
         """取り込み元を解放する。"""
