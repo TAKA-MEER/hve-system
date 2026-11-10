@@ -919,3 +919,37 @@ async def test_fake_source_follows_capture_and_snapshot(aiohttp_client):
     response = await client.get("/snapshot")  # 起こして新しい 1 枚を返す
     assert response.status == 200
     assert await until(lambda: not pipeline_of(app)._source.capturing)
+
+
+async def test_stream_sends_nothing_while_a_snapshot_wakes_the_capture(aiohttp_client):
+    """静止画のために起こしている間も、`/capture` が偽なら `/stream` へ 1 枚も送らない。"""
+    spawner = ScriptedSpawner(None)
+    app, source = make_pipe_app(spawner)
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    pipeline = pipeline_of(app)
+    async with client.get("/stream") as stream:
+        pipeline.acquire_wake()  # 静止画の待ちが続いている状態
+        try:
+            assert await until(lambda: spawner.live == 1)
+            spawner.children[-1].feed(jpeg_gray(120))
+            assert await until(lambda: source.latest_jpeg() is not None)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(first_jpeg(stream), timeout=0.6)
+        finally:
+            pipeline.release_wake()
+
+
+async def test_capture_off_during_a_snapshot_wake_does_not_cut_the_wake_short(aiohttp_client):
+    """起こしている最中に `/capture` false が来ても、静止画の待ちは終わりまで続く。"""
+    spawner = ScriptedSpawner(None)
+    app, source = make_pipe_app(spawner, wake_wait_ms=1500)
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    task = asyncio.ensure_future(client.get("/snapshot"))
+    assert await until(lambda: spawner.live == 1)
+    assert (await client.post("/capture", json={"on": False})).status == 200
+    spawner.children[-1].feed(jpeg_gray(120))
+    response = await task
+    assert response.status == 200
+    assert await until(lambda: spawner.live == 0)
