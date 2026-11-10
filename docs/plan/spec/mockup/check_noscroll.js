@@ -8,7 +8,7 @@ const target = process.argv[2];
 const url = /^https?:/.test(target) ? target : 'file://' + require('path').resolve(target);
 const sizes = [[360,640],[375,667],[390,844],[430,932],[768,1024],[810,1080],[1024,1366],
                [640,360],[667,375],[844,390],[932,430],[1024,600],[1024,768],[1280,800],[1366,768],[1920,1080],[2560,1440]];
-const states = ['', '?h=1100&ceil=stale&hold=lift_up&zoom=4', '?settings=1', '?mock=1', '?snap=1&zoom=2'];
+const states = ['', '?h=1100&ceil=stale&hold=lift_up&zoom=4', '?settings=1', '?mock=1', '?snap=1&zoom=2', '?power=1'];
 (async () => {
   const b = await chromium.launch({executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome'});
   let fail = 0, n = 0;

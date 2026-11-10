@@ -19,6 +19,15 @@ test('release と zoom の JSON', () => {
   assert.deepEqual(app.zoomMessage('2'), {t: 'zoom', level: 2});
 });
 
+test('touch の JSON と省電力の重ね表示（DetailedDesign-power.md §6）', () => {
+  assert.deepEqual(app.touchMessage(), {t: 'touch'});
+  assert.equal(app.powerText({mode: 'saving'}), '省電力中です。操作すると戻ります。機体の無線が無くなると電源を切ります');
+  assert.equal(app.powerText({mode: 'active'}), null);
+  assert.equal(app.powerText(null), null);
+  assert.equal(app.powerText(undefined), null); // 古いアプリ（state.power が無い）は何も出さない
+  assert.equal(app.powerText({}), null);
+});
+
 test('「＋」「−」の 1 段は zoom_step の倍数で 1〜zoom_max に収まる', () => {
   assert.equal(app.zoomTarget(1, 0.5), 1.5);   // 開いた直後の「＋」は 1.5
   assert.equal(app.zoomTarget(1, -0.5), 1);    // 1 倍より小さくはならない

@@ -724,6 +724,39 @@ test('15 設定画面の天井の閾値を保存すると昇降部へ中継さ�
   }
 });
 
+/* --- 16. 省電力の重ね表示（WP-UI-05） ----------------------------------------- */
+test('16 省電力中は重ね表示を出し、押すと touch を送る（静止画のボタンも）', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  try {
+    const result = await page.evaluate(() => {
+      // `state.power` は WP-CAM-13 が入れる。ここでは届いた state を saving に差し替えて見る
+      last_state = Object.assign({}, last_state, {power: {mode: 'saving'}});
+      render();
+      const power = document.getElementById('bPower');
+      const visible = getComputedStyle(power).display !== 'none';
+      const text = power.textContent;
+      const sent = [];
+      const original = send;
+      send = (message) => { sent.push(message); original(message); };
+      power.click();
+      document.getElementById('snapBtn').click();
+      send = original;
+      // 古いアプリ（state.power が無い）では何も出さない
+      last_state = Object.assign({}, last_state, {power: null});
+      render();
+      const hidden = getComputedStyle(power).display === 'none';
+      return {visible, text, sent, hidden};
+    });
+    assert.equal(result.visible, true, '省電力中の重ね表示が出ていない');
+    assert.equal(result.text, '省電力中です。操作すると戻ります。機体の無線が無くなると電源を切ります');
+    assert.deepEqual(result.sent, [{t: 'touch'}, {t: 'touch'}], '重ね表示と静止画のボタンが touch を送っていない');
+    assert.equal(result.hidden, true, 'state.power が無いのに重ね表示が出ている');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await cleanup();
+  }
+});
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
