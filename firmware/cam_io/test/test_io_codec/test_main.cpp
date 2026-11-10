@@ -104,6 +104,36 @@ void test_drops_null_and_too_long_line() {
   assert_dropped(long_line);
 }
 
+// --- R 行（力を抜く。DetailedDesign-power.md §2） ---
+
+void test_parse_valid_r_line() {
+  uint16_t seq = 999;
+  TEST_ASSERT_TRUE(parse_r_line("R 0", &seq));
+  TEST_ASSERT_EQUAL_UINT(0, seq);
+  TEST_ASSERT_TRUE(parse_r_line("R 65535", &seq));
+  TEST_ASSERT_EQUAL_UINT(65535, seq);
+  TEST_ASSERT_TRUE(parse_r_line("R 12", &seq));
+  TEST_ASSERT_EQUAL_UINT(12, seq);
+}
+
+void test_parse_r_line_drops_unreadable_lines() {
+  const char* dropped[] = {
+      "R", "R x", "R 1 2", "R 1 ", " R 1", "R  1", "R -1", "R 65536",
+      "R 1\n", "r 1", "M 1 0 0", "R 9999999999", nullptr,
+  };
+  for (const char* line : dropped) {
+    uint16_t seq = 999;
+    TEST_ASSERT_FALSE(parse_r_line(line, &seq));
+    TEST_ASSERT_EQUAL_UINT(0, seq);
+  }
+  char long_line[64];
+  std::memset(long_line, 'R', sizeof(long_line) - 1);
+  long_line[sizeof(long_line) - 1] = '\0';
+  uint16_t seq = 999;
+  TEST_ASSERT_FALSE(parse_r_line(long_line, &seq));
+  TEST_ASSERT_EQUAL_UINT(0, seq);
+}
+
 // --- C 行の組み立て ---
 
 void test_format_c_line() {
@@ -158,6 +188,9 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_drops_non_integer_fields);
   RUN_TEST(test_drops_out_of_range_seq);
   RUN_TEST(test_drops_null_and_too_long_line);
+
+  RUN_TEST(test_parse_valid_r_line);
+  RUN_TEST(test_parse_r_line_drops_unreadable_lines);
 
   RUN_TEST(test_format_c_line);
   RUN_TEST(test_format_c_line_reports_zero_when_buffer_is_short);

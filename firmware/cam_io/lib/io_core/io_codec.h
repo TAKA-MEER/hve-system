@@ -29,6 +29,10 @@ static_assert(sizeof(IoCmd::yaw_hsps) == 4, "yaw_hsps must be 32 bits");
 // M 行を読む。読めたら true。読めなければ out を 0 にして false を返す
 bool parse_m_line(const char* line, IoCmd* out);
 
+// R 行（外力を抜く。DetailedDesign-power.md §2）を読む。読めたら true で seq を入れる。
+// 読めなければ seq を 0 にして false を返す
+bool parse_r_line(const char* line, uint16_t* out_seq);
+
 // C 行（天井の測定 1 回）を作る。書き込んだ文字数（終端なし）を返す。
 // バッファが足りない・IO_LINE_MAX を超える・fw が読めないときは 0
 unsigned int format_c_line(uint32_t uno_ms, int st, int cm, char* out, unsigned int out_size);

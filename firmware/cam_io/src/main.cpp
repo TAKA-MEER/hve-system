@@ -1,5 +1,5 @@
 // Arduino UNO の実物（DetailedDesign.md §4.5・DetailedDesign-protocol.md §5）。
-// Serial（D0/D1・IO_BAUD）で M 行を受けて IoController へ、SRF02 の測定ごとに C 行、
+// Serial（D0/D1・IO_BAUD）で M 行・R 行を受けて IoController へ、SRF02 の測定ごとに C 行、
 // 起動時に B 行を出す。組み立てて呼ぶだけで、判定（途絶・丸め）は IoController に任せる。
 // Serial にデバッグの出力を出さない（UnitV2 へ流れる）。
 #include <Arduino.h>
@@ -65,6 +65,11 @@ void feed_line(char* line, uint32_t now_ms) {
   IoCmd cmd;
   if (parse_m_line(line, &cmd)) {
     g_controller.on_command(cmd, now_ms);
+    return;
+  }
+  uint16_t relax_seq = 0;
+  if (parse_r_line(line, &relax_seq)) {
+    g_controller.on_relax(relax_seq, now_ms);
   }
 }
 

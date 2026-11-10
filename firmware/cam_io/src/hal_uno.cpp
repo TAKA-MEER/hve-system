@@ -108,6 +108,17 @@ void HalUno::servo_set_ddeg(int pitch_ddeg) {
   // OCR1A は TOP で反映されるので、パルスの途中で幅が変わることはない
   noInterrupts();
   OCR1A = ocr;
+  TCCR1A |= (1 << COM1A1);  // servo_off で切り離した出力を戻す
+  interrupts();
+}
+
+void HalUno::servo_off() {
+  // OC1A を切り離して D9 を Low に固定する（OCR1A＝0 では Fast PWM で 1 クロックの
+  // スパイクが残るため）。Timer1 は回し続け、次の servo_set_ddeg で再び出る
+  noInterrupts();
+  TCCR1A &= ~(1 << COM1A1);
+  OCR1A = 0;
+  digitalWrite(SERVO_PIN, LOW);
   interrupts();
 }
 

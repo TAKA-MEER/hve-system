@@ -74,6 +74,29 @@ bool parse_m_line(const char* line, IoCmd* out) {
   return true;
 }
 
+bool parse_r_line(const char* line, uint16_t* out_seq) {
+  if (out_seq == nullptr) {
+    return false;
+  }
+  *out_seq = 0;
+  if (line == nullptr) {
+    return false;
+  }
+  if (strlen(line) > IO_LINE_MAX) {
+    return false;
+  }
+  if (line[0] != 'R' || line[1] != ' ') {
+    return false;
+  }
+  long seq = 0;
+  const char* end = nullptr;
+  if (!take_int(line + 2, &seq, &end) || *end != '\0' || seq < 0 || seq > 65535) {
+    return false;
+  }
+  *out_seq = static_cast<uint16_t>(seq);
+  return true;
+}
+
 unsigned int format_c_line(uint32_t uno_ms, int st, int cm, char* out, unsigned int out_size) {
   if (out == nullptr || out_size == 0) {
     return 0;

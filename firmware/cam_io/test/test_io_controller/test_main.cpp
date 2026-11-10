@@ -79,6 +79,7 @@ void test_watchdog_keeps_servo_pulse_at_last_angle() {
   // パルスを止めない（止めると脱力してカメラが倒れる）。角度はそのまま保つ
   TEST_ASSERT_EQUAL_INT(200, hal.pitch_ddeg());
   TEST_ASSERT_EQUAL_INT(calls_before + 2, hal.servo_calls());
+  TEST_ASSERT_TRUE(hal.servo_on());
 }
 
 void test_fresh_command_after_watchdog_moves_again() {
@@ -94,6 +95,54 @@ void test_fresh_command_after_watchdog_moves_again() {
   TEST_ASSERT_EQUAL_INT32(-50, hal.yaw_hsps());
   TEST_ASSERT_TRUE(hal.coils_on());
   TEST_ASSERT_EQUAL_INT(-100, hal.pitch_ddeg());
+}
+
+// --- R 行（力を抜く。DetailedDesign-power.md §2） ---
+
+void test_relax_stops_yaw_and_servo() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(200, 100), 0);
+  ctrl.tick(0);
+  TEST_ASSERT_TRUE(hal.yaw_moving());
+  TEST_ASSERT_TRUE(hal.servo_on());
+
+  ctrl.on_relax(1, 10);
+  ctrl.tick(10);
+  TEST_ASSERT_FALSE(hal.yaw_moving());  // R でヨーを止める
+  TEST_ASSERT_FALSE(hal.coils_on());
+  TEST_ASSERT_FALSE(hal.servo_on());  // パルスを止める（力を抜く）
+}
+
+void test_relax_keeps_pulse_off_after_timeout() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_relax(1, 0);
+  ctrl.tick(0);
+  TEST_ASSERT_FALSE(hal.servo_on());
+  const int off_calls = hal.servo_off_calls();
+
+  // 途絶えても戻らない（パルスを出す側へ戻らない）
+  ctrl.tick(IO_CMD_TIMEOUT_MS + 1);
+  ctrl.tick(IO_CMD_TIMEOUT_MS + 1000);
+  TEST_ASSERT_FALSE(hal.servo_on());
+  TEST_ASSERT_EQUAL_INT(off_calls + 2, hal.servo_off_calls());
+  TEST_ASSERT_FALSE(hal.coils_on());
+}
+
+void test_command_after_relax_resumes_pulse() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_relax(1, 0);
+  ctrl.tick(0);
+  TEST_ASSERT_FALSE(hal.servo_on());
+
+  ctrl.on_command(cmd(-100, 50), 10);
+  ctrl.tick(10);
+  TEST_ASSERT_TRUE(hal.servo_on());  // 次の M で戻る
+  TEST_ASSERT_EQUAL_INT(-100, hal.pitch_ddeg());
+  TEST_ASSERT_TRUE(hal.coils_on());
+  TEST_ASSERT_EQUAL_INT32(50, hal.yaw_hsps());
 }
 
 // --- 丸め（2 つ目の守り） ---
@@ -196,6 +245,10 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_watchdog_stops_yaw_at_300ms);
   RUN_TEST(test_watchdog_keeps_servo_pulse_at_last_angle);
   RUN_TEST(test_fresh_command_after_watchdog_moves_again);
+
+  RUN_TEST(test_relax_stops_yaw_and_servo);
+  RUN_TEST(test_relax_keeps_pulse_off_after_timeout);
+  RUN_TEST(test_command_after_relax_resumes_pulse);
 
   RUN_TEST(test_pitch_is_clamped);
   RUN_TEST(test_pitch_beyond_16bit_int_is_clamped_on_correct_side);

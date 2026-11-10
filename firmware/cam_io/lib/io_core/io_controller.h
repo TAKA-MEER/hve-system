@@ -2,6 +2,8 @@
 // DetailedDesign.md §4.5 の IoController。ハードウェアは io_hal.h の抽象を通す。
 // 途絶えたときはヨーを止めてコイルの電流を切り、ピッチはパルスを止めずその角度で保つ
 // （DetailedDesign.md §3.4・DetailedDesign-hardware.md §2.4）。
+// ただし R 行を受けたら力を抜き（サーボのパルスを止める）、次の M 行まで止めたままにする
+// （DetailedDesign-power.md §2）。
 #pragma once
 
 // avr-gcc には C++ 標準ライブラリのヘッダが無いので C のヘッダだけを使う。
@@ -27,6 +29,10 @@ class IoController {
   // UnitV2 からの指令を受ける。読めない行はここへ渡さない（捨てると途絶えて止まる）
   void on_command(const IoCmd& cmd, uint32_t now_ms);
 
+  // R 行（力を抜く）を受けた。ピッチのパルスを止め、ヨーを止める。
+  // 次の on_command まで抜いたまま（途絶えても戻らない）
+  void on_relax(uint16_t seq, uint32_t now_ms);
+
   // 判定して、その結果をハードウェアへ出す。指令をそのまま流さないこと
   void tick(uint32_t now_ms);
 
@@ -36,4 +42,5 @@ class IoController {
   int pitch_ddeg_;      // 丸め済みの目標角 [0.1°]
   int32_t yaw_hsps_;    // 丸め済みの速さ [半ステップ毎秒]
   uint32_t cmd_at_ms_;  // 最後の指令を受けた時刻
+  bool relaxed_;        // R 行で力を抜いた状態（次の M 行で解ける）
 };
