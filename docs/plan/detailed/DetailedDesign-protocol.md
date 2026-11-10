@@ -117,6 +117,7 @@ ASCII の 1 行 1 メッセージ。区切りは空白 1 つ、行末は `\n`。
 | `M` | UnitV2 → Arduino | `M <seq> <pitch_ddeg> <yaw_hsps>` | `seq`: 0〜65535 で一周する連番（ログ用）。`pitch_ddeg`: ピッチの目標角 [0.1°]（整数）。`yaw_hsps`: ヨーの半ステップの速さ [1 秒あたり]（整数・符号が向き。0 で止める） |
 | `C` | Arduino → UnitV2 | `C <uno_ms> <st> <cm>` | 天井の測定 1 回。`uno_ms`: Arduino の `millis()`（32 bit・符号なし）。`st`: `0`＝読めた・`1`＝I2C で読めない。`cm`: SRF02 の生の値 [cm]（`st` が `1` なら `0`） |
 | `B` | Arduino → UnitV2 | `B <uno_ms> <fw>` | 起動した。UnitV2 は `UnoClock` をやり直す |
+| **`R`** | UnitV2 → Arduino | `R <seq>` | **外し忘れの省電力（2026-11-10）。ピッチの力を抜き、ヨーを止める。次の `M` まで抜いたまま**（途絶えても戻らない）。省電力の間は `M` の代わりに周期で送る。[-power.md](DetailedDesign-power.md) §2 |
 
 **汎用の 4 状態への直し方（UnitV2 の `classify_srf02()`）**:
 

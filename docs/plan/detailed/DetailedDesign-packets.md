@@ -68,6 +68,11 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-LIFT-16` | 8 | **天井の閾値を設定に**（2026-11-06。`ceiling_margin_mm`・判定に設定の値・`provisional` から外す） | LIFT-15 | 不要（実機の確認は管理担当） |
 | `WP-LIFTUI-05` | 8 | 昇降部の画面・偽の昇降部に `ceiling_margin_mm`（設定画面の欄・偽の昇降部の判定） | LIFT-16（取り決め）・LIFTUI-04 | 不要 |
 | `WP-CAM-12` | 8 | カメラモジュールに `ceiling_margin_mm`（設定の中継・設定画面の欄・偽物の昇降部） | LIFT-16（取り決め）・CAM-11 | 不要（偽物のモード） |
+| `WP-IO-03` | 9 | **UNO に `R` 行**（ピッチの力を抜き、次の `M` まで保つ。2026-11-10 外し忘れ。[-power.md](DetailedDesign-power.md) §2） | — | 不要（実機の確認は管理担当） |
+| `WP-VIDEO-04` | 9 | **`hve_video` に `POST /capture`**（取り込みを止める・戻す・止めている間の静止画。[-power.md](DetailedDesign-power.md) §3） | — | 不要（実機の確認は管理担当） |
+| `WP-CAM-13` | 9 | **カメラモジュールの外し忘れの判定**（`IdlePower`・`PowerHw`・`R` 行を送る・`/capture` を送る・`touch`・`state.power`。[-power.md](DetailedDesign-power.md) §1・§4〜§6） | IO-03・VIDEO-04（取り決め） | 不要（偽物のモード） |
+| `WP-UI-05` | 9 | カメラモジュールの画面に省電力の重ね表示と `touch`（[-power.md](DetailedDesign-power.md) §6） | CAM-13（取り決め） | 不要（偽物のモード） |
+| `WP-MEAS-07` | 9 | **電池の消費と無線の見え方の実測**（通常・省電力・電源断のあと・パルスあり／なし／`wlan0` の `operstate` が AP を切って何秒で変わるか・`poweroff` で UnitV2 が止まるか・電池が自分で出力を止めるか） | 4 つのマージ | 要（全部・USB テスター） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -80,6 +85,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **段階 7（2026-11-06。単体の操作でも天井で止める。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5）**: 段階 6 の 3 つ（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10`）のあと。単体の操作で使う天井の値は、`WP-LIFT-13` の出どころと `WP-CAM-10` の止まっている間の `ceiling` が無いと届かない。`ceiling_standalone` は設定 API で欠けてもよい（[-protocol.md](DetailedDesign-protocol.md) §3）ので、**3 つは互換を崩さず別々に入れてよい**（`WP-CAM-11` の前のカメラモジュールは設定を中継しないだけ）。
 
 **段階 8（2026-11-06。天井の閾値を設定に。[-protocol.md](DetailedDesign-protocol.md) §3）**: 3 つは互換を崩さず別々に入れてよい（`ceiling_margin_mm` は設定 API で欠けてもよい）。**3 つとも、設定画面に行が 1 つ増えるので背の低い画面のスクロール検査に気をつける**（spec のモックアップは、背の低い画面で仮値の一覧を省いて収めた）。
+
+**段階 9（2026-11-10。外し忘れの省電力・電源断。[-power.md](DetailedDesign-power.md)）**: 取り決めは書いてあるので 4 つ並べてよい。**互換は崩れない**（古い UNO は `R` を捨てて今までどおり保つ・古い `hve_video` は `/capture` に 404 を返すだけで取り込みを続ける）。**`WP-MEAS-07` の結果で `ap_absent_ms`・`power_save_pitch_deg` と、提案 `P-15` を決める。**
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -516,3 +523,34 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 作るもの: `LIFT_TOP_DETECT_ENABLED` を `true`・**`LIFT_TOP_MM` を 1800**（2026-10-28 ユーザー決定。-names.md）・`WAIVER(demo): W-1` をすべて消す・試験を「判定する」側へ直す。台帳の `W-1` をクローズにしてコミットハッシュを書く（管理担当）。**`docs/使い方.md`**（起動直後は上昇しない・「上端の検知: 一時無効」が出なくなる）
 - 受け入れ: native の試験が成功。`grep -rn 'WAIVER(demo): W-1'` が空。**変異**: ※ 原点を取る前に上昇できる／※ `LIFT_TOP_MM` を設定して高さがそれ以上でも上昇できる → 赤
 - **実機で管理担当が確かめる**: 起動直後は上昇しない（`HEIGHT_UNKNOWN`）→ 下げて下端に着けると上昇できる／`LIFT_TOP_MM` を仮に低く置いて、そこで止まる
+
+### `WP-IO-03` UNO に `R` 行
+
+- 読む節: [-power.md](DetailedDesign-power.md) §2、[-protocol.md](DetailedDesign-protocol.md) §5、[DetailedDesign.md](DetailedDesign.md) §3.4・§4.5
+- 作るもの: `io_codec`（`parse_r_line`）・`IoController`（`on_relax`。力を抜いた状態を次の `on_command` まで保つ・途絶えても戻らない）・`IoHal::servo_off`・`hal_uno`（パルスを止める。`OCR1A` を 0 にするなど）・`main.cpp`（`R` 行を渡す）・`io_core_version` を上げる・`io_hal.h`・`io_controller.h` のコメント（「サーボのパルスは止めない」に例外を書く）
+- 受け入れ: `pio test -d firmware/cam_io -e native`・`pio run -d firmware/cam_io -e uno` が通る。**変異**: `R` のあと途絶えたらパルスが戻る／`R` のあとの `M` で戻らない／`R` でヨーが止まらない／`M` のあとの途絶えでパルスが止まる（`P-8` を壊す）／`parse_r_line` が `R` 以外の行や余計な欄を通す → 赤（**`tick` の呼び出し側で縛る**。純関数だけで縛らない）
+
+### `WP-VIDEO-04` `hve_video` に `POST /capture`
+
+- 読む節: [-power.md](DetailedDesign-power.md) §3、[DetailedDesign.md](DetailedDesign.md) §4.4
+- 作るもの: `camera/hve_video/server.py`（`POST /capture`・127.0.0.1 だけ・止めている間の `/snapshot`）・`sources.py`（`MjpegPipeSource` を止める・起こす・最後の 1 枚を捨てる）・`FakeSource` も同じに・`params.toml` に `snapshot_wake_wait_ms`（`provisional` にも）
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**変異**: 止めても子プロセスが残る／止めている間の `/snapshot` が古い 1 枚を返す／外の宛先からの `/capture` を受ける／同じ値を 2 回受けると子プロセスが 2 つになる → 赤
+
+### `WP-CAM-13` カメラモジュールの外し忘れの判定
+
+- 読む節: [-power.md](DetailedDesign-power.md) §1・§2・§4〜§6、[-protocol.md](DetailedDesign-protocol.md) §4・§5
+- 作るもの: `camera/hve_camera/power.py`（`IdlePower`）・`hw/power_hw.py`・`hw/fake_power.py`（`POST /api/fake` の `wlan_up`）・`uno_link.py`（`R` 行の組み立て）・`hw/uno_hw.py`（省電力の間は `R` を送る・`SETTLING` のピッチ）・`app.py`（`touch()` の入口・`step()`・`/capture` の送り直し・`state.power`）・`params.toml`（[-names.md](DetailedDesign-names.md) §5.3 の 6 つ。仮のものは `provisional` へ）・**`docs/使い方.md`**
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**偽物のモードで `OFF` の条件を満たしても実物の `poweroff` が呼ばれない**ことを試験で縛る。**変異**（`app.py`・`uno_hw.py` の**呼び出し側の数行**で縛る）: 電源断の条件から無線の条件を落とす／`idle` の条件を落とす／`ap_absent_ms` を待たない／無線が一瞬戻っても数え直さない／`touch()` で戻らない・戻ったのに `M` を送らない／`lift_moving` を数えない／画面を開くだけで `touch()` する／`poweroff` を 2 回呼ぶ／`SAVING` で `M` を送る → 赤
+
+### `WP-UI-05` 省電力の重ね表示
+
+- 読む節: [-power.md](DetailedDesign-power.md) §1・§6、spec [Spec-ui.md](../spec/Spec-ui.md) §0.1
+- 作るもの: `camera/web/app.js`（`powerText`・静止画のボタンで `touch` を送る・重ね表示を押すと `touch`）・`index.html`・`style.css`（`bPower`）・spec のモックアップ（省電力の見た目を足す）・**`docs/使い方.md`**（画面の文言）
+- 受け入れ: `node --test camera/web/tests/web.test.js`・スクロール検査・`browser_paths.js`（9 は前から失敗）が通る。**変異**: `saving` で重ね表示を出さない／静止画のボタンで `touch` を送らない／重ね表示を押しても `touch` を送らない → 赤
+
+### `WP-MEAS-07` 電池の消費と無線の見え方（管理担当・ユーザー）
+
+- USB テスターをモバイルバッテリの出力 A（モータ）・B（UnitV2・UNO）に挟み、**通常（映像あり）・省電力（`SAVING`）・電源断のあと**の電流を測る。省電力はピッチのパルスあり／なしも
+- `th-rpi-ap` を止め、`wlan0` の `operstate` が何秒で `up` 以外になるか（変わらなければ [-power.md](DetailedDesign-power.md) §4 の代わりの方法）
+- `poweroff` で UnitV2 が止まるか・電源断のあと電池が自分で出力を止めるか（`D-9`）
+- 結果で `ap_absent_ms`（`H-V16`）・`power_save_pitch_deg`（`H-V15`）・`P-15`・`H-V7` を決める

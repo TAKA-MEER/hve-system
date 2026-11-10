@@ -82,6 +82,16 @@
 | `LiftLink.current_host` | `camera/hve_camera/lift_link.py` | いま繋いでいる昇降部のホスト（画面に昇降部の IP とリンクを出すため） |
 | `FakeHardware.set_io_lost` | `camera/hve_camera/hw/` の偽物 | 偽物のモードで Arduino から行が来ない状態を作る |
 
+### 1.6 外し忘れの省電力の名前（2026-11-10。[-power.md](DetailedDesign-power.md)。`WP-IO-03`・`WP-VIDEO-04`・`WP-CAM-13`・`WP-UI-05`）
+
+| 名前 | 置き場 | 中身 |
+| --- | --- | --- |
+| `IdlePower`・`touch`・`step` ／ 状態 `ACTIVE`・`SETTLING`・`SAVING`・`OFF` | `camera/hve_camera/power.py` | 無操作の判定（純関数のクラス） |
+| `PowerHw`・`wlan_up`・`poweroff` | `camera/hve_camera/hw/power_hw.py`（実物）・`hw/fake_power.py`（偽物） | 機体の無線と電源断の口。偽物は `poweroff` を呼ばない |
+| `POST /capture`（`{"on": bool}`） | `camera/hve_video/server.py` | 取り込みを止める・戻す（127.0.0.1 だけ） |
+| `parse_r_line` ／ `IoController::on_relax` ／ `IoHal::servo_off` | `firmware/cam_io/lib/io_core/` | `R` 行の読み取り・力を抜いた状態の保持・パルスを止める |
+| `powerText`・`bPower` | `camera/web/app.js`・`index.html` | 省電力の重ね表示 |
+
 ### 1.4 カメラモジュールの画面の名前（`WP-UI-02` で足した。2026-10-07 に管理担当が登録）
 
 | 名前 | 置き場 | 中身 |
@@ -148,7 +158,7 @@
 ## 4. メッセージ
 
 種類 `t` は昇降部の WS で `hello` / `hold` / `release` / `state`、カメラモジュールの WS で旧版と同じ `hold` / `release` / `zoom` / `state`。
-UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesign-protocol.md) が正。
+UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesign-power.md) §2）。カメラモジュールの WS に **`touch`**（画面 → アプリ。静止画のボタン・省電力の重ね表示）と `state.power` を足す（同 §1・§6）。フィールドは [-protocol.md](DetailedDesign-protocol.md) が正。
 
 **上部モジュールの複数対応（2026-11-05。fk-system・ss-system が確かめ済み。`WP-LIFT-13`・`-14`・`WP-LIFTUI-03`・`WP-CAM-10`）で足すもの**。フィールドは [-protocol-modules.md](DetailedDesign-protocol-modules.md) が正:
 
@@ -266,6 +276,13 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | **`video_send_timeout_ms`** | 5000 | **仮**（1 枚の書き込みがこれを超えた接続を捨てる。[DetailedDesign.md](DetailedDesign.md) §4.4。無線の一時的な途切れで切らない長さ） |
 | `settings_path` | `/home/m5stack/hve_data/settings.json` | 実機調査（root で動かすので `~` を使わない。ルートに 117 MB 空き）。**ピッチ・ヨーの 2 軸だけを保存する** |
 
+| **`idle_save_ms`** | 1800000 | spec [Spec-power.md](../spec/Spec-power.md) §1（30 分。2026-11-10 ユーザー決定） |
+| **`ap_absent_ms`** | 60000 | **仮**（`H-V16`。機体の無線が見えない状態がこれだけ続いたら「飛んでいない」） |
+| **`power_save_pitch_deg`** | 0 | **仮**（`H-V15`。力を抜く前に動かす角度） |
+| **`power_save_settle_ms`** | 1500 | **仮**（その角度へ動き終わるのを待つ時間） |
+| **`power_check_period_ms`** | 1000 | **仮**（無線を見る・`/capture` を送り直す周期） |
+| **`snapshot_wake_wait_ms`** | 3000 | **仮**（取り込みを止めている間の静止画の要求で、新しい 1 枚を待つ上限） |
+
 ### 5.3.1 カメラモジュールの画面（`camera/web/app.js`）
 
 | 名前 | 値 | 出どころ |
@@ -278,7 +295,7 @@ UART の行は `M` / `C` / `B`。フィールドは [-protocol.md](DetailedDesig
 | 名前 | 置き場 | 値 | 出どころ |
 | --- | --- | --- | --- |
 | `IO_BAUD` | `io_core/io_codec.h` | 115200 | M5 文書の例。**16 MHz の UNO では誤差 約 2 %。化けるなら 57600 に下げ、`io_baud` と揃える**（`WP-MEAS-06`） |
-| `IO_LINE_MAX` | `io_codec.h` | 32 | `M 65535 -1800 -680` が 20 文字 |
+| `IO_LINE_MAX` | `io_codec.h` | 32 | `M 65535 -1800 -680` が 20 文字（`R 65535` は 7 文字） |
 | `IO_CMD_TIMEOUT_MS` | `io_controller.h` | 300 | **仮**（`io_cmd_period_ms` の 6 倍） |
 | `YAW_HSPS_ABS_MAX` | `io_controller.h` | 680 | 60 deg/s × 4096 ÷ 360 ≒ 683（`axis_speed_abs_max_dps` と揃える） |
 | `PITCH_MIN_DEG` / `PITCH_MAX_DEG` | `io_controller.h` | -60 / 60 | **仮**。**UnitV2 側（±45）より広い 2 つ目の守り**。機構に当たらない範囲を実機で決める（`H-X5`） |
