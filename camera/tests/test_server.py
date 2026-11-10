@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import os
 import re
 import socket
 import struct
@@ -411,6 +412,7 @@ class CountingPipeline:
     def __init__(self):
         self.calls = 0
         self.level = 1.0
+        self.capture_wanted = True
 
     def jpeg_bytes(self):
         self.calls += 1
@@ -673,3 +675,281 @@ async def test_a_dropped_connection_is_aborted_when_setsockopt_fails(fake_respon
     sock.setsockopt.side_effect = OSError("boom")
     await _drop_stuck_connection(fake_app(CountingPipeline(), send_timeout_ms=100), transport)
     assert calls == ["abort"]
+
+
+# --- 取り込みを止める・戻す（POST /capture。DetailedDesign-power.md §3） ----------------------
+
+
+def capture_request_from(peer: str, body: bytes = b"") -> object:
+    request = request_from(peer, body)
+    return request.clone(rel_url="/capture")
+
+
+class PipeChild:
+    """`v4l2-ctl` の子プロセスの代わり。標準出力はパイプ。"""
+
+    def __init__(self):
+        read_fd, self._write_fd = os.pipe()
+        self.stdout = os.fdopen(read_fd, "rb")
+        self.terminated = False
+
+    def feed(self, data: bytes) -> None:
+        if not self.terminated:
+            os.write(self._write_fd, data)
+
+    def poll(self):
+        return 0 if self.terminated else None
+
+    def terminate(self):
+        if not self.terminated:
+            self.terminated = True
+            os.close(self._write_fd)
+
+    kill = terminate
+
+    def wait(self, timeout=None):
+        return 0
+
+
+class ScriptedSpawner:
+    """起動のたびに子プロセスを作り、`frame_on_spawn` があれば起動の直後に 1 枚流す。"""
+
+    def __init__(self, frame_on_spawn: bytes | None = None):
+        self.frame_on_spawn = frame_on_spawn
+        self.children: list[PipeChild] = []
+
+    def __call__(self, command, **kwargs):
+        child = PipeChild()
+        self.children.append(child)
+        if self.frame_on_spawn is not None:
+            child.feed(self.frame_on_spawn)
+        return child
+
+    @property
+    def live(self) -> int:
+        return sum(1 for child in self.children if not child.terminated)
+
+
+def jpeg_gray(level: int) -> bytes:
+    ok, buffer = cv2.imencode(".jpg", np.full((48, 64, 3), level, dtype=np.uint8))
+    assert ok
+    return buffer.tobytes()
+
+
+def make_pipe_app(spawner, wake_wait_ms: float = 3000):
+    from hve_video.sources import MjpegPipeSource
+
+    source = MjpegPipeSource(
+        640, 480, 10, "/dev/video0", spawn=spawner, read_timeout=0.3, respawn_wait=0.05
+    )
+    pipeline = VideoPipeline(
+        source,
+        zoom=1.0,
+        zoom_max=ZOOM_MAX,
+        zoom_step=ZOOM_STEP,
+        out_height=OUT_HEIGHT,
+        jpeg_quality=JPEG_QUALITY,
+    )
+    app = video_server.create_app(pipeline, VIDEO_FPS, SEND_TIMEOUT_MS, wake_wait_ms)
+
+    async def release(_app):
+        source.release()
+
+    app.on_shutdown.append(release)
+    return app, source
+
+
+async def until(predicate, timeout: float = 3.0) -> bool:
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
+async def test_capture_from_another_address_is_forbidden():
+    app = make_app()
+    handler = handler_of(app, "POST", "/capture")
+    response = await handler(capture_request_from(FOREIGN_PEER, b'{"on": false}'))
+    assert response.status == 403
+    assert pipeline_of(app).capture_wanted  # 止まっていない
+    assert pipeline_of(app)._source.capturing
+
+
+async def test_capture_checks_the_peer_before_the_body():
+    app = make_app()
+    handler = handler_of(app, "POST", "/capture")
+    response = await handler(capture_request_from(FOREIGN_PEER, b"not json"))
+    assert response.status == 403
+
+
+@pytest.mark.skipif(
+    _non_loopback_address() is None, reason="127.0.0.1 以外のアドレスが無い"
+)
+async def test_capture_over_a_real_socket_from_another_address_is_forbidden():
+    address = _non_loopback_address()
+    app = make_app()
+    test_server = TestServer(app, host="0.0.0.0")
+    await test_server.start_server()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"http://{address}:{test_server.port}/capture", json={"on": False}
+            ) as response:
+                assert response.status == 403
+        assert pipeline_of(app)._source.capturing
+    finally:
+        await test_server.close()
+
+
+@pytest.mark.parametrize("body", [{"on": 1}, {"on": "false"}, {}, [True], {"off": True}])
+async def test_capture_rejects_a_body_without_a_boolean_on(aiohttp_client, body):
+    app = make_app()
+    client = await aiohttp_client(app)
+    response = await client.post("/capture", json=body)
+    assert response.status == 400
+    assert pipeline_of(app).capture_wanted
+
+
+async def test_capture_rejects_a_broken_body(aiohttp_client):
+    app = make_app()
+    client = await aiohttp_client(app)
+    response = await client.post("/capture", data=b"not json")
+    assert response.status == 400
+    assert pipeline_of(app).capture_wanted
+
+
+async def test_capture_off_stops_the_child_and_on_wakes_it(aiohttp_client):
+    spawner = ScriptedSpawner(jpeg_gray(60))
+    app, source = make_pipe_app(spawner)
+    client = await aiohttp_client(app)
+    assert await until(lambda: source.latest_jpeg() is not None)
+    response = await client.post("/capture", json={"on": False})
+    assert response.status == 200
+    assert (await response.json()) == {"on": False}
+    assert spawner.live == 0, "止めたのに子プロセスが残っている"
+    assert source.latest_jpeg() is None
+    assert (await client.post("/capture", json={"on": True})).status == 200
+    assert await until(lambda: spawner.live == 1)
+    assert await until(lambda: source.latest_jpeg() is not None)
+
+
+async def test_capture_repeating_a_value_never_makes_two_children(aiohttp_client):
+    spawner = ScriptedSpawner(jpeg_gray(60))
+    app, source = make_pipe_app(spawner)
+    client = await aiohttp_client(app)
+    for _ in range(3):
+        assert (await client.post("/capture", json={"on": True})).status == 200
+    for _ in range(3):
+        assert (await client.post("/capture", json={"on": False})).status == 200
+    assert spawner.live == 0
+    for _ in range(3):
+        assert (await client.post("/capture", json={"on": True})).status == 200
+    assert await until(lambda: len(spawner.children) == 2)
+    await asyncio.sleep(0.2)
+    assert len(spawner.children) == 2
+    assert spawner.live == 1
+
+
+async def test_snapshot_while_stopped_wakes_and_returns_a_new_frame(aiohttp_client):
+    spawner = ScriptedSpawner(jpeg_gray(60))
+    app, source = make_pipe_app(spawner)
+    client = await aiohttp_client(app)
+    assert await until(lambda: source.latest_jpeg() == jpeg_gray(60))
+    await client.post("/capture", json={"on": False})
+    spawner.frame_on_spawn = jpeg_gray(180)  # 起こして最初に来る 1 枚は、止める前と違う
+    response = await client.get("/snapshot")
+    assert response.status == 200
+    assert await response.read() == jpeg_gray(180), "古い 1 枚を返した"
+    # 待ち終わったら止めた状態へ戻す（起こしたままにしない）
+    assert await until(lambda: spawner.live == 0)
+    assert source.latest_jpeg() is None
+    assert not pipeline_of(app).capture_wanted
+
+
+async def test_snapshot_while_stopped_is_503_when_no_frame_comes(aiohttp_client):
+    spawner = ScriptedSpawner(jpeg_gray(60))
+    app, source = make_pipe_app(spawner, wake_wait_ms=200)
+    client = await aiohttp_client(app)
+    assert await until(lambda: source.latest_jpeg() is not None)
+    await client.post("/capture", json={"on": False})
+    spawner.frame_on_spawn = None  # 起こしても 1 枚も来ない
+    response = await client.get("/snapshot")
+    assert response.status == 503
+    assert await until(lambda: spawner.live == 0), "起こしたままになっている"
+
+
+async def test_snapshot_does_not_turn_the_capture_off_when_it_was_turned_on_meanwhile(
+    aiohttp_client,
+):
+    spawner = ScriptedSpawner(None)
+    app, source = make_pipe_app(spawner, wake_wait_ms=1500)
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    task = asyncio.ensure_future(client.get("/snapshot"))
+    assert await until(lambda: spawner.live == 1)
+    assert (await client.post("/capture", json={"on": True})).status == 200
+    spawner.children[-1].feed(jpeg_gray(120))
+    response = await task
+    assert response.status == 200
+    await asyncio.sleep(0.2)
+    assert spawner.live == 1, "/capture true が来ていたのに止めた"
+    assert pipeline_of(app).capture_wanted
+
+
+async def test_stream_sends_nothing_while_stopped_but_keeps_the_connection(aiohttp_client):
+    app = make_app()
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    async with client.get("/stream") as response:
+        assert response.status == 200
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(first_jpeg(response), timeout=0.5)
+        await client.post("/capture", json={"on": True})
+        fields, body = await asyncio.wait_for(first_jpeg(response), timeout=3.0)
+        assert body.startswith(b"\xff\xd8")
+
+
+async def test_fake_source_follows_capture_and_snapshot(aiohttp_client):
+    app = make_app()
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    assert not pipeline_of(app)._source.capturing
+    response = await client.get("/snapshot")  # 起こして新しい 1 枚を返す
+    assert response.status == 200
+    assert await until(lambda: not pipeline_of(app)._source.capturing)
+
+
+async def test_stream_sends_nothing_while_a_snapshot_wakes_the_capture(aiohttp_client):
+    """静止画のために起こしている間も、`/capture` が偽なら `/stream` へ 1 枚も送らない。"""
+    spawner = ScriptedSpawner(None)
+    app, source = make_pipe_app(spawner)
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    pipeline = pipeline_of(app)
+    async with client.get("/stream") as stream:
+        pipeline.acquire_wake()  # 静止画の待ちが続いている状態
+        try:
+            assert await until(lambda: spawner.live == 1)
+            spawner.children[-1].feed(jpeg_gray(120))
+            assert await until(lambda: source.latest_jpeg() is not None)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(first_jpeg(stream), timeout=0.6)
+        finally:
+            pipeline.release_wake()
+
+
+async def test_capture_off_during_a_snapshot_wake_does_not_cut_the_wake_short(aiohttp_client):
+    """起こしている最中に `/capture` false が来ても、静止画の待ちは終わりまで続く。"""
+    spawner = ScriptedSpawner(None)
+    app, source = make_pipe_app(spawner, wake_wait_ms=1500)
+    client = await aiohttp_client(app)
+    await client.post("/capture", json={"on": False})
+    task = asyncio.ensure_future(client.get("/snapshot"))
+    assert await until(lambda: spawner.live == 1)
+    assert (await client.post("/capture", json={"on": False})).status == 200
+    spawner.children[-1].feed(jpeg_gray(120))
+    response = await task
+    assert response.status == 200
+    assert await until(lambda: spawner.live == 0)
