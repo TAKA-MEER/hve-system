@@ -68,6 +68,7 @@ class FakeSource:
         self._height = int(capture_height)
         self._index = 0
         self._released = False
+        self._capturing = True
         self._last: np.ndarray | None = None
         if self._width < 1 or self._height < 1:
             raise ValueError(f"取り込みの大きさが 0 以下: {capture_width}x{capture_height}")
@@ -89,9 +90,22 @@ class FakeSource:
         """取り込みの大きさ `(幅, 高さ)`。"""
         return self._width, self._height
 
+    @property
+    def capturing(self) -> bool:
+        return self._capturing
+
+    def set_capturing(self, on: bool) -> None:
+        """取り込みを止める・戻す（power §3）。止めると最後の 1 枚を捨てる。同じ値を何度でも受ける。"""
+        on = bool(on)
+        if on == self._capturing:
+            return
+        self._capturing = on
+        if not on:
+            self._last = None
+
     def read(self) -> np.ndarray | None:
-        """次の 1 フレームを返す。`release()` したあとは `None`。"""
-        if self._released:
+        """次の 1 フレームを返す。`release()` したあと・取り込みを止めている間は `None`。"""
+        if self._released or not self._capturing:
             return None
         self._last = self._render()
         self._index += 1
@@ -111,10 +125,19 @@ class FakeSource:
         return frame
 
     def latest_jpeg(self) -> bytes | None:
-        """最後に作った絵をその場で JPEG にして返す（実物の「カメラの JPEG」の代わり）。"""
+        """最後に作った絵をその場で JPEG にして返す（実物の「カメラの JPEG」の代わり）。
+
+        取り込みを止めている間は捨てたので `None`（古い 1 枚を返さない）。
+        """
+        if not self._capturing:
+            return None
         frame = self._last if self._last is not None else self._render()
         ok, buffer = cv2.imencode(".jpg", frame)
         return buffer.tobytes() if ok else None
+
+    def wait_latest_jpeg(self, timeout: float) -> bytes | None:
+        """新しい 1 枚を待って返す。偽物は取り込み中ならその場で作れるので待たない。"""
+        return self.latest_jpeg()
 
     def release(self) -> None:
         self._released = True
@@ -156,6 +179,7 @@ class MjpegPipeSource:
         self._sequence = 0  # 区切れた枚数
         self._taken = 0  # `read()` が取った枚数の印
         self._closed = False
+        self._capturing = True  # False の間は子プロセスを持たない（power §3）
         self._proc = None
         self._reader = threading.Thread(target=self._run, name="mjpeg-split", daemon=True)
         self._reader.start()
@@ -167,18 +191,32 @@ class MjpegPipeSource:
     def _run(self) -> None:
         """子プロセスを動かし、標準出力を区切って最新の 1 枚を更新する。死んだら起動し直す。"""
         while not self._closed:
+            with self._cond:
+                while not self._capturing and not self._closed:
+                    self._cond.wait()
+            if self._closed:
+                break
             try:
-                self._proc = self._spawn(
+                proc = self._spawn(
                     self._command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
                 )
+                self._proc = proc
             except OSError as error:
                 log.error("v4l2-ctl を起動できない: %s", error)
                 self._wait_before_respawn()
                 continue
+            if not self._capturing:
+                # 起動の途中で止められた。`set_capturing(False)` が子プロセスを見つける前に
+                # 起動していたかもしれないので、ここで確実に止める
+                self._stop_child()
+                continue
             pending = b""
-            stdout = self._proc.stdout
-            while not self._closed:
-                chunk = stdout.read1(READ_CHUNK_BYTES)
+            stdout = proc.stdout
+            while not self._closed and self._capturing:
+                try:
+                    chunk = stdout.read1(READ_CHUNK_BYTES)
+                except (ValueError, OSError):
+                    break  # 止める側が標準出力を閉じた
                 if not chunk:
                     break  # 子プロセスが終わった
                 frames, pending = split_mjpeg(pending + chunk)
@@ -186,11 +224,13 @@ class MjpegPipeSource:
                     pending = b""
                 if frames:
                     with self._cond:
+                        if not self._capturing:
+                            break  # 止めたあとに届いた分は捨てる
                         self._latest = frames[-1]
                         self._sequence += len(frames)
                         self._cond.notify_all()
             self._stop_child()
-            if not self._closed:
+            if not self._closed and self._capturing:
                 log.warning("v4l2-ctl が終わった。起動し直す")
                 self._wait_before_respawn()
 
@@ -218,9 +258,42 @@ class MjpegPipeSource:
         except Exception:
             pass
 
-    def latest_jpeg(self) -> bytes | None:
-        """最後に受けたカメラの JPEG をそのまま返す。まだ 1 枚も無ければ `None`。"""
+    @property
+    def capturing(self) -> bool:
+        return self._capturing
+
+    def set_capturing(self, on: bool) -> None:
+        """取り込みの子プロセスを止める・起こす（power §3）。
+
+        止めるときは子プロセスを止め終えてから戻り、**最後の 1 枚を捨てる**（古い 1 枚を返さない）。
+        同じ値を何度受けても子プロセスは 1 つだけ。
+        """
+        on = bool(on)
         with self._cond:
+            if on == self._capturing:
+                return
+            self._capturing = on
+            if not on:
+                self._latest = None
+                self._taken = self._sequence
+            self._cond.notify_all()
+        if not on:
+            self._stop_child()
+
+    def latest_jpeg(self) -> bytes | None:
+        """最後に受けたカメラの JPEG をそのまま返す。まだ 1 枚も無ければ（止めて捨てたあとも）`None`。"""
+        with self._cond:
+            return self._latest
+
+    def wait_latest_jpeg(self, timeout: float) -> bytes | None:
+        """最後の JPEG を返す。無ければ新しい 1 枚が来るまで最大 `timeout` 秒待つ。来なければ `None`。"""
+        deadline = time.monotonic() + float(timeout)
+        with self._cond:
+            while self._latest is None and not self._closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._cond.wait(remaining)
             return self._latest
 
     def read(self) -> np.ndarray | None:
@@ -231,12 +304,18 @@ class MjpegPipeSource:
         deadline = time.monotonic() + self._read_timeout
         while True:
             with self._cond:
-                while self._sequence == self._taken and not self._closed:
+                if not self._capturing:
+                    return None  # 止めている間は取らない
+                while (
+                    self._sequence == self._taken
+                    and not self._closed
+                    and self._capturing
+                ):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
                         return None
                     self._cond.wait(remaining)
-                if self._closed:
+                if self._closed or not self._capturing or self._latest is None:
                     return None
                 jpeg = self._latest
                 self._taken = self._sequence

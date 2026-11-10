@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 
 import cv2
@@ -337,3 +338,87 @@ def test_open_source_picks_the_real_camera_with_the_params(monkeypatch):
     source = sources.open_source(False, 1280, 720, 10, "/dev/video0")
     assert isinstance(source, Recorded)
     assert made == [(1280, 720, 10, "/dev/video0")]
+
+
+# --- 取り込みを止める・起こす（DetailedDesign-power.md §3） ---------------------------------
+
+
+def test_mjpeg_pipe_source_stops_the_child_when_capturing_is_off(pipe_source):
+    source = pipe_source()
+    child = pipe_source.spawner.children[0]
+    child.feed(jpeg_of(50))
+    assert wait_until(lambda: source.latest_jpeg() is not None)
+    source.set_capturing(False)
+    assert child.terminated, "止めたのに子プロセスが残っている"
+    assert not source.capturing
+
+
+def test_mjpeg_pipe_source_discards_the_last_frame_when_capturing_is_off(pipe_source):
+    source = pipe_source()
+    pipe_source.spawner.children[0].feed(jpeg_of(50))
+    assert wait_until(lambda: source.latest_jpeg() is not None)
+    source.set_capturing(False)
+    assert source.latest_jpeg() is None, "古い 1 枚が残っている"
+    assert source.read() is None
+
+
+def test_mjpeg_pipe_source_does_not_respawn_while_stopped(pipe_source):
+    source = pipe_source(respawn_wait=0.05)
+    source.set_capturing(False)
+    time.sleep(0.4)
+    assert len(pipe_source.spawner.children) == 1
+
+
+def test_mjpeg_pipe_source_wakes_with_one_child_and_a_new_frame(pipe_source):
+    source = pipe_source()
+    pipe_source.spawner.children[0].feed(jpeg_of(50))
+    assert wait_until(lambda: source.latest_jpeg() is not None)
+    source.set_capturing(False)
+    source.set_capturing(True)
+    assert wait_until(lambda: len(pipe_source.spawner.children) == 2)
+    assert source.latest_jpeg() is None, "起こした直後に古い 1 枚がある"
+    pipe_source.spawner.children[1].feed(jpeg_of(200))
+    assert wait_until(lambda: source.latest_jpeg() == jpeg_of(200))
+    frame = source.read()
+    assert frame is not None and abs(int(frame.mean()) - 200) <= 3
+
+
+def test_mjpeg_pipe_source_repeating_the_same_value_keeps_one_child(pipe_source):
+    source = pipe_source()
+    for _ in range(3):
+        source.set_capturing(True)
+    time.sleep(0.2)
+    assert len(pipe_source.spawner.children) == 1
+    source.set_capturing(False)
+    source.set_capturing(False)
+    source.set_capturing(True)
+    source.set_capturing(True)
+    assert wait_until(lambda: len(pipe_source.spawner.children) == 2)
+    time.sleep(0.2)
+    assert len(pipe_source.spawner.children) == 2
+    live = [c for c in pipe_source.spawner.children if not c.terminated]
+    assert len(live) == 1, "子プロセスが 2 つ動いている"
+
+
+def test_mjpeg_pipe_source_wait_latest_jpeg_waits_for_a_new_frame(pipe_source):
+    source = pipe_source()
+    source.set_capturing(False)
+    source.set_capturing(True)
+    assert wait_until(lambda: len(pipe_source.spawner.children) == 2)
+    assert source.wait_latest_jpeg(0.1) is None
+    threading.Timer(0.1, lambda: pipe_source.spawner.children[1].feed(jpeg_of(90))).start()
+    assert source.wait_latest_jpeg(2.0) == jpeg_of(90)
+
+
+def test_fake_source_stops_discards_and_resumes():
+    source = sources.FakeSource(64, 48)
+    assert source.read() is not None
+    source.set_capturing(False)
+    assert not source.capturing
+    assert source.read() is None
+    assert source.latest_jpeg() is None, "古い 1 枚が残っている"
+    source.set_capturing(False)  # 同じ値を何度受けてもよい
+    source.set_capturing(True)
+    source.set_capturing(True)
+    assert source.read() is not None
+    assert source.latest_jpeg() is not None
