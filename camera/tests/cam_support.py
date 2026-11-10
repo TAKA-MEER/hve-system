@@ -53,6 +53,11 @@ PARAMS: dict[str, Any] = {
     "ceiling_read_stale_ms": 600,
     "uno_clock_window": 20,
     "video_port": 8080,
+    "idle_save_ms": 1800000,
+    "ap_absent_ms": 60000,
+    "power_save_pitch_deg": 0,
+    "power_save_settle_ms": 1500,
+    "power_check_period_ms": 1000,
     "provisional": ["hold_timeout_ms", "lift_cmd_period_ms"],
 }
 
@@ -101,6 +106,21 @@ class RecordingVideoZoom:
             return True
         self.pending = float(level)
         return False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class RecordingVideoCapture:
+    """`VideoCapture` の偽物。送られた取り込みの入り切りを順番どおりに覚える。"""
+
+    def __init__(self) -> None:
+        self.sent: list[bool] = []
+        self.closed = False
+
+    async def send_capture(self, on: bool) -> bool:
+        self.sent.append(bool(on))
+        return True
 
     async def close(self) -> None:
         self.closed = True

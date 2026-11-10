@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Callable
 
 from hve_camera.ceiling import CeilingReading, CeilingStatus
-from hve_camera.hw.base import HardwareBase
+from hve_camera.hw.base import POWER_ACTIVE, POWER_MODES, HardwareBase
 
 #: 時計の型。`Callable[[], float]`。ms を返す。
 Clock = Callable[[], float]
@@ -42,6 +42,10 @@ class FakeHardware(HardwareBase):
         self._steady: tuple[CeilingStatus, int | None] | None = None
         #: `True` の間は行が来ない（`POST /api/fake` の `io_lost`。`IO_LOST` を再現する）
         self._io_lost = False
+        #: 外し忘れの省電力の段階と、そのとき渡されたピッチの角度（履歴つき）
+        self.power_mode: str = POWER_ACTIVE
+        self.power_pitch_deg: float = 0.0
+        self.power_history: list[tuple[str, float]] = []
         self.closed = False
 
     # --- 外から天井の読み値を差し替える ----------------------------------------------------------
@@ -102,6 +106,13 @@ class FakeHardware(HardwareBase):
         self.yaw_steps_per_s = 0.0
         self.yaw_direction = None
         self.yaw_history.append(None)
+
+    async def set_power_mode(self, mode: str, pitch_deg: float) -> None:
+        if mode not in POWER_MODES:
+            raise ValueError("知らない省電力の段階: %r" % (mode,))
+        self.power_mode = mode
+        self.power_pitch_deg = float(pitch_deg)
+        self.power_history.append((mode, self.power_pitch_deg))
 
     async def close(self) -> None:
         self.closed = True

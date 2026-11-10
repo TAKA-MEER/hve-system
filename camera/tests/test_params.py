@@ -39,6 +39,11 @@ EXPECTED = {
     "ceiling_read_stale_ms": 600,
     "uno_clock_window": 20,
     "video_port": 8080,
+    "idle_save_ms": 1800000,
+    "ap_absent_ms": 60000,
+    "power_save_pitch_deg": 0,
+    "power_save_settle_ms": 1500,
+    "power_check_period_ms": 1000,
     "provisional": [
         "hold_timeout_ms",
         "lift_cmd_period_ms",
@@ -55,6 +60,10 @@ EXPECTED = {
         "io_lost_ms",
         "ceiling_read_stale_ms",
         "uno_clock_window",
+        "ap_absent_ms",
+        "power_save_pitch_deg",
+        "power_save_settle_ms",
+        "power_check_period_ms",
     ],
 }
 
