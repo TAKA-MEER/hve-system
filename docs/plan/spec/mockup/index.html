@@ -81,6 +81,11 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .zoombtn:disabled{opacity:.35;cursor:not-allowed}
 .nosig{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--mut);background:#050608;font-size:16px}
 .nosig.show{display:flex}
+/* 省電力の重ね表示（押すと戻る。映像の上に重ねる。スクロールはさせない） */
+.powerbar{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:16px;
+  border:0;background:rgba(0,0,0,.72);color:var(--warn-tx);font-size:clamp(13px,2.2vh,18px);font-weight:700;
+  line-height:1.6;cursor:pointer;z-index:2;overflow:clip}
+.powerbar.show{display:flex}
 
 /* ---------- 操作パネル ---------- */
 .panel{min-height:0;display:grid;gap:var(--gap);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
@@ -206,6 +211,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
       <button class="zoombtn" id="zOut" title="縮小">−</button>
     </div>
     <div class="nosig" id="nosig">映像がありません</div>
+    <!-- 省電力中（state.power.mode が saving の間だけ出す。押すと touch を送る） -->
+    <button class="powerbar" id="bPower"></button>
     <div class="stopbar" id="stopbar"></div>
     <!-- 静止画（押した端末だけ。映像の上に重ねる。操作ボタンは映像の外なので表示中も効く。Spec-ui.md §1.5.1） -->
     <div class="snapshot" id="snapshot">
@@ -286,6 +293,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     <button data-mock="liftUi">昇降部の画面から操作</button>
     <button data-mock="ws">カメラ部と接続切れ</button>
     <button data-mock="novideo">映像なし</button>
+    <button data-mock="power">省電力中</button>
     <button data-mock="fake">偽物のモード表示</button>
     <button data-mock="clients">端末 2 台</button>
     <button data-mock="reload">画面を開き直す</button>
@@ -321,7 +329,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   // origin が偽の間（電源投入から下端に着くまで）は、画面に高さを出せない
   const S = {height:0, origin:true, ceilingAt:2400, pitch:0, yaw:0,
              link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true,
-             active:null, reason:'NONE', runAxis:null, runT:0, runDist:0, meas:0};
+             power:false, active:null, reason:'NONE', runAxis:null, runT:0, runDist:0, meas:0};
+  const POWER_TEXT = '省電力中です。操作すると戻ります。機体の無線が無くなると電源を切ります';
   // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_PCT・pitch_min/max_deg）。GAUGE_FULL は上端の閾値
   const PITCH_LIM = 45, MAX_RUN_PCT = 150, GAUGE_FULL = 1800;
 
@@ -574,6 +583,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     $('bLiftUi').lastElementChild.textContent = `昇降部の画面 ${S.liftUi ? 1 : 0}`;
     $('bLiftLink').style.display = S.link ? '' : 'none';
     $('bWs').style.display = S.ws ? 'none' : '';
+    $('bPower').classList.toggle('show', S.power);
+    $('bPower').textContent = S.power ? POWER_TEXT : '';
     // 映像: 画面中央に来る世界の y。下端では盤面、上がるほど盤上部へ。ピッチ上向きでさらに上
     drawScene();
     $('osdH').textContent = S.origin ? `高さ ${Math.round(S.height)} mm` : '高さ 読めない';
@@ -700,7 +711,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   $('mockRow').addEventListener('click', e => {
     const m = e.target.dataset.mock; if (!m) return;
     if (m === 'normal'){
-      Object.assign(S, {link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true, ceilingAt:2400});
+      Object.assign(S, {link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true, power:false, ceilingAt:2400});
       S.origin = true;
       $('bFake').style.display = 'none'; $('bClients').lastElementChild.textContent = '端末 1';
       document.querySelectorAll('#mockRow button').forEach(b => b.classList.toggle('on', b.dataset.mock === 'normal'));
@@ -716,7 +727,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     document.querySelector('#mockRow [data-mock=normal]').classList.remove('on');
     e.target.classList.toggle('on');
     const on = e.target.classList.contains('on');
-    const toggles = {ceilStale:'ceilStale', ceilOut:'ceilOut', stall:'stall', liftUi:'liftUi'};
+    const toggles = {ceilStale:'ceilStale', ceilOut:'ceilOut', stall:'stall', liftUi:'liftUi', power:'power'};
     if (toggles[m]) S[toggles[m]] = on;
     if (m === 'link') S.link = !on;
     if (m === 'io') S.io = !on;
@@ -728,7 +739,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   });
 
   applySliders();
-  // 確認用: ?h=<高さ>&pitch=<deg>&yaw=<deg>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&mock=1 で状態を作って開ける
+  // 確認用: ?h=<高さ>&pitch=<deg>&yaw=<deg>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&power=1&mock=1 で状態を作って開ける
   const q = new URLSearchParams(location.search);
   if (q.has('h')) S.height = +q.get('h');
   if (q.has('pitch')) S.pitch = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, +q.get('pitch')));
@@ -739,6 +750,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   if (q.has('settings')) openSettings();
   if (q.has('zoom')) setZoom(+q.get('zoom'));
   if (q.has('snap')) openSnapshot();
+  if (q.has('power')) S.power = true;
   if (q.has('mock')) { placeMock(); $('mockPop').classList.add('show'); }
   requestAnimationFrame(tick);
 })();
