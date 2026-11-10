@@ -24,12 +24,14 @@ from hve_camera.app import VideoZoom, create_app
 from hve_camera.ceiling import CeilingStatus
 from hve_camera.hw.fake_hw import FakeHardware
 from hve_camera.hw.fake_lift import FakeLift
+from hve_camera.hw.fake_power import FakePower
 from hve_camera.lift_link import LiftLink
 from tests.cam_support import (
     PARAMS,
     SETTINGS,
     FakeEsp32,
     ManualClock,
+    RecordingVideoCapture,
     RecordingVideoZoom,
     wait_until,
 )
@@ -53,6 +55,9 @@ class Rig:
         self.hw = FakeHardware(self.clock)
         self.hw.set_steady_ceiling(CeilingStatus.MEASURED, 2000)
         self.zoom = RecordingVideoZoom(deliver=deliver_zoom)
+        #: 外し忘れの省電力（`WP-CAM-13`）の偽物。電源の口は必ず偽物
+        self.power = FakePower()
+        self.capture = RecordingVideoCapture()
         self.settings = copy.deepcopy(SETTINGS)
         self.fake = fake
         self.autostart = autostart
@@ -107,6 +112,8 @@ class Rig:
             params=self.params,
             clock=self.clock,
             video_zoom=self.zoom,
+            video_capture=self.capture,
+            power_hw=self.power,
             fake=self.fake,
             autostart=self.autostart,
             settings_path=f"{SETTINGS_DIR}/settings-test.json",

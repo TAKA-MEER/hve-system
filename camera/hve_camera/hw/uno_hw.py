@@ -7,6 +7,9 @@
 - 送り: `io_cmd_period_ms` ごとに `M` 行を送る（**止まっている間も送る**。生存確認を兼ねる）。
   送る値は `set_pitch`・`drive_yaw`・`stop_yaw` で置き換えるだけ。専用スレッドで回すので、
   制御ループの周期を待たせない。
+- **外し忘れの省電力（`set_power_mode`）**: `settling` の間は `M` のピッチを倒れてもよい角度にして送る
+  （軸の目標角は書き換えない）。`saving` の間は **`M` の代わりに `R` 行**を同じ周期で送る
+  （ピッチの力を抜き、ヨーを止める）。`active` に戻れば `M` を軸の目標角で送り直す。
 - 受け: `read_ceiling()` が**読むたびに受信バッファを全部読み出し**、`C` 行のうち
   最も新しい `uno_ms` の行だけを天井に使う。`UnoClock` で Arduino の時計を直す。
 - **前回読んでから `ceiling_read_stale_ms` より長く空いたときは、その回に読み出した行を
@@ -26,8 +29,14 @@ import time
 from typing import Any, Callable, Mapping, Optional
 
 from hve_camera.ceiling import CeilingReading, CeilingStatus, classify_srf02
-from hve_camera.hw.base import HardwareBase
-from hve_camera.uno_link import UnoClock, encode_io_cmd, parse_io_line
+from hve_camera.hw.base import (
+    POWER_ACTIVE,
+    POWER_MODES,
+    POWER_SAVING,
+    POWER_SETTLING,
+    HardwareBase,
+)
+from hve_camera.uno_link import UnoClock, encode_io_cmd, encode_relax_cmd, parse_io_line
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +67,9 @@ class UnoHardware(HardwareBase):
         self._pitch_deg = 0.0
         self._yaw_hsps = 0
         self._seq = 0
+        #: 外し忘れの省電力の段階と、`settling` で送るピッチの角度
+        self._power_mode = POWER_ACTIVE
+        self._save_pitch_deg = 0.0
 
         #: 前回 `read_ceiling()` で読み出した時刻（窓の空きの判定用）。
         self._last_drain_ms: Optional[float] = None
@@ -145,6 +157,14 @@ class UnoHardware(HardwareBase):
         with self._lock:
             self._yaw_hsps = 0
 
+    async def set_power_mode(self, mode: str, pitch_deg: float) -> None:
+        """省電力の段階を覚えるだけ（送るのは `io_cmd_period_ms` ごとのスレッド）。"""
+        if mode not in POWER_MODES:
+            raise ValueError("知らない省電力の段階: %r" % (mode,))
+        with self._lock:
+            self._power_mode = mode
+            self._save_pitch_deg = float(pitch_deg)
+
     async def close(self) -> None:
         """送るスレッドを止めてシリアルを閉じる。"""
         self._stop.set()
@@ -186,25 +206,30 @@ class UnoHardware(HardwareBase):
         return rows
 
     def _send_loop(self) -> None:
-        """`io_cmd_period_ms` ごとに `M` 行を送る（止まっている間も。生存確認を兼ねる）。"""
+        """`io_cmd_period_ms` ごとに `M` 行（省電力の `saving` では `R` 行）を送る。止まっている間も送る（生存確認を兼ねる）。"""
         period_s = float(self._params["io_cmd_period_ms"]) / 1000.0
         while not self._stop.is_set():
             started = time.monotonic()
             with self._lock:
-                pitch_ddeg = int(round(self._pitch_deg * 10))
+                mode = self._power_mode
+                pitch_deg = self._save_pitch_deg if mode == POWER_SETTLING else self._pitch_deg
+                pitch_ddeg = int(round(pitch_deg * 10))
                 yaw_hsps = self._yaw_hsps
                 seq = self._seq
                 self._seq = (self._seq + 1) % 65536
             try:
-                line = encode_io_cmd(seq, pitch_ddeg, yaw_hsps)
+                if mode == POWER_SAVING:
+                    line = encode_relax_cmd(seq)
+                else:
+                    line = encode_io_cmd(seq, pitch_ddeg, yaw_hsps)
             except ValueError as exc:
-                log.error("M 行を作れない: %s", exc)
+                log.error("UART の行を作れない: %s", exc)
                 line = ""
             if line:
                 try:
                     self._serial.write((line + "\n").encode("ascii"))
                 except Exception as exc:  # noqa: BLE001 - 送れなくてもスレッドは止めない
-                    log.warning("M 行を送れない: %s", exc)
+                    log.warning("UART の行を送れない: %s", exc)
             remaining = period_s - (time.monotonic() - started)
             if remaining > 0:
                 self._stop.wait(remaining)

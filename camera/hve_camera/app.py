@@ -14,6 +14,11 @@
 2. **画面が新しく繋がったら倍率を 1 に戻し、全画面に配る**（spec §1.5）。
 3. **`hve_video` が居なくてもアプリは止まらない。**倍率は `VideoZoom` が送れるまで覚えておく。
 4. **`POST /api/fake` は偽物のモードのときだけ存在させる。**（偽物でなければ 404）
+5. **外し忘れの省電力（[DetailedDesign-power.md](../../docs/plan/detailed/DetailedDesign-power.md)）。**
+   `touch()` を呼ぶのは画面の WS の `hold`・`release`・`zoom`・`touch` と `PUT /api/settings` **だけ**
+   （画面を開く・映像の接続・状態を読むだけでは呼ばない）。`control_step()` のたびに `IdlePower.step()` を回し、
+   段階が変わったら `HardwareBase.set_power_mode()` と `hve_video` の `/capture` へ伝える。
+   **偽物のモード（`fake=True`）では必ず `FakePower`。実物の `poweroff` を呼べない。**
 """
 
 from __future__ import annotations
@@ -29,9 +34,17 @@ import aiohttp
 from aiohttp import web
 
 from hve_camera.control import ControlLoop
-from hve_camera.hw.base import HardwareBase
+from hve_camera.hw.base import (
+    POWER_ACTIVE,
+    POWER_SAVING,
+    POWER_SETTLING,
+    HardwareBase,
+    PowerBase,
+)
+from hve_camera.hw.fake_power import FakePower
 from hve_camera.lift_link import LiftPort
 from hve_camera.lift_resolve import resolve_lift_host
+from hve_camera.power import IdlePower, PowerState
 from hve_camera.settings import (
     LIFT_AXES,
     MOTOR_MAX_PCT_DEFAULT,
@@ -105,6 +118,46 @@ class VideoZoom:
         return self._session
 
 
+class VideoCapture:
+    """取り込みの入り切りを `hve_video` へ送る（`POST /capture`）。**居なくても・古くて 404 でもアプリは止まらない。**"""
+
+    #: 1 回の送信を待つ上限 [秒]。`hve_video` が固まっていても制御ループを止めない
+    TIMEOUT_S = 1.0
+
+    def __init__(self, port: int) -> None:
+        self._url = f"http://127.0.0.1:{int(port)}/capture"
+        self._session: aiohttp.ClientSession | None = None
+        self._failing = False
+
+    async def send_capture(self, on: bool) -> bool:
+        """取り込みの入り切りを送る。**送れたら `True`、送れなかったら `False`（例外は投げない）。**"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.TIMEOUT_S))
+        try:
+            async with self._session.post(self._url, json={"on": bool(on)}) as response:
+                if response.status == 200:
+                    self._note(False, "hve_video に取り込みの入り切りを送れるようになった")
+                    return True
+                self._note(True, "hve_video が /capture を %s で受け付けなかった", response.status)
+        except Exception as exc:  # noqa: BLE001 - hve_video が居ない・古いのは想定内
+            self._note(True, "hve_video (%s) に /capture を送れなかった: %s", self._url, exc)
+        return False
+
+    def _note(self, failing: bool, message: str, *args: Any) -> None:
+        """送れなくなったときと復帰したときだけ記録する（毎秒の送り直しで繰り返し出さない）。"""
+        if failing == self._failing:
+            return
+        self._failing = failing
+        log.info(message, *args)
+
+    async def close(self) -> None:
+        if self._session is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._session.close()
+        self._session = None
+
+
 class CameraApp:
     """画面・設定 API・ブラウザとの WS を持つアプリ。制御ループもここに立ち上げる。"""
 
@@ -122,6 +175,8 @@ class CameraApp:
         settings_path: str | Path | None = None,
         web_dir: str | Path | None = None,
         autostart: bool = True,
+        power_hw: PowerBase | None = None,
+        video_capture: Any = None,
     ) -> None:
         self._hw = hw
         self._lift = lift
@@ -132,6 +187,33 @@ class CameraApp:
         self._settings_path = settings_path
         self._web_dir = Path(web_dir) if web_dir is not None else None
         self._autostart = autostart
+
+        # 外し忘れの省電力。**渡されなければ偽物**（実物の `poweroff` を勝手に選ばない）。
+        # 偽物のモードで実物を渡されたら作らない（開発機を落としうる）
+        if power_hw is None:
+            power_hw = FakePower()
+        if fake and not isinstance(power_hw, FakePower):
+            raise ValueError("偽物のモードでは FakePower しか使えない（実物の poweroff を呼ばない）")
+        self._power_hw: PowerBase = power_hw
+        #: `hve_video` へ取り込みの入り切りを送る口（`None` なら送らない）
+        self._video_capture = video_capture
+        #: 時間はアプリの起動から数える（power.md §1）
+        self._idle = IdlePower(
+            params["idle_save_ms"],
+            params["ap_absent_ms"],
+            params["power_save_settle_ms"],
+            clock(),
+        )
+        #: 最後に見た機体の無線（`power_check_period_ms` ごとに読む）と、読んだ時刻
+        self._wlan_up = True
+        self._wlan_checked_ms: float | None = None
+        #: `HardwareBase` に伝えた段階
+        self._applied_power: PowerState | None = None
+        #: `hve_video` に望む取り込みの値と、最後に送った時刻
+        self._capture_want = True
+        self._capture_sent_ms: float | None = None
+        #: `poweroff()` は 1 回だけ
+        self._poweroff_done = False
 
         #: 設定。`PUT /api/settings` で**中身を入れ替える**（制御ループと同じ物を見るため）
         self._settings = settings
@@ -181,14 +263,74 @@ class CameraApp:
         await self._lift.close()
         await self._hw.close()
         await self._video_zoom.close()
+        if self._video_capture is not None:
+            await self._video_capture.close()
 
     async def control_step(self) -> None:
         """制御ループ 1 回。**立ち上げたタスクも試験もこの関数を使う。**"""
         await self.control.step()
+        await self._power_step()
+
+    # --- 外し忘れの省電力（power.md） --------------------------------------------------------------
+
+    async def _touch(self) -> None:
+        """操作があった。**省電力中なら戻し、すぐ `M` 行と取り込みを戻す。**"""
+        self._idle.touch(self._clock())
+        await self._apply_power()
+
+    def _lift_moving(self) -> bool:
+        """昇降部が動いているか（誰が動かしていても。`state.lift.dir` が `stop` 以外）。"""
+        # **古い state は数えない**（昇降部の電源ごと落ちると最後の `dir: up` が残り、永久に省電力に入れなくなる）。
+        # 鮮度は `control.py` が `LINK_LOST` を決めるのと同じ基準（`lift_state_timeout_ms`）
+        if not self._lift.link_ok(self._clock(), float(self._params["lift_state_timeout_ms"])):
+            return False
+        raw = self._lift.latest_state() or {}
+        return raw.get("dir", "stop") != "stop"
+
+    async def _power_step(self) -> None:
+        """`IdlePower.step()` を回し、段階が変わったら伝える。`OFF` なら電源を切る（1 回だけ）。"""
+        now = self._clock()
+        period = float(self._params["power_check_period_ms"])
+        if self._wlan_checked_ms is None or now - self._wlan_checked_ms >= period:
+            self._wlan_checked_ms = now
+            self._wlan_up = bool(self._power_hw.wlan_up())
+        self._idle.step(now, self._lift_moving(), self._wlan_up)
+        await self._apply_power()
+        if self._idle.state is PowerState.OFF and not self._poweroff_done:
+            self._poweroff_done = True
+            log.warning("外し忘れとみなして電源を切る")
+            self._power_hw.poweroff()
+
+    async def _apply_power(self) -> None:
+        """今の段階を `HardwareBase` へ、望む取り込みを `hve_video` へ伝える（後者は周期でも送り直す）。"""
+        state = self._idle.state
+        if state is not self._applied_power:
+            self._applied_power = state
+            await self._hw.set_power_mode(
+                _POWER_MODE_OF[state], float(self._params["power_save_pitch_deg"])
+            )
+        if self._video_capture is None:
+            return
+        now = self._clock()
+        want = state is PowerState.ACTIVE
+        period = float(self._params["power_check_period_ms"])
+        if (
+            want != self._capture_want
+            or self._capture_sent_ms is None
+            or now - self._capture_sent_ms >= period
+        ):
+            self._capture_want = want
+            self._capture_sent_ms = now
+            await self._video_capture.send_capture(want)
+
+    def power_mode(self) -> str:
+        """画面へ出す `state.power.mode`（`active` / `saving`。`SETTLING`・`SAVING` はどちらも `saving`）。"""
+        return "active" if self._idle.state is PowerState.ACTIVE else "saving"
 
     async def broadcast_state(self) -> dict[str, Any]:
         """`state` を組み立てて全画面へ配る。**繋がっている画面の数つきで**。"""
         state = self.control.build_state(len(self._clients))
+        state["power"] = {"mode": self.power_mode()}
         payload = json.dumps(state, ensure_ascii=False)
         for ws in list(self._clients):
             try:
@@ -241,7 +383,7 @@ class CameraApp:
         return ws
 
     async def _on_message(self, ws: web.WebSocketResponse, raw: str) -> None:
-        """`hold` / `release` / `zoom` を受ける。**読めないものは無視する。**"""
+        """`hold` / `release` / `zoom` / `touch` を受ける。**読めないものは無視する。**"""
         try:
             data = json.loads(raw)
         except ValueError:
@@ -252,6 +394,11 @@ class CameraApp:
             return
 
         kind = data.get("t")
+        # **操作の入口だけが `touch()` を呼ぶ**（画面を開く・映像の接続・状態を読むだけでは呼ばない）
+        if kind in ("hold", "release", "zoom", "touch"):
+            await self._touch()
+        if kind == "touch":
+            return  # 静止画のボタンなど。`hve_camera` に操作を知らせるだけ
         if kind == "hold":
             if self.control.hold(data.get("axis"), data.get("speed"), owner=ws):
                 self._owner = ws
@@ -297,6 +444,7 @@ class CameraApp:
         昇降部が `400` ならその `errors` を返し、自分も保存しない。
         昇降部に繋がらなければ `503` で何も保存しない。
         """
+        await self._touch()  # 設定の変更も操作
         try:
             data = await request.json()
         except ValueError:
@@ -448,6 +596,14 @@ class CameraApp:
                 self._hw.set_io_lost(value)
             else:
                 errors.append("io_lost: 偽物の機構でない")
+        if "wlan_up" in data:
+            value = data["wlan_up"]
+            if not isinstance(value, bool):
+                errors.append("wlan_up: 真偽値でない")
+            elif isinstance(self._power_hw, FakePower):
+                self._power_hw.set_wlan_up(value)
+            else:
+                errors.append("wlan_up: 偽物の電源の口でない")
         if "height_mm" in data or "bottom" in data:
             # 昇降部の偽物（`hw/fake_lift.py`）だけが这些を受け取る。実物には無いので、
             # うっかり付けた時に 500 にしないよう理由として返す。
@@ -548,6 +704,14 @@ class CameraApp:
         return []
 
 
+_POWER_MODE_OF = {
+    PowerState.ACTIVE: POWER_ACTIVE,
+    PowerState.SETTLING: POWER_SETTLING,
+    PowerState.SAVING: POWER_SAVING,
+    PowerState.OFF: POWER_SAVING,
+}
+
+
 def create_app(
     hw: HardwareBase,
     lift: LiftPort,
@@ -561,6 +725,8 @@ def create_app(
     settings_path: str | Path | None = None,
     web_dir: str | Path | None = None,
     autostart: bool = True,
+    power_hw: PowerBase | None = None,
+    video_capture: Any = None,
 ) -> web.Application:
     """`CameraApp` を作って aiohttp のアプリを返す。**起動と試験が同じ物を使う。**"""
     camera = CameraApp(
@@ -575,6 +741,8 @@ def create_app(
         settings_path=settings_path,
         web_dir=web_dir,
         autostart=autostart,
+        power_hw=power_hw,
+        video_capture=video_capture,
     )
 
     app = web.Application()

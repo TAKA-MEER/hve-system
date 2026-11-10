@@ -1,7 +1,7 @@
 """Arduino（UNO）との UART の行の組み立て・読み取りと時計の直し。
 
 [DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §5。
-行の形は `firmware/cam_io/lib/io_core/io_codec.{h,cpp}`（`M`・`C`・`B`）と同じ。
+行の形は `firmware/cam_io/lib/io_core/io_codec.{h,cpp}`（`M`・`C`・`B`・`R`）と同じ。
 **読めない行は捨てる**（`None` を返し、呼び出し側は生存確認を延ばさない）。
 
 `UnoClock` は [DetailedDesign.md](../../docs/plan/detailed/DetailedDesign.md) §3.5 の
@@ -39,6 +39,15 @@ def encode_io_cmd(seq: int, pitch_ddeg: int, yaw_hsps: int) -> str:
     if len(line) > _IO_LINE_MAX:
         raise ValueError("M 行が長すぎる: %r" % (line,))
     return line
+
+
+def encode_relax_cmd(seq: int) -> str:
+    """`R` 行を作る（外し忘れの省電力。ピッチの力を抜き、ヨーを止める。`seq` は `M` と同じ連番）。"""
+    if isinstance(seq, bool) or not isinstance(seq, int):
+        raise ValueError("seq が整数でない: %r" % (seq,))
+    if not 0 <= seq <= 65535:
+        raise ValueError("seq が 0〜65535 の外: %r" % (seq,))
+    return "R %d" % (seq,)
 
 
 _LEADING_JUNK = "".join(chr(c) for c in range(0x20)) + "\x7f"

@@ -24,7 +24,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from hve_camera.app import VideoZoom, create_app
+from hve_camera.app import VideoCapture, VideoZoom, create_app
 from hve_camera.ceiling import CeilingStatus
 from hve_camera.lift_link import LIFT_WS_MODULE_PATH, LiftLink
 from hve_camera.lift_resolve import resolve_lift_host
@@ -82,12 +82,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.fake:
         from hve_camera.hw.fake_hw import FakeHardware
         from hve_camera.hw.fake_lift import FakeLift
+        from hve_camera.hw.fake_power import FakePower
 
         hw = FakeHardware(clock)
         # **偽物でも天井は「十分遠い MEASURED」で保つ（古くならない）。**天井の読み値が無く起動すると
         # 画面が「天井 値なし」で上昇ボタンも薄いままになる（画面を見る人が動かせない）
         hw.set_steady_ceiling(CeilingStatus.MEASURED, FAKE_CEILING_MM)
         lift = FakeLift(clock)
+        # **偽物のモードでは電源の口も偽物**（実物の `poweroff` で開発機を落とさない）
+        power_hw = FakePower()
         # 既定の保存先（`/home/m5stack/...`）はホストに無く PUT が 500 になる。
         # 偽物のモードは起動ごとの一時ディレクトリに保存する（実機の既定は変えない）
         settings_path = str(Path(tempfile.mkdtemp(prefix="hve_camera_fake_")) / "settings.json")
@@ -95,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("偽物のモードで起動する（実機の結果と取り違えないこと）")
         log.info("偽物の天井は %d mm（MEASURED）から始める。POST /api/fake の差し込みは 1 回分、止めるのは freeze", FAKE_CEILING_MM)
     else:
+        from hve_camera.hw.power_hw import PowerHw
         from hve_camera.hw.uno_hw import UnoHardware
 
         try:
@@ -105,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
             log.exception("Arduino との UART を開けなかった")
             return 2
 
+        power_hw = PowerHw()
         lift = LiftLink(
             lambda: module_ws_url(params),
             clock,
@@ -128,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         params=params,
         clock=clock,
         video_zoom=VideoZoom(params["video_port"]),
+        video_capture=VideoCapture(params["video_port"]),
+        power_hw=power_hw,
         fake=args.fake,
         settings_path=settings_path,
         web_dir=WEB_DIR,

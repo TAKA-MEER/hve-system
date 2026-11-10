@@ -249,3 +249,80 @@ async def test_b_line_with_leading_nul_bytes_resets_the_clock() -> None:
         assert (reading.status, reading.distance_mm) == (CeilingStatus.MEASURED, 2000)
     finally:
         await shutdown(hw)
+
+
+# --- 外し忘れの省電力（`WP-CAM-13`。送信ループの切り替え） ------------------------------
+
+
+async def _next_lines(serial: FakeSerial, count: int = 3) -> list:
+    """いまから `count` 行以上送られるのを待ち、その行（文字列）を返す。"""
+    mark = len(serial.written)
+    deadline = asyncio.get_running_loop().time() + 2.0
+    while len(serial.written) < mark + count and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    assert len(serial.written) >= mark + count, "送信ループが行を送らない"
+    return [w.decode("ascii").strip() for w in serial.written[mark:]]
+
+
+async def test_saving_sends_r_lines_instead_of_m() -> None:
+    clock = ManualClock(start_ms=0.0)
+    serial = FakeSerial()
+    hw = make_hw(clock, serial)
+    try:
+        await hw.set_pitch(12.3)
+        await hw.drive_yaw(68.0, "left")
+        await hw.set_power_mode("saving", -10.0)
+        await asyncio.sleep(0.2)  # 切り替え前に作りかけた行を流す
+        lines = await _next_lines(serial, 5)
+        assert all(line.startswith("R ") for line in lines), "saving では M を送らない"
+        seqs = [int(line.split()[1]) for line in lines]
+        assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), "連番は M と同じく進む"
+    finally:
+        await shutdown(hw)
+
+
+async def test_settling_sends_m_with_the_save_pitch_and_keeps_the_target() -> None:
+    clock = ManualClock(start_ms=0.0)
+    serial = FakeSerial()
+    hw = make_hw(clock, serial)
+    try:
+        await hw.set_pitch(12.3)
+        await hw.set_power_mode("settling", -10.0)
+        await asyncio.sleep(0.2)
+        lines = await _next_lines(serial)
+        assert all(line.startswith("M ") and line.split()[2] == "-100" for line in lines)
+        # 軸の目標角は書き換わっていない: 戻れば目標角で送る
+        await hw.set_power_mode("active", -10.0)
+        await asyncio.sleep(0.2)
+        lines = await _next_lines(serial)
+        assert all(line.startswith("M ") and line.split()[2] == "123" for line in lines)
+    finally:
+        await shutdown(hw)
+
+
+async def test_returning_to_active_sends_m_again() -> None:
+    clock = ManualClock(start_ms=0.0)
+    serial = FakeSerial()
+    hw = make_hw(clock, serial)
+    try:
+        await hw.set_pitch(5.0)
+        await hw.set_power_mode("saving", -10.0)
+        await asyncio.sleep(0.2)
+        await hw.set_power_mode("active", -10.0)
+        await asyncio.sleep(0.2)
+        lines = await _next_lines(serial)
+        assert all(line.startswith("M ") and line.split()[2] == "50" for line in lines)
+    finally:
+        await shutdown(hw)
+
+
+async def test_unknown_power_mode_is_rejected() -> None:
+    import pytest
+
+    clock = ManualClock(start_ms=0.0)
+    hw = make_hw(clock, FakeSerial())
+    try:
+        with pytest.raises(ValueError):
+            await hw.set_power_mode("sleep", 0.0)
+    finally:
+        await shutdown(hw)

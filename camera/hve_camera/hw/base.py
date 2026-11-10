@@ -22,6 +22,25 @@ from abc import ABC, abstractmethod
 from hve_camera.ceiling import CeilingReading
 
 
+#: 外し忘れの省電力の段階（[-power.md](../../../docs/plan/detailed/DetailedDesign-power.md) §1）。
+POWER_ACTIVE = "active"
+POWER_SETTLING = "settling"
+POWER_SAVING = "saving"
+POWER_MODES = (POWER_ACTIVE, POWER_SETTLING, POWER_SAVING)
+
+
+class PowerBase(ABC):
+    """機体の無線と電源断の口（実物は `power_hw.py`、偽物は `fake_power.py`）。"""
+
+    @abstractmethod
+    def wlan_up(self) -> bool:
+        """機体の無線（`wlan0`）が AP につながっているか。読めなければ偽。"""
+
+    @abstractmethod
+    def poweroff(self) -> None:
+        """カメラモジュールの電源を切る。**偽物は呼んでも何も切らない。**"""
+
+
 class HardwareBase(ABC):
     """ピッチ・ヨー・天井の読み値を外へ出す口。"""
 
@@ -44,6 +63,15 @@ class HardwareBase(ABC):
     @abstractmethod
     async def stop_yaw(self) -> None:
         """ヨーを止める。**止めている間はコイルの電流を切る**（spec [Spec-safety.md](../../../docs/plan/spec/Spec-safety.md) §2）"""
+
+    @abstractmethod
+    async def set_power_mode(self, mode: str, pitch_deg: float) -> None:
+        """外し忘れの省電力の段階を切り替える（`POWER_ACTIVE`・`POWER_SETTLING`・`POWER_SAVING`）。
+
+        - `POWER_ACTIVE`: ふつう。ピッチは軸の目標角（`set_pitch` で置いた値）で送る
+        - `POWER_SETTLING`: ピッチを `pitch_deg`（倒れてもよい角度）へ動かす。軸の目標角は書き換えない
+        - `POWER_SAVING`: ピッチの力を抜き、ヨーを止める（UART では `M` の代わりに `R` を送る）
+        """
 
     async def close(self) -> None:
         """ハードウェアを片付ける。当面は何もしない（実物は `WP-CAM-03`）。"""

@@ -55,6 +55,17 @@ io_lost_ms = 600                 # 仮
 ceiling_read_stale_ms = 600      # 仮
 # UnoClock が覚える d の直近の行数（C 行が約 70 ms ごとなので約 1.4 秒分）
 uno_clock_window = 20            # 仮
+# 外し忘れの省電力・電源断（DetailedDesign-power.md）
+# 最後の操作からこれだけ経ったら省電力（映像を止め、ピッチの力を抜く）。さらに機体の無線が無ければ電源を切る
+idle_save_ms = 1800000           # spec Spec-power.md §1（30 分。2026-11-10 ユーザー決定）
+# 機体の無線が見えない状態がこれだけ続いたら「飛んでいない」とみなす
+ap_absent_ms = 60000             # 仮（H-V16）
+# 省電力で力を抜く前にピッチを動かす角度
+power_save_pitch_deg = 0         # 仮（H-V15）
+# その角度へ動き終わるのを待つ時間
+power_save_settle_ms = 1500      # 仮
+# 無線を見る・hve_video へ /capture を送り直す周期
+power_check_period_ms = 1000     # 仮
 # 映像の配信プロセス hve_video のポート（倍率の送り先。127.0.0.1 だけ）
 video_port = 8080
 # 仮値のまま動いているパラメータ名の一覧（DD-3、画面に出す）。DetailedDesign-names.md §5 の
@@ -76,4 +87,8 @@ provisional = [
   "io_lost_ms",
   "ceiling_read_stale_ms",
   "uno_clock_window",
+  "ap_absent_ms",
+  "power_save_pitch_deg",
+  "power_save_settle_ms",
+  "power_check_period_ms",
 ]

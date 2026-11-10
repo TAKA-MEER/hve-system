@@ -53,6 +53,11 @@ PARAMS: dict[str, Any] = {
     "ceiling_read_stale_ms": 600,
     "uno_clock_window": 20,
     "video_port": 8080,
+    "idle_save_ms": 1800000,
+    "ap_absent_ms": 60000,
+    "power_save_pitch_deg": 0,
+    "power_save_settle_ms": 1500,
+    "power_check_period_ms": 1000,
     "provisional": ["hold_timeout_ms", "lift_cmd_period_ms"],
 }
 
@@ -106,6 +111,21 @@ class RecordingVideoZoom:
         self.closed = True
 
 
+class RecordingVideoCapture:
+    """`VideoCapture` の偽物。送られた取り込みの入り切りを順番どおりに覚える。"""
+
+    def __init__(self) -> None:
+        self.sent: list[bool] = []
+        self.closed = False
+
+    async def send_capture(self, on: bool) -> bool:
+        self.sent.append(bool(on))
+        return True
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 class FakeEsp32:
     """偽の昇降部の WS サーバ。v2 の取り決め（`hello`・`hold`・`release`・`state`）を話す。
 
@@ -140,6 +160,8 @@ class FakeEsp32:
         self.fail_put = False
         #: `True` にすると `state` を出し止める。途絶えを再現する。
         self.silent = False
+        #: `state` の `dir`（`up` にすると昇降部が動いているふり）
+        self.state_dir = "stop"
         self._ws: web.WebSocketResponse | None = None
         self._runner: web.AppRunner | None = None
         self._task: asyncio.Task[None] | None = None
@@ -272,7 +294,7 @@ class FakeEsp32:
             state = {
                 "t": "state",
                 "seq": self._seq,
-                "dir": "stop",
+                "dir": self.state_dir,
                 "duty": 0,
                 "speed": 0,
                 "speed_meas": 0,

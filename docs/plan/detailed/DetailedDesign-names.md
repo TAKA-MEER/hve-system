@@ -91,6 +91,12 @@
 | `POST /capture`（`{"on": bool}`） | `camera/hve_video/server.py` | 取り込みを止める・戻す（127.0.0.1 だけ） |
 | `parse_r_line` ／ `IoController::on_relax` ／ `IoHal::servo_off` | `firmware/cam_io/lib/io_core/` | `R` 行の読み取り・力を抜いた状態の保持・パルスを止める |
 | `powerText`・`bPower` | `camera/web/app.js`・`index.html` | 省電力の重ね表示 |
+| `PowerState`（`ACTIVE`・`SETTLING`・`SAVING`・`OFF`） ／ `IdlePower(idle_save_ms, ap_absent_ms, power_save_settle_ms, now_ms)` | `camera/hve_camera/power.py` | `WP-CAM-13`。状態の列挙と、`touch(now_ms)`・`step(now_ms, lift_moving, wlan_up)` を持つ判定のクラス |
+| `PowerBase` ／ `POWER_ACTIVE`・`POWER_SETTLING`・`POWER_SAVING` ／ `HardwareBase.set_power_mode(mode, pitch_deg)` | `camera/hve_camera/hw/base.py` | 電源の口の基底（`wlan_up()`・`poweroff()`）・省電力の段階を `HardwareBase` へ伝える口（`FakeHardware` は `power_mode`・`power_pitch_deg`・`power_history` に記録） |
+| `FakePower`（`set_wlan_up`・`poweroff_count`） ／ `POST /api/fake` の `wlan_up` | `camera/hve_camera/hw/fake_power.py`・`app.py` | 偽物の電源の口。`create_app(power_hw=…)` を渡さなければ偽物。偽物のモードに実物の `PowerHw` を渡すと `ValueError` |
+| `encode_relax_cmd(seq)` | `camera/hve_camera/uno_link.py` | `R <seq>` 行の組み立て（`UnoHardware` の送信ループが `saving` の間 `M` の代わりに送る） |
+| `VideoCapture.send_capture(on)` ／ `create_app(video_capture=…)` | `camera/hve_camera/app.py` | `hve_video` の `POST /capture` を `power_check_period_ms` ごとに送り直す（居なくても・404 でも落ちない） |
+| `state.power.mode` | `camera/hve_camera/app.py`（`broadcast_state`） | `active` / `saving`（`SETTLING`・`SAVING` はどちらも `saving`。`OFF` も `saving`） |
 
 ### 1.4 カメラモジュールの画面の名前（`WP-UI-02` で足した。2026-10-07 に管理担当が登録）
 
