@@ -431,3 +431,25 @@ def parse_seq(line: str) -> int | None:
     if len(parts) == 2 and parts[0] == "R" and parts[1].isdigit():
         return int(parts[1])
     return None
+
+
+async def test_stale_lift_state_does_not_count_as_moving(loop, monkeypatch) -> None:
+    """昇降部が `dir: up` のまま電源ごと落ちた（state が途絶えた）ら、最後の `up` を数えず 30 分で省電力に入る。"""
+    r = Rig()  # 本物の LiftLink ＋ 偽 ESP32
+    r.params["power_save_pitch_deg"] = SAVE_PITCH
+    await r.start()
+    try:
+        await wait_until(lambda: r.lift.connected)
+        assert r.esp32 is not None
+        r.esp32.state_dir = "up"
+        await wait_until(lambda: (r.lift.latest_state() or {}).get("dir") == "up")
+        await r.pump(100)
+        assert r.hw.power_mode == POWER_ACTIVE
+        r.esp32.silent = True  # 以降 state が来ない（最後の dir: up だけが残る）
+        await wait_until(lambda: True)
+        await r.pump(100)
+        assert (r.lift.latest_state() or {}).get("dir") == "up"
+        await run_for(r, IDLE + 10_000, step_ms=10_000)
+        assert r.hw.power_mode != POWER_ACTIVE, "古い dir: up を数えて省電力に入れない"
+    finally:
+        await r.stop()

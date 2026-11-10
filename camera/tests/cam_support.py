@@ -160,6 +160,8 @@ class FakeEsp32:
         self.fail_put = False
         #: `True` にすると `state` を出し止める。途絶えを再現する。
         self.silent = False
+        #: `state` の `dir`（`up` にすると昇降部が動いているふり）
+        self.state_dir = "stop"
         self._ws: web.WebSocketResponse | None = None
         self._runner: web.AppRunner | None = None
         self._task: asyncio.Task[None] | None = None
@@ -292,7 +294,7 @@ class FakeEsp32:
             state = {
                 "t": "state",
                 "seq": self._seq,
-                "dir": "stop",
+                "dir": self.state_dir,
                 "duty": 0,
                 "speed": 0,
                 "speed_meas": 0,

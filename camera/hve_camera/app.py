@@ -280,6 +280,10 @@ class CameraApp:
 
     def _lift_moving(self) -> bool:
         """昇降部が動いているか（誰が動かしていても。`state.lift.dir` が `stop` 以外）。"""
+        # **古い state は数えない**（昇降部の電源ごと落ちると最後の `dir: up` が残り、永久に省電力に入れなくなる）。
+        # 鮮度は `control.py` が `LINK_LOST` を決めるのと同じ基準（`lift_state_timeout_ms`）
+        if not self._lift.link_ok(self._clock(), float(self._params["lift_state_timeout_ms"])):
+            return False
         raw = self._lift.latest_state() or {}
         return raw.get("dir", "stop") != "stop"
 
