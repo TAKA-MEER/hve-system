@@ -88,7 +88,7 @@ herdr agent get <name>                            # agent_status を 10 秒間�
 
 ```bash
 orca worktree create --name <n> --no-parent --setup skip --base-branch <元のブランチ> --agent opencode --json   # worktree 作成と opencode 起動を 1 回で（元のブランチは main）
-git -C <worktreeのpath> branch -m <n> <種別>/<主題>     # orca はブランチ名を <n> にするので付け替える
+git -C <worktreeのpath> branch -m yisahia787/<n> <種別>/<主題>   # orca はブランチ名を yisahia787/<n> にするので付け替える（2026-11-10 から。以前は <n>）
 mkdir -p <worktreeのpath>/.briefs/tmp                    # .briefs は gitignore なので新しい worktree には無い。ブリーフもここに置く
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json   # satisfied:true を確かめてから送る
 orca terminal send --terminal <handle> --text "指示書は .briefs/brief-<ID>.md。…" --enter --json
