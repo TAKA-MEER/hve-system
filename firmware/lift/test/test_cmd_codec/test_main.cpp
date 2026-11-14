@@ -453,8 +453,9 @@ void test_state_arm_is_all_null() {
   char json[2048];
   TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
   TEST_ASSERT_NOT_NULL(std::strstr(
-      json, "\"arm\":{\"attached\":null,\"link\":null,\"confirm\":null,\"out\":null,\"drum\":null}"));
+      json, "\"arm\":{\"attached\":null,\"link\":null,\"confirm\":null,\"out\":null}"));
   TEST_ASSERT_NULL(std::strstr(json, "\"attached\":false"));
+  TEST_ASSERT_NULL(std::strstr(json, "\"drum\""));
 }
 
 void test_state_owner_auto_and_modules_round_trip() {

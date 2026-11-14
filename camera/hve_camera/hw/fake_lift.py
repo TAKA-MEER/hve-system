@@ -362,7 +362,6 @@ class FakeLift(LiftPort):
                 "link": None,
                 "confirm": None,
                 "out": self._arm_out,
-                "drum": None,
             },
             "ui_clients": 0,
             "provisional": ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],

@@ -329,7 +329,7 @@ class FakeEsp32:
                     }
                 ],
                 "goto": None,
-                "arm": {"attached": None, "link": None, "confirm": None, "out": None, "drum": None},
+                "arm": {"attached": None, "link": None, "confirm": None, "out": None},
                 "ui_clients": 0,
                 "provisional": [],
                 "fw": "fake-esp32-0.2.0",

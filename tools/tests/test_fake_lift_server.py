@@ -544,7 +544,7 @@ def test_state_lists_all_modules_and_names_the_owner():
     assert state["modules"][1]["ip"] == "192.168.5.9"
     assert "module" not in state
     assert state["arm"] == {"attached": None, "link": None, "confirm": None,
-                            "out": None, "drum": None}
+                            "out": None}
     go(lift, cam, 1000, ceiling=FAR)
     state = lift.step(1050)
     assert (state["owner"], state["owner_name"], state["owner_operator"]) == (

@@ -276,7 +276,7 @@ class FakeLift:
         self.bottom = False
         self.stall = False  # 真の間は動かそうとすると ENCODER_STALL で止まる（POST /api/fake）
         self.arm: dict = {"attached": None, "link": None, "confirm": None,
-                          "out": None, "drum": None}  # 分からないときは null（POST /api/fake で変える）
+                          "out": None}  # 分からないときは null（POST /api/fake で変える）
         self.pinned_ceiling: CeilingReport | None = None
         self.seq = 0
         # id → {kind, hello_seen, has_sensor, explicit_sensor, name, role, operator,
