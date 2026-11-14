@@ -464,7 +464,6 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
   arm["link"] = nullptr;
   arm["confirm"] = nullptr;
   arm["out"] = nullptr;
-  arm["drum"] = nullptr;
   JsonArray provisional = obj["provisional"].to<JsonArray>();
   for (size_t i = 0; i < sizeof(kProvisional) / sizeof(kProvisional[0]); ++i) {
     provisional.add(kProvisional[i]);
