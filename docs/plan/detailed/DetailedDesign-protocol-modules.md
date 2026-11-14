@@ -68,7 +68,7 @@
   - 着いたかは `state` の `bottom: true` と、止めた理由 `BOTTOM` で判断する（原点を取る前は高さが読めないので、高さでは判断しない）。
   - 原点を取る前も使える（下降は止めない。spec [Spec-safety.md](../spec/Spec-safety.md) §2 #4）。
   - 途中で `MAX_RUN`（連続駆動の上限）で止まったら、**新しい `press` で押し直す**。
-  - 測定機構の `ARM_LINK`・`ARM_CONFIRM`・`DRUM_LAG`（spec #4e〜#4g）は**下降も止める**。
+  - 測定機構の `ARM_LINK`（spec #4e）は**下降も止める**（`ARM_CONFIRM`・`DRUM_LAG` は 2026-11-14 に無くした）。
 
 ### 2.2 `goto`（目標の高さへの移動。spec §2.1）
 
@@ -131,7 +131,7 @@
  "modules":[{"name":"hve-cam","role":"control","operator":"human","ceiling_sensor":true,"busy_label":null,"ip":"192.168.5.23","fw":"0.2.0"},
             {"name":"fk","role":"control","operator":"auto","ceiling_sensor":false,"busy_label":"測定操作中","ip":"192.168.5.10","fw":"0.1.0"}],
  "goto":{"by":"fk","press":21,"target_mm":1200,"status":"MOVING","reason":"NONE"},
- "arm":{"attached":null,"link":null,"confirm":null,"out":null,"drum":null}}
+ "arm":{"attached":null,"link":null,"confirm":null,"out":null}}
 ```
 
 | フィールド | 値 |
@@ -144,7 +144,7 @@
 | **`ceiling.standalone`** | `USE` / `SETTING_OFF` / `NO_SOURCE`。単体の操作（昇降部の画面・物理ボタン）で天井を使うか・使わない理由（§2.5。2026-11-06）。**足すだけの変更**なので、fk・ss に確かめ直さなくてよい（読まなければ今のまま） |
 | **`modules`** | 繋がっている接続の一覧（`observe` を含む）。**今の `module`（1 つ）を置き換える** |
 | **`goto`** | 最後の `goto`。`by`（送った接続の `name`）・`press`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason`（止めた理由。§3.1）。次の `goto` まで残す。起動してから無ければ `null` |
-| **`arm`** | 測定機構（spec §3・§5）。`attached`（コネクタを検知しているか）・`link`（アームの制御器と通信できて、腕の角度が古くないか）・`confirm`（コネクタの確認待ち。`null` / `DETACHED` / `ATTACHED`）・`out`（腕が格納位置にないか）・`drum`（ドラムの状態）。**名前だけ決め、`link`・`out`・`drum` の中身はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから。**分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**`attached: false` は「付いていないと検知した」ときだけ**で、コネクタの検知を作るまでは `attached` も `null`。`out: false` も「格納位置にあると知らされた」ときだけ。fk-system は `attached: false` を「付いていない」と読んで機体を動かし、`null` は「腕の状態が読めない」として動かさない |
+| **`arm`** | 測定機構（spec §3・§5）。`attached`（アームの制御器と通信できて、付いているとみなしているか）・`link`（いまアームの制御器と通信できているか）・`confirm`（spec #4e で止めていて、昇降部の画面の確認待ちか）・`out`（腕が格納位置にないか）。**名前だけ決め、中身はアームの制御器とのつなぎ方（spec `H-M7`）が決まってから。**分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**2026-11-14 に改めた**（spec [Spec-module.md](../spec/Spec-module.md) §5。ドラムが昇降部から外れ、コネクタが無くなった）: **`drum` は無くす**（コードから消すのは [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 10）。**`attached` はコネクタの検知ではなくなり、`false` は出さない**（昇降部は「付いていない」と判定できない。`true` か `null`）。`confirm` は `null` / `DETACHED` / `ATTACHED` をやめ、確認待ちかどうかだけにする。`out: false` は「格納位置にあると知らされた」ときだけ。fk-system は `null` を「腕の状態が読めない」として機体を動かさない。**`attached: false` を「付いていない」と読んで機体を動かす決まりは、`false` が出なくなるので fk-system に確かめ直す** |
 
 ### 3.1 足す止めた理由（[-names.md](DetailedDesign-names.md) §3 に移した）
 
@@ -153,9 +153,7 @@
 | `ARRIVED` | 目標の高さに着いた（`goto`） |
 | `PREEMPTED` | 取って代わられた（別の操作元が新しく押し始めた）。`goto.reason` に出す（`state.reason` は新しい持ち主の動きを出す） |
 | `TARGET_RANGE` | `goto` の目標が範囲の外 |
-| `ARM_LINK` | 測定機構を検知しているのに、アームの制御器と通信できない・腕の角度が古い（spec #4e） |
-| `ARM_CONFIRM` | 測定機構のコネクタの確認待ち（spec #4f） |
-| `DRUM_LAG` | ドラムが腕の角度を保てない（spec #4g） |
+| `ARM_LINK` | 腕が格納位置にない（または分からない）と最後に知った状態で、アームの制御器と通信できなくなった（spec #4e。2026-11-14 に改めた）。昇降部の画面の確認待ちでもある（`arm.confirm`）。**`ARM_CONFIRM`（spec #4f）と `DRUM_LAG`（spec #4g）は 2026-11-14 に無くした**（どちらも名前を取っておいただけで、実装は無かった） |
 
 ### 3.2 周期と古さ
 

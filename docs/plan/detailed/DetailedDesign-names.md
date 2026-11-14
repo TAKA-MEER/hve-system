@@ -155,7 +155,7 @@
 | **`ARRIVED`** | 昇降部（`goto`） | 目標の高さに着いた（`WP-LIFT-14`。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2） |
 | **`PREEMPTED`** | 昇降部（`goto.reason` だけ） | 取って代わられた（別の操作元が新しく押し始めた）。`state.reason` には出ない（`WP-LIFT-14`） |
 | **`TARGET_RANGE`** | 昇降部（`goto`） | `goto` の目標が 0 未満、または上端の閾値より上（`WP-LIFT-14`） |
-| **`ARM_LINK`** / **`ARM_CONFIRM`** / **`DRUM_LAG`** | 昇降部 | 測定機構の #4e・#4f・#4g（spec [Spec-safety.md](../spec/Spec-safety.md) §2）。**名前だけ取っておく。実装はアームの制御器とのつなぎ方（spec `H-M7`）とハードが決まってから** |
+| **`ARM_LINK`** | 昇降部 | 測定機構の #4e（spec [Spec-safety.md](../spec/Spec-safety.md) §2。腕が出ていると最後に知った状態でアームの制御器と通信できなくなった）。**名前だけ取っておく。実装はアームの制御器とのつなぎ方（spec `H-M7`）が決まってから。**`ARM_CONFIRM`・`DRUM_LAG`（#4f・#4g）は 2026-11-14 に無くした |
 | `HOLD_TIMEOUT` | カメラモジュール | 画面からの操作が途絶えた |
 | `LINK_LOST` | カメラモジュール | 昇降部と繋がっていない |
 | **`IO_LOST`** | カメラモジュール | Arduino から行が来ない（ヨー・ピッチが動かない・天井が読めない） |
