@@ -65,6 +65,9 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .guide .box{position:absolute;left:25%;top:25%;width:50%;height:50%;border:1px dashed rgba(127,180,238,.45)}
 .osd{position:absolute;left:6px;top:6px;right:150px;display:flex;gap:4px;flex-wrap:wrap}
 .osd span{background:rgba(0,0,0,.6);padding:1px 7px;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums}
+.osd span.busy{background:var(--warn);color:#000;font-weight:700}
+@container (max-width:200px){.card h2 .ttl{display:none}}
+.card h2 .yawzero{padding:0 6px;font-size:11px;line-height:15px;margin:-1px 0;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .stopbar{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.75);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px}
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
 .stopbar.show{display:block}
@@ -202,7 +205,7 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
       <g id="world"></g>  <!-- 中身は drawScene() が描く -->
     </svg>
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
-    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0.0°</span></div>
+    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ 0.0°</span><span id="osdY">ヨー —</span><span class="busy" id="osdBusy" style="display:none"></span></div>
     <button class="snapbtn" id="snapBtn" title="静止画を取り寄せて重ねて表示する">静止画</button>
     <button class="guidebtn" id="toggleGuide" title="ガイド線の表示を切り替える">ガイド線</button>
     <div class="zoom" aria-label="デジタルズーム">
@@ -241,11 +244,11 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     </section>
 
     <section class="card">
-      <h2><span>カメラの向き</span></h2>
+      <h2><span class="ttl">カメラの向き</span><button class="hbtn yawzero" id="yawZero" title="カメラを機体の前に向けてから押すと、いまの向きが 0° になります">機体の前を 0° に</button></h2>
       <div class="pad">
         <div></div><button class="hold" data-axis="pitch_up">▲</button><div></div>
         <button class="hold" data-axis="yaw_left">◀</button>
-        <div class="c" title="ピッチ（ヨーの向きは扱わない）"><span id="cP">↕ 0°</span></div>
+        <div class="c" title="ピッチ（ヨーの向きは映像の左上に出る）"><span id="cP">↕ 0°</span></div>
         <button class="hold" data-axis="yaw_right">▶</button>
         <div></div><button class="hold" data-axis="pitch_down">▼</button><div></div>
       </div>
@@ -329,7 +332,9 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   // origin が偽の間（電源投入から下端に着くまで）は、画面に高さを出せない
   const S = {height:0, origin:true, ceilingAt:2400, pitch:0, yaw:0,
              link:true, io:true, ceilStale:false, ceilOut:false, stall:false, liftUi:false, ws:true, video:true,
-             power:false, active:null, reason:'NONE', runAxis:null, runT:0, runDist:0, meas:0};
+             power:false, yawZeroed:false, busy:null, active:null, reason:'NONE', runAxis:null, runT:0, runDist:0, meas:0};
+  // 原点（機体の前）を合わせるまでヨーの向きは「—」。0° とは出さない（Spec-ui.md §1.4）
+  const yawText = () => S.yawZeroed ? `${S.yaw.toFixed(1)}°` : '—';
   const POWER_TEXT = '省電力中です。操作すると戻ります。機体の無線が無くなると電源を切ります';
   // 値は実装の仮値（CEILING_MARGIN_MM・LIFT_MAX_RUN_PCT・pitch_min/max_deg）。GAUGE_FULL は上端の閾値
   const PITCH_LIM = 45, MAX_RUN_PCT = 150, GAUGE_FULL = 1800;
@@ -589,6 +594,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     drawScene();
     $('osdH').textContent = S.origin ? `高さ ${Math.round(S.height)} mm` : '高さ 読めない';
     $('osdP').textContent = `ピッチ ${S.pitch.toFixed(1)}°`;  $('cP').textContent = `↕ ${Math.round(S.pitch)}°`;
+    $('osdY').textContent = `ヨー ${yawText()}`;
+    $('osdBusy').style.display = S.busy ? '' : 'none';  $('osdBusy').textContent = S.busy || '';
     const r = REASON[S.reason], bar = $('stopbar');
     if (r){ bar.className = 'stopbar show' + (r[0]==='ng' ? ' ng' : ''); bar.textContent = r[1]; }
     else bar.className = 'stopbar';
@@ -739,7 +746,9 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   });
 
   applySliders();
-  // 確認用: ?h=<高さ>&pitch=<deg>&yaw=<deg>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&power=1&mock=1 で状態を作って開ける
+  // 「機体の前を 0° に」: 今の向きを 0° にする（確認は挟まない。押し直せる）
+  $('yawZero').addEventListener('click', () => { S.yaw = 0; S.yawZeroed = true; });
+  // 確認用: ?h=<高さ>&pitch=<deg>&yaw=<deg>&ceil=near|stale&hold=<軸>&zoom=<倍率>&settings=1&snap=1&power=1&yawzero=1&busy=1&mock=1 で状態を作って開ける
   const q = new URLSearchParams(location.search);
   if (q.has('h')) S.height = +q.get('h');
   if (q.has('pitch')) S.pitch = Math.max(-PITCH_LIM, Math.min(PITCH_LIM, +q.get('pitch')));
@@ -751,6 +760,8 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   if (q.has('zoom')) setZoom(+q.get('zoom'));
   if (q.has('snap')) openSnapshot();
   if (q.has('power')) S.power = true;
+  if (q.has('yawzero')) S.yawZeroed = true;            // 原点を合わせた後（ヨーの向きを出す）
+  if (q.has('busy')) S.busy = '画像認識で操作中';       // ss-system が動かしている間
   if (q.has('mock')) { placeMock(); $('mockPop').classList.add('show'); }
   requestAnimationFrame(tick);
 })();
