@@ -1,7 +1,8 @@
 # 通信 — カメラモジュールが ss-system に開く口（案）
 
 [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 8a。spec [Spec-module.md](../spec/Spec-module.md) §1（口の名前と形は本システムが書き、ss-system が確かめる。2026-11-05）。
-**状態: 2026-11-16 の案。ss-system の確認待ち。実装はまだ（作業パケットは確認のあとで切る）。**
+**状態: 2026-11-16 に ss-system が確かめた（ss のユーザーの承認。ss-system `8760b4e`。問いへの答え `d448eda`・`ff790fb` を含む）。実装はまだ（作業パケットはこれから切る）。**
+ss の使い方: `yaw_zeroed` が `false`、または `boot_id` が変わったら、動かさずに（途中なら止めて）依頼を返す。人の割り込みを見たら、すぐ止まり、戻さずに手を離す。静止画は `X-Still-Ms` < `X-Frame-Age-Ms` なら撮り直す。後片付けは、始める前の `pitch_deg`・`yaw_deg` へ `aim` で戻す。
 
 - 入力: ss-system の要るもの C1〜C7（2026-11-15 の相談）、spec [Spec.md](../spec/Spec.md) §1.1（`H-A12`・`H-V14`）、[Spec-ui.md](../spec/Spec-ui.md) §1.4（ヨー。2026-11-16）・§1.5.1（静止画。デモは 1 秒 5 枚まで）、[Spec-power.md](../spec/Spec-power.md)。
 - **昇降部の口（[-protocol-modules.md](DetailedDesign-protocol-modules.md)）と同じ形にそろえる**（ss が同じ書き方で両方を扱えるように）: `hello` で名乗る・`press` で持ち主を決める・送り続けている間だけ続く・`state` で結果を返す。
