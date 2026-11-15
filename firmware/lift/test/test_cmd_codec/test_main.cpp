@@ -507,12 +507,96 @@ void test_state_worst_case_fits_text_max() {
   TEST_ASSERT_EQUAL_INT(LIFT_MODULE_LIST_MAX, back.module_count);
 }
 
+// --- goto（WP-LIFT-14。protocol-modules §2.2・§3）---
+
+void test_decode_valid_goto() {
+  GotoMsg go;
+  TEST_ASSERT_TRUE(decode_goto(
+      "{\"t\":\"goto\",\"press\":21,\"target_mm\":1200,\"speed\":40,"
+      "\"ceiling\":{\"status\":\"MEASURED\",\"mm\":1450,\"age_ms\":80}}",
+      &go, 5000));
+  TEST_ASSERT_EQUAL_INT(21, go.press);
+  TEST_ASSERT_EQUAL_INT(1200, go.target_mm);
+  TEST_ASSERT_EQUAL_INT(40, go.speed);
+  TEST_ASSERT_TRUE(go.has_ceiling);
+  TEST_ASSERT_EQUAL_INT(1450, go.ceiling.mm);
+  TEST_ASSERT_EQUAL_UINT32(5000, go.ceiling.received_at_ms);
+  // ceiling が無くても受け取る（距離計を持たない上部モジュール）。負の目標も読める（範囲は受け付けで見る）
+  TEST_ASSERT_TRUE(decode_goto("{\"t\":\"goto\",\"press\":1,\"target_mm\":-5,\"speed\":10}", &go, 1));
+  TEST_ASSERT_FALSE(go.has_ceiling);
+  TEST_ASSERT_EQUAL_INT(-5, go.target_mm);
+}
+
+void test_decode_broken_goto_is_dropped() {
+  GotoMsg go;
+  TEST_ASSERT_FALSE(decode_goto("{", &go, 1));
+  TEST_ASSERT_FALSE(decode_goto("{\"t\":\"hold\",\"press\":1,\"target_mm\":1,\"speed\":1}", &go, 1));
+  TEST_ASSERT_FALSE(decode_goto("{\"t\":\"goto\",\"target_mm\":1,\"speed\":1}", &go, 1));
+  TEST_ASSERT_FALSE(decode_goto("{\"t\":\"goto\",\"press\":1,\"speed\":1}", &go, 1));
+  TEST_ASSERT_FALSE(decode_goto("{\"t\":\"goto\",\"press\":1,\"target_mm\":\"x\",\"speed\":1}", &go, 1));
+  TEST_ASSERT_FALSE(decode_goto("{\"t\":\"goto\",\"press\":1,\"target_mm\":1}", &go, 1));
+  TEST_ASSERT_FALSE(decode_goto("{\"t\":\"goto\",\"press\":1,\"target_mm\":1,\"speed\":-1}", &go, 1));
+  // 壊れた ceiling は goto を捨てず MISSING として受け取る
+  TEST_ASSERT_TRUE(decode_goto(
+      "{\"t\":\"goto\",\"press\":1,\"target_mm\":1,\"speed\":1,\"ceiling\":{\"status\":\"X\"}}", &go, 1));
+  TEST_ASSERT_FALSE(go.has_ceiling);
+}
+
+void test_state_goto_is_null_until_first_goto_and_round_trips() {
+  LiftState state = moving_state();
+  char json[1024];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"goto\":null"));
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_FALSE(back.goto_info.present);
+
+  state.goto_info.present = true;
+  std::strncpy(state.goto_info.by, "fk", sizeof(state.goto_info.by));
+  state.goto_info.press = 21;
+  state.goto_info.target_mm = 1200;
+  state.goto_info.status = GotoStatus::NOT_ARRIVED;
+  state.goto_info.reason = StopReason::PREEMPTED;
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(
+      json, "\"goto\":{\"by\":\"fk\",\"press\":21,\"target_mm\":1200,\"status\":\"NOT_ARRIVED\",\"reason\":\"PREEMPTED\"}"));
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_TRUE(back.goto_info.present);
+  TEST_ASSERT_EQUAL_STRING("fk", back.goto_info.by);
+  TEST_ASSERT_EQUAL_INT(21, back.goto_info.press);
+  TEST_ASSERT_EQUAL_INT(1200, back.goto_info.target_mm);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(GotoStatus::NOT_ARRIVED), static_cast<int>(back.goto_info.status));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StopReason::PREEMPTED), static_cast<int>(back.goto_info.reason));
+  state.goto_info.status = GotoStatus::ARRIVED;
+  state.goto_info.reason = StopReason::NONE;
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(GotoStatus::ARRIVED), static_cast<int>(back.goto_info.status));
+  state.goto_info.status = GotoStatus::MOVING;
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(GotoStatus::MOVING), static_cast<int>(back.goto_info.status));
+}
+
+void test_state_worst_case_with_goto_fits_text_max() {
+  LiftState state = worst_case_state();
+  state.goto_info.present = true;
+  std::memset(state.goto_info.by, 'a', sizeof(state.goto_info.by) - 1);
+  state.goto_info.press = 2147483647;
+  state.goto_info.target_mm = 2147483647;
+  state.goto_info.status = GotoStatus::NOT_ARRIVED;
+  state.goto_info.reason = StopReason::HEIGHT_UNKNOWN;
+  static char exact[LIFT_STATE_TEXT_MAX];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, exact, sizeof(exact)));
+}
+
 void test_state_encode_reports_every_stop_reason() {
   const StopReason reasons[] = {
       StopReason::NONE,          StopReason::CMD_STOP,     StopReason::CMD_TIMEOUT,
       StopReason::OWNER_GONE,    StopReason::CEILING_NEAR, StopReason::CEILING_STALE,
       StopReason::HEIGHT_UNKNOWN, StopReason::TOP,         StopReason::BOTTOM,
       StopReason::MAX_RUN,       StopReason::ENCODER_STALL, StopReason::OUT_OF_RANGE,
+      StopReason::ARRIVED,       StopReason::PREEMPTED,     StopReason::TARGET_RANGE,
   };
   for (size_t i = 0; i < sizeof(reasons) / sizeof(reasons[0]); ++i) {
     LiftState state = moving_state();
@@ -612,6 +696,9 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_decode_hold_with_broken_ceiling_is_missing);
   RUN_TEST(test_decode_hold_ceiling_statuses);
 
+  RUN_TEST(test_decode_valid_goto);
+  RUN_TEST(test_decode_broken_goto_is_dropped);
+
   RUN_TEST(test_decode_valid_release);
   RUN_TEST(test_decode_broken_release_is_dropped);
 
@@ -623,6 +710,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_state_arm_is_all_null);
   RUN_TEST(test_state_owner_auto_and_modules_round_trip);
   RUN_TEST(test_state_worst_case_fits_text_max);
+  RUN_TEST(test_state_goto_is_null_until_first_goto_and_round_trips);
+  RUN_TEST(test_state_worst_case_with_goto_fits_text_max);
   RUN_TEST(test_state_encode_reports_every_stop_reason);
   RUN_TEST(test_state_encode_reports_zero_when_buffer_is_short);
   RUN_TEST(test_state_decode_rejects_broken_input);

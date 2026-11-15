@@ -2124,6 +2124,481 @@ void test_many_reconnects_still_accept_holds() {
   }
 }
 
+// --- 目標の高さへの移動 goto（WP-LIFT-14。protocol-modules §2.2・§3）---
+// 偽 HAL の高さとエンコーダを、モータが回っている向きに目標の速さで進めて、
+// LiftController を通して「着く」まで回す。
+
+namespace {
+
+constexpr int kGotoSpeed = 40;
+
+GotoMsg goto_msg(int press, int target_mm, int speed = kGotoSpeed) {
+  GotoMsg go;
+  go.press = press;
+  go.target_mm = target_mm;
+  go.speed = speed;
+  go.has_ceiling = false;  // 距離計を持たない上部モジュール（fk）の goto
+  return go;
+}
+
+struct GotoRig {
+  FakeHal hal;
+  LiftController ctrl;
+  double height = 0.0;
+  double count_acc = 0.0;
+  int ceiling_mm = 1450;  // カメラモジュールが送り続ける天井の値
+  uint32_t t = 0;
+  LiftState last;
+
+  explicit GotoRig(int start_mm, int top_mm = LIFT_TOP_MM) : ctrl(&hal, top_mm) {
+    height = start_mm;
+    hal.set_height(start_mm, true, 0);
+    ctrl.on_hello(module(2), hello_cam());
+    ctrl.on_hello(module(3), hello_fk());
+    ctrl.on_ceiling(module(2), measured(ceiling_mm, 0));
+  }
+
+  // 100 ms 進める。前の周期にモータが回っていたぶん、高さとエンコーダを進める
+  void physics() {
+    t += 100;
+    if (hal.motor_moving()) {
+      const int sign = hal.motor_dir() == LiftDir::UP ? 1 : -1;
+      height += sign * kGotoSpeed * 0.1;
+      count_acc += sign * ENC_UP_SIGN * (kGotoSpeed * 100.0) / LIFT_UM_PER_COUNT;
+      hal.set_encoder_count(static_cast<int32_t>(count_acc));
+    }
+    hal.set_height(static_cast<int>(height + 0.5), true, t);
+    ctrl.on_ceiling(module(2), measured(ceiling_mm, t));
+  }
+
+  LiftState go(const ConnId& conn, int press, int target_mm, int speed = kGotoSpeed) {
+    physics();
+    ctrl.on_goto(conn, goto_msg(press, target_mm, speed), t);
+    last = ctrl.step(t);
+    return last;
+  }
+  LiftState fk_goto(int press, int target_mm) { return go(module(3), press, target_mm); }
+
+  LiftState idle() {
+    physics();
+    last = ctrl.step(t);
+    return last;
+  }
+
+  // 着くまで fk の goto を送り続ける（最大 max_cycles 周期）
+  LiftState fk_goto_until_arrived(int press, int target_mm, int max_cycles = 200) {
+    for (int i = 0; i < max_cycles; ++i) {
+      fk_goto(press, target_mm);
+      if (last.goto_info.status == GotoStatus::ARRIVED) {
+        break;
+      }
+    }
+    return last;
+  }
+};
+
+void assert_goto(GotoStatus status, StopReason reason, const LiftState& state) {
+  TEST_ASSERT_TRUE(state.goto_info.present);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(status), static_cast<int>(state.goto_info.status));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(reason), static_cast<int>(state.goto_info.reason));
+}
+
+}  // namespace
+
+void test_goto_is_null_before_any_goto() {
+  GotoRig rig(500);
+  const LiftState state = rig.idle();
+  TEST_ASSERT_FALSE(state.goto_info.present);
+  char json[LIFT_STATE_TEXT_MAX];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"goto\":null"));
+}
+
+// 変異 7: 目標より下にいれば上昇、上にいれば下降（向きの取り違え）
+void test_goto_goes_up_when_below_and_down_when_above() {
+  GotoRig low(400);
+  const LiftState up = low.fk_goto(1, 800);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(low.hal.motor_dir()));
+  TEST_ASSERT_TRUE(low.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::UP), static_cast<int>(up.dir));
+  assert_reason(StopReason::NONE, up);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, up);
+
+  GotoRig high(900);
+  const LiftState down = high.fk_goto(1, 500);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(high.hal.motor_dir()));
+  TEST_ASSERT_TRUE(high.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(down.dir));
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, down);
+  TEST_ASSERT_EQUAL_INT(kGotoSpeed, down.speed);
+}
+
+// 着いた周期で止め、持ち主を離す（owner は null・state.reason は ARRIVED）
+void test_goto_arrives_stops_and_releases_owner() {
+  GotoRig rig(500);
+  const LiftState first = rig.fk_goto(21, 600);
+  TEST_ASSERT_TRUE(first.has_owner);
+  TEST_ASSERT_EQUAL_STRING("fk", first.owner_name);
+  const LiftState end = rig.fk_goto_until_arrived(21, 600);
+  assert_goto(GotoStatus::ARRIVED, StopReason::NONE, end);
+  TEST_ASSERT_FALSE(end.has_owner);
+  assert_reason(StopReason::ARRIVED, end);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(0, end.duty);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::STOP), static_cast<int>(end.dir));
+  TEST_ASSERT_TRUE(std::abs(end.height_mm - 600) <= LIFT_GOTO_TOL_MM);
+  // 着いたあとも state.goto は次の goto まで残る
+  rig.idle();
+  const LiftState later = rig.idle();
+  assert_goto(GotoStatus::ARRIVED, StopReason::NONE, later);
+  TEST_ASSERT_EQUAL_STRING("fk", later.goto_info.by);
+  TEST_ASSERT_EQUAL_INT(21, later.goto_info.press);
+  TEST_ASSERT_EQUAL_INT(600, later.goto_info.target_mm);
+  TEST_ASSERT_FALSE(later.has_owner);
+}
+
+// 変異 1・9: 着いたあと、同じ press の goto では動き出さず、持ち主にもならない
+void test_goto_same_press_after_arrival_does_not_move_or_own() {
+  GotoRig rig(500);
+  rig.fk_goto_until_arrived(21, 600);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(GotoStatus::ARRIVED),
+                        static_cast<int>(rig.last.goto_info.status));
+  for (int i = 0; i < 5; ++i) {
+    const LiftState state = rig.fk_goto(21, 900);  // fk が送り続けた同じ press の goto
+    TEST_ASSERT_FALSE(rig.hal.motor_moving());
+    TEST_ASSERT_FALSE(state.has_owner);
+    assert_reason(StopReason::ARRIVED, state);
+    assert_goto(GotoStatus::ARRIVED, StopReason::NONE, state);
+    TEST_ASSERT_EQUAL_INT(600, state.goto_info.target_mm);
+  }
+  // 新しい press なら次の移動を始める
+  const LiftState next = rig.fk_goto(22, 900);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  TEST_ASSERT_TRUE(next.has_owner);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, next);
+  TEST_ASSERT_EQUAL_INT(900, next.goto_info.target_mm);
+  TEST_ASSERT_EQUAL_INT(22, next.goto_info.press);
+}
+
+// 着いたあと、持ち主が空いているので、ほかの接続が新しい press で動かせる
+void test_goto_arrival_frees_owner_for_others() {
+  GotoRig rig(500);
+  rig.fk_goto_until_arrived(21, 600);
+  rig.physics();
+  rig.ctrl.on_hold(module(2), up_hold(1, 30, rig.t), rig.t);
+  const LiftState state = rig.ctrl.step(rig.t);
+  TEST_ASSERT_TRUE(state.has_owner);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.owner_name);
+  // 着いた goto の結果は書き換わらない（着いたあとなので取って代わられたのではない）
+  assert_goto(GotoStatus::ARRIVED, StopReason::NONE, state);
+}
+
+void test_goto_tolerance_boundary() {
+  GotoRig at(590);  // 目標との差が LIFT_GOTO_TOL_MM ちょうど: 着いたとみなす
+  const LiftState arrived = at.fk_goto(1, 600);
+  assert_goto(GotoStatus::ARRIVED, StopReason::NONE, arrived);
+  TEST_ASSERT_FALSE(at.hal.motor_moving());
+  TEST_ASSERT_FALSE(arrived.has_owner);
+  GotoRig near_miss(589);  // 1 mm 外: まだ動く
+  const LiftState moving = near_miss.fk_goto(1, 600);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, moving);
+  TEST_ASSERT_TRUE(near_miss.hal.motor_moving());
+  GotoRig above(610);  // 目標より上でも差がちょうど
+  assert_goto(GotoStatus::ARRIVED, StopReason::NONE, above.fk_goto(1, 600));
+}
+
+// 変異 2: 高さが読めない（原点を取る前を含む）goto は受け付けない
+void test_goto_is_refused_while_height_is_unknown() {
+  GotoRig rig(500);
+  rig.physics();
+  rig.hal.set_height(0, false, rig.t);  // 原点を取る前
+  rig.ctrl.on_goto(module(3), goto_msg(1, 600), rig.t);
+  LiftState state = rig.ctrl.step(rig.t);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::HEIGHT_UNKNOWN, state);
+  assert_reason(StopReason::HEIGHT_UNKNOWN, state);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  // 受け付けなかった goto は、あとで高さが読めるようになっても動き出さない
+  for (int i = 0; i < 3; ++i) {
+    rig.physics();
+    rig.hal.set_height(500, true, rig.t);
+    rig.ctrl.on_goto(module(3), goto_msg(1, 600), rig.t);
+    state = rig.ctrl.step(rig.t);
+    assert_goto(GotoStatus::NOT_ARRIVED, StopReason::HEIGHT_UNKNOWN, state);
+    TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  }
+  // 新しい press なら受け付ける
+  rig.physics();
+  rig.hal.set_height(500, true, rig.t);
+  rig.ctrl.on_goto(module(3), goto_msg(2, 600), rig.t);
+  state = rig.ctrl.step(rig.t);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, state);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 動いている途中に高さが読めなくなったら止まる（下降の goto も止める）
+void test_goto_stops_when_height_becomes_unreadable() {
+  GotoRig rig(900);
+  rig.fk_goto(1, 500);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  rig.physics();
+  rig.hal.set_height(800, false, rig.t);
+  rig.ctrl.on_goto(module(3), goto_msg(1, 500), rig.t);
+  const LiftState state = rig.ctrl.step(rig.t);
+  assert_reason(StopReason::HEIGHT_UNKNOWN, state);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::HEIGHT_UNKNOWN, state);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+}
+
+// 変異 3: 目標が 0 未満・上端の閾値より上は受け付けない
+void test_goto_target_out_of_range_is_refused() {
+  GotoRig above(500);
+  const LiftState top = above.fk_goto(1, LIFT_TOP_MM + 1);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::TARGET_RANGE, top);
+  assert_reason(StopReason::TARGET_RANGE, top);
+  TEST_ASSERT_FALSE(above.hal.motor_moving());
+  TEST_ASSERT_TRUE(top.has_owner);  // 持ち主のまま止めておく（偽の昇降部と同じ）
+  GotoRig negative(500);
+  const LiftState neg = negative.fk_goto(1, -1);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::TARGET_RANGE, neg);
+  assert_reason(StopReason::TARGET_RANGE, neg);
+  TEST_ASSERT_FALSE(negative.hal.motor_moving());
+  // 範囲の端は受け付ける（上端ちょうど・0）
+  GotoRig edge_top(500);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, edge_top.fk_goto(1, LIFT_TOP_MM));
+  GotoRig edge_zero(500);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, edge_zero.fk_goto(1, 0));
+  // 上端が設定されていなければ、上の目標も範囲の外にしない
+  GotoRig no_top(500, -1);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, no_top.fk_goto(1, LIFT_TOP_MM + 100));
+}
+
+// 変異 4: 取って代わられたら NOT_ARRIVED と PREEMPTED。state.reason は新しい持ち主の動き
+void test_goto_preempted_by_other_module_ui_and_button() {
+  for (int who = 0; who < 3; ++who) {
+    GotoRig rig(500);
+    rig.fk_goto(1, 900);
+    TEST_ASSERT_TRUE(rig.hal.motor_moving());
+    rig.physics();
+    if (who == 0) {
+      rig.ctrl.on_hold(module(2), up_hold(1, 30, rig.t), rig.t);
+    } else if (who == 1) {
+      rig.ctrl.on_hold(ui(5), down_hold(1, 30), rig.t);
+    } else {
+      rig.ctrl.on_hold(button(9), down_hold(1, 30), rig.t);
+    }
+    const LiftState state = rig.ctrl.step(rig.t);
+    assert_goto(GotoStatus::NOT_ARRIVED, StopReason::PREEMPTED, state);
+    TEST_ASSERT_EQUAL_STRING("fk", state.goto_info.by);
+    TEST_ASSERT_TRUE(state.reason != StopReason::PREEMPTED);
+    assert_reason(StopReason::NONE, state);  // 新しい持ち主の動き
+    TEST_ASSERT_TRUE(state.has_owner);
+    TEST_ASSERT_TRUE(rig.hal.motor_moving());
+    // その後も次の goto まで残る
+    assert_goto(GotoStatus::NOT_ARRIVED, StopReason::PREEMPTED, rig.idle());
+  }
+}
+
+// goto が別の goto に取って代わられた: 新しい goto が state.goto に載る
+void test_goto_preempted_by_another_goto() {
+  GotoRig rig(500);
+  rig.fk_goto(1, 900);
+  rig.physics();
+  rig.ctrl.on_goto(module(2), goto_msg(7, 300, 30), rig.t);
+  const LiftState state = rig.ctrl.step(rig.t);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, state);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.goto_info.by);
+  TEST_ASSERT_EQUAL_INT(7, state.goto_info.press);
+  TEST_ASSERT_EQUAL_INT(300, state.goto_info.target_mm);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(LiftDir::DOWN), static_cast<int>(rig.hal.motor_dir()));
+}
+
+// 取って代わられたあと、古い goto の押し続けは動かさない・書き換えない
+void test_goto_after_preemption_old_press_is_ignored() {
+  GotoRig rig(500);
+  rig.fk_goto(1, 900);
+  rig.physics();
+  rig.ctrl.on_hold(module(2), up_hold(1, 30, rig.t), rig.t);
+  rig.ctrl.step(rig.t);
+  const LiftState state = rig.fk_goto(1, 900);  // fk の古い press の押し続け
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::PREEMPTED, state);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", state.owner_name);
+}
+
+// 変異 5: goto の上昇にも天井の判定が効く（fk の goto がカメラモジュールの天井で止まる）
+void test_goto_climb_stops_at_camera_ceiling() {
+  GotoRig rig(500);
+  rig.ceiling_mm = 300;
+  const LiftState near = rig.fk_goto(1, 900);
+  assert_reason(StopReason::CEILING_NEAR, near);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::CEILING_NEAR, near);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_EQUAL_STRING("hve-cam", near.ceiling_from);
+  // 天井が離れたら続きを動く（持ち主のまま。status は MOVING に戻る）
+  rig.ceiling_mm = 1450;
+  const LiftState clear = rig.fk_goto(1, 900);
+  assert_reason(StopReason::NONE, clear);
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, clear);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 下降の goto には天井は要らない
+void test_goto_descent_ignores_camera_ceiling() {
+  GotoRig rig(900);
+  rig.ceiling_mm = 300;
+  const LiftState state = rig.fk_goto(1, 500);
+  assert_reason(StopReason::NONE, state);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 天井の値が古くなったら（カメラモジュールが黙った）上昇の goto は止まる
+void test_goto_climb_stops_when_camera_ceiling_goes_stale() {
+  GotoRig rig(500);
+  rig.fk_goto(1, 900);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  for (int i = 0; i < 8; ++i) {  // ceiling を送らずに進める
+    rig.t += 100;
+    rig.hal.set_height(500, true, rig.t);
+    rig.ctrl.on_goto(module(3), goto_msg(1, 900), rig.t);
+    rig.last = rig.ctrl.step(rig.t);
+  }
+  assert_reason(StopReason::CEILING_STALE, rig.last);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::CEILING_STALE, rig.last);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+}
+
+// 変異 6: goto が途切れたら LIFT_CMD_TIMEOUT_MS で止まる
+void test_goto_stops_when_goto_stops_arriving() {
+  GotoRig rig(500);
+  rig.fk_goto(1, 1200);
+  const uint32_t last_goto_at = rig.t;
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  // ちょうど LIFT_CMD_TIMEOUT_MS ではまだ動く
+  const uint32_t edge_at = last_goto_at + LIFT_CMD_TIMEOUT_MS;
+  // 600 ms のあいだ上がっていたことにして、エンコーダも進める（ENCODER_STALL にしない）
+  rig.hal.set_encoder_count(static_cast<int32_t>(
+      ENC_UP_SIGN * (kGotoSpeed * 600.0 * 1000.0 / 1000.0) / LIFT_UM_PER_COUNT));
+  rig.hal.set_height(500, true, edge_at);
+  rig.ctrl.on_ceiling(module(2), measured(1450, edge_at));
+  const LiftState edge = rig.ctrl.step(edge_at);
+  assert_reason(StopReason::NONE, edge);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_goto(GotoStatus::MOVING, StopReason::NONE, edge);
+  // 1 ms 超えたら止まる
+  const uint32_t late = edge_at + 1;
+  rig.hal.set_height(500, true, late);
+  rig.ctrl.on_ceiling(module(2), measured(1450, late));
+  const LiftState state = rig.ctrl.step(late);
+  assert_reason(StopReason::CMD_TIMEOUT, state);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::CMD_TIMEOUT, state);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_FALSE(state.has_owner);
+}
+
+void test_goto_release_and_close_end_the_goto() {
+  GotoRig rel(500);
+  rel.fk_goto(1, 900);
+  rel.ctrl.on_release(module(3), 1);
+  const LiftState released = rel.ctrl.step(rel.t);
+  assert_reason(StopReason::CMD_STOP, released);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::CMD_STOP, released);
+  TEST_ASSERT_FALSE(rel.hal.motor_moving());
+
+  GotoRig closed(500);
+  closed.fk_goto(1, 900);
+  closed.ctrl.on_close(3);
+  const LiftState gone = closed.ctrl.step(closed.t);
+  assert_reason(StopReason::OWNER_GONE, gone);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::OWNER_GONE, gone);
+  TEST_ASSERT_FALSE(closed.hal.motor_moving());
+}
+
+// 同じ持ち主が goto から hold に替えた
+void test_goto_replaced_by_hold_of_same_owner() {
+  GotoRig rig(500);
+  rig.fk_goto(1, 900);
+  rig.physics();
+  rig.ctrl.on_hold(module(3), fk_up(1), rig.t);
+  const LiftState state = rig.ctrl.step(rig.t);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::CMD_STOP, state);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+// 変異 8: state.goto の by・press・target_mm が送り手と合う
+void test_goto_by_press_and_target_follow_the_sender() {
+  GotoRig rig(500);
+  const LiftState cam = rig.go(module(2), 7, 800);
+  TEST_ASSERT_EQUAL_STRING("hve-cam", cam.goto_info.by);
+  TEST_ASSERT_EQUAL_INT(7, cam.goto_info.press);
+  TEST_ASSERT_EQUAL_INT(800, cam.goto_info.target_mm);
+  const LiftState fk = rig.fk_goto(3, 1100);
+  TEST_ASSERT_EQUAL_STRING("fk", fk.goto_info.by);
+  TEST_ASSERT_EQUAL_INT(3, fk.goto_info.press);
+  TEST_ASSERT_EQUAL_INT(1100, fk.goto_info.target_mm);
+  // 名前の無い接続は anon-<接続番号>
+  GotoRig anon(500);
+  anon.ctrl.on_hello(module(8), HelloMsg());
+  const LiftState nameless = anon.go(module(8), 4, 700);
+  TEST_ASSERT_EQUAL_STRING("anon-8", nameless.goto_info.by);
+  // hello を受けていない画面の接続も anon-<番号>
+  GotoRig screen(500);
+  const LiftState from_ui = screen.go(ui(5), 2, 700);
+  TEST_ASSERT_EQUAL_STRING("anon-5", from_ui.goto_info.by);
+}
+
+// 押し続け（同じ press）は state.goto を作り直さず、動いているあいだ MOVING のまま
+void test_goto_keeps_record_while_sent_repeatedly() {
+  GotoRig rig(500);
+  rig.fk_goto(5, 800);
+  for (int i = 0; i < 5; ++i) {
+    const LiftState state = rig.fk_goto(5, 800);
+    assert_goto(GotoStatus::MOVING, StopReason::NONE, state);
+    TEST_ASSERT_EQUAL_INT(5, state.goto_info.press);
+  }
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+void test_goto_from_observer_is_dropped() {
+  GotoRig rig(500);
+  rig.ctrl.on_hello(module(6), hello_as("watch", false, ModuleRole::OBSERVE, ModuleOperator::AUTO));
+  rig.physics();
+  rig.ctrl.on_goto(module(6), goto_msg(1, 900), rig.t);
+  const LiftState state = rig.ctrl.step(rig.t);
+  TEST_ASSERT_FALSE(state.goto_info.present);
+  TEST_ASSERT_FALSE(state.has_owner);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+}
+
+// goto も #8a（エンコーダが進まない）など hold と同じ判定に掛かる
+void test_goto_stops_when_encoder_does_not_move() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  ctrl.on_hello(module(2), hello_cam());
+  ctrl.on_hello(module(3), hello_fk());
+  LiftState state;
+  for (uint32_t t = 0; t <= 2000; t += 100) {
+    hal.set_height(500, true, t);  // 高さもエンコーダも動かない
+    ctrl.on_ceiling(module(2), measured(1450, t));
+    ctrl.on_goto(module(3), goto_msg(1, 900), t);
+    state = ctrl.step(t);
+  }
+  assert_reason(StopReason::ENCODER_STALL, state);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::ENCODER_STALL, state);
+  TEST_ASSERT_FALSE(hal.motor_moving());
+}
+
+void test_goto_stops_at_bottom_switch_on_the_way_down() {
+  GotoRig rig(300);
+  rig.fk_goto(1, 100);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  rig.hal.set_bottom(true);
+  const LiftState state = rig.fk_goto(1, 100);
+  assert_reason(StopReason::BOTTOM, state);
+  assert_goto(GotoStatus::NOT_ARRIVED, StopReason::BOTTOM, state);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+}
+
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -2249,6 +2724,30 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_saved_margin_applies_after_boot_and_missing_means_500);
   RUN_TEST(test_saved_false_makes_ui_climb_ignore_ceiling_after_boot);
   RUN_TEST(test_many_reconnects_still_accept_holds);
+
+  RUN_TEST(test_goto_is_null_before_any_goto);
+  RUN_TEST(test_goto_goes_up_when_below_and_down_when_above);
+  RUN_TEST(test_goto_arrives_stops_and_releases_owner);
+  RUN_TEST(test_goto_same_press_after_arrival_does_not_move_or_own);
+  RUN_TEST(test_goto_arrival_frees_owner_for_others);
+  RUN_TEST(test_goto_tolerance_boundary);
+  RUN_TEST(test_goto_is_refused_while_height_is_unknown);
+  RUN_TEST(test_goto_stops_when_height_becomes_unreadable);
+  RUN_TEST(test_goto_target_out_of_range_is_refused);
+  RUN_TEST(test_goto_preempted_by_other_module_ui_and_button);
+  RUN_TEST(test_goto_preempted_by_another_goto);
+  RUN_TEST(test_goto_after_preemption_old_press_is_ignored);
+  RUN_TEST(test_goto_climb_stops_at_camera_ceiling);
+  RUN_TEST(test_goto_descent_ignores_camera_ceiling);
+  RUN_TEST(test_goto_climb_stops_when_camera_ceiling_goes_stale);
+  RUN_TEST(test_goto_stops_when_goto_stops_arriving);
+  RUN_TEST(test_goto_release_and_close_end_the_goto);
+  RUN_TEST(test_goto_replaced_by_hold_of_same_owner);
+  RUN_TEST(test_goto_by_press_and_target_follow_the_sender);
+  RUN_TEST(test_goto_keeps_record_while_sent_repeatedly);
+  RUN_TEST(test_goto_from_observer_is_dropped);
+  RUN_TEST(test_goto_stops_when_encoder_does_not_move);
+  RUN_TEST(test_goto_stops_at_bottom_switch_on_the_way_down);
 
   return UNITY_END();
 }
