@@ -36,6 +36,12 @@ class IoController {
   // 判定して、その結果をハードウェアへ出す。指令をそのまま流さないこと
   void tick(uint32_t now_ms);
 
+  // ヨーを回した半ステップの累計（io_hal.h の yaw_hs_total）
+  int32_t yaw_hs() { return hal_->yaw_hs_total(); }
+
+  // Y 行（DetailedDesign-protocol.md §5）を out に作る。文字数（終端なし）を返す。作れなければ 0
+  unsigned int format_y(uint32_t uno_ms, char* out, unsigned int out_size);
+
  private:
   IoHal* hal_;
   bool has_cmd_;

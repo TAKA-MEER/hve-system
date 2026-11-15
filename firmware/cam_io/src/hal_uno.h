@@ -27,6 +27,8 @@ class HalUno : public IoHal {
   void servo_set_ddeg(int pitch_ddeg) override;
   // パルスを止める（OC1A を切り離して D9 を Low）。R 行で力を抜くとき。次の servo_set_ddeg で再び出る
   void servo_off() override;
+  // 半ステップの累計。isr_step が数える StepRate の値を割り込み禁止で読む（32 bit は 1 命令でない）
+  int32_t yaw_hs_total() override;
 
   // SRF02 を SRF02_PERIOD_MS ごとに読む。新しい測定ができたら true を返し、
   // st（0＝読めた・1＝I2C で読めない）・cm（生の値。st が 1 なら 0）を入れる。

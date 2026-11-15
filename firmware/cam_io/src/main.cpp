@@ -1,5 +1,5 @@
 // Arduino UNO の実物（DetailedDesign.md §4.5・DetailedDesign-protocol.md §5）。
-// Serial（D0/D1・IO_BAUD）で M 行・R 行を受けて IoController へ、SRF02 の測定ごとに C 行、
+// Serial（D0/D1・IO_BAUD）で M 行・R 行を受けて IoController へ、SRF02 の測定ごとに C 行・Y 行、
 // 起動時に B 行を出す。組み立てて呼ぶだけで、判定（途絶・丸め）は IoController に任せる。
 // Serial にデバッグの出力を出さない（UnitV2 へ流れる）。
 #include <Arduino.h>
@@ -120,6 +120,11 @@ void loop() {
     const unsigned int n = format_c_line(now_ms, st, cm, buf, sizeof(buf));
     if (n > 0) {
       send_text(buf, n);
+    }
+    // Y 行は C 行と同じ周期で送る（ヨーの半ステップの累計）
+    const unsigned int ny = g_controller.format_y(now_ms, buf, sizeof(buf));
+    if (ny > 0) {
+      send_text(buf, ny);
     }
   }
   wdt_reset();

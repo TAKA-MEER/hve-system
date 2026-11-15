@@ -1,4 +1,4 @@
-// UART の行の読み取り（M）・組み立て（C・B）（DetailedDesign-protocol.md §5）。
+// UART の行の読み取り（M・R）・組み立て（C・Y・B）（DetailedDesign-protocol.md §5）。
 // 読めない行は捨てる（false・0 を返し、呼び出し側は生存確認を延ばさない）。
 // Arduino.h は include しない（DetailedDesign-names.md §1）。
 #pragma once
@@ -36,4 +36,6 @@ bool parse_r_line(const char* line, uint16_t* out_seq);
 // C 行（天井の測定 1 回）を作る。書き込んだ文字数（終端なし）を返す。
 // バッファが足りない・IO_LINE_MAX を超える・fw が読めないときは 0
 unsigned int format_c_line(uint32_t uno_ms, int st, int cm, char* out, unsigned int out_size);
+// Y 行（ヨーの半ステップの累計）を作る。C 行と同じ規則（足りない・長すぎるときは 0）
+unsigned int format_y_line(uint32_t uno_ms, int32_t yaw_hs, char* out, unsigned int out_size);
 unsigned int format_b_line(uint32_t uno_ms, const char* fw, char* out, unsigned int out_size);

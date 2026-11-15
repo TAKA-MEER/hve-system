@@ -25,4 +25,8 @@ class IoHal {
   // ピッチのパルスを止める（外力を抜く。R 行。DetailedDesign-power.md §2）。
   // 次の servo_set_ddeg でまた出す
   virtual void servo_off() = 0;
+
+  // ヨーを回した半ステップの累計（起動から。向きつきで足し引きした符号つき 32 bit）。
+  // 実際に 1 半ステップ進めたときだけ数える（速さの指令では数えない）。Y 行の元
+  virtual int32_t yaw_hs_total() = 0;
 };
