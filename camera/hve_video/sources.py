@@ -56,6 +56,11 @@ def split_mjpeg(buf: bytes) -> tuple[list[bytes], bytes]:
         pos = end + 2
 
 
+def age_ms(received_at: float, now: float) -> int:
+    """受けた時刻（単調時計の秒）から `now` までの経過 ms（整数。負にはしない）。"""
+    return max(0, int(round((now - received_at) * 1000.0)))
+
+
 class FakeSource:
     """偽の画像列（numpy で作る）。中央に白い正方形の目印があり、フレームごとに変わる。
 
@@ -63,9 +68,11 @@ class FakeSource:
     倍率を上げると目印がそのまま大きくなる（spec Spec-ui.md §1.5）。
     """
 
-    def __init__(self, capture_width: int, capture_height: int):
+    def __init__(self, capture_width: int, capture_height: int, *, clock=time.monotonic):
         self._width = int(capture_width)
         self._height = int(capture_height)
+        self._clock = clock
+        self._last_at = clock()  # 最後に絵を作った時刻（単調時計）。実物の「最後の JPEG を受けた時刻」の代わり
         self._index = 0
         self._released = False
         self._capturing = True
@@ -108,6 +115,7 @@ class FakeSource:
         if self._released or not self._capturing:
             return None
         self._last = self._render()
+        self._last_at = self._clock()
         self._index += 1
         return self._last
 
@@ -139,6 +147,21 @@ class FakeSource:
         """新しい 1 枚を待って返す。偽物は取り込み中ならその場で作れるので待たない。"""
         return self.latest_jpeg()
 
+    def latest_jpeg_stamped(self) -> tuple[bytes, int] | None:
+        """`latest_jpeg()` と、その 1 枚を作ってからの経過 ms。無ければ `None`。"""
+        if not self._capturing:
+            return None
+        if self._last is None:  # まだ読んでいない。その場で作る（経過 0）
+            self._last_at = self._clock()
+        jpeg = self.latest_jpeg()
+        if jpeg is None:
+            return None
+        return jpeg, age_ms(self._last_at, self._clock())
+
+    def wait_latest_jpeg_stamped(self, timeout: float) -> tuple[bytes, int] | None:
+        """`wait_latest_jpeg()` と、その 1 枚の経過 ms。偽物は待たない。"""
+        return self.latest_jpeg_stamped()
+
     def release(self) -> None:
         self._released = True
 
@@ -161,6 +184,7 @@ class MjpegPipeSource:
         spawn=subprocess.Popen,
         read_timeout: float = READ_TIMEOUT_S,
         respawn_wait: float = RESPAWN_WAIT_S,
+        clock=time.monotonic,
     ):
         self._command = [
             "v4l2-ctl",
@@ -174,8 +198,10 @@ class MjpegPipeSource:
         self._spawn = spawn
         self._read_timeout = float(read_timeout)
         self._respawn_wait = float(respawn_wait)
+        self._clock = clock  # 単調時計（秒）。受けた時刻と経過の計算に使う
         self._cond = threading.Condition()
         self._latest: bytes | None = None  # 最後に区切れた 1 枚（カメラの JPEG のまま）
+        self._latest_at = 0.0  # `_latest` を受けた時刻（`clock()`）
         self._sequence = 0  # 区切れた枚数
         self._taken = 0  # `read()` が取った枚数の印
         self._closed = False
@@ -227,6 +253,7 @@ class MjpegPipeSource:
                         if not self._capturing:
                             break  # 止めたあとに届いた分は捨てる
                         self._latest = frames[-1]
+                        self._latest_at = self._clock()
                         self._sequence += len(frames)
                         self._cond.notify_all()
             self._stop_child()
@@ -295,6 +322,26 @@ class MjpegPipeSource:
                     return None
                 self._cond.wait(remaining)
             return self._latest
+
+    def latest_jpeg_stamped(self) -> tuple[bytes, int] | None:
+        """`latest_jpeg()` と、その 1 枚を受けてからの経過 ms（返す時点。整数）。無ければ `None`。"""
+        with self._cond:
+            if self._latest is None:
+                return None
+            return self._latest, age_ms(self._latest_at, self._clock())
+
+    def wait_latest_jpeg_stamped(self, timeout: float) -> tuple[bytes, int] | None:
+        """`wait_latest_jpeg()` と、返す 1 枚を受けてからの経過 ms。止めて起こした直後は新しい 1 枚の経過。"""
+        deadline = time.monotonic() + float(timeout)
+        with self._cond:
+            while self._latest is None and not self._closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._cond.wait(remaining)
+            if self._latest is None:
+                return None
+            return self._latest, age_ms(self._latest_at, self._clock())
 
     def read(self) -> np.ndarray | None:
         """**最新の** 1 枚を展開して返す。新しい 1 枚が来るまで待ち、上限を超えたら `None`。

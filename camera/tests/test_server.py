@@ -192,6 +192,10 @@ class CameraJpegSource:
     def latest_jpeg(self):
         return self.camera_jpeg
 
+    def latest_jpeg_stamped(self):
+        # まだ 1 枚も無いときは None（本物の取り込み元と同じ。503 の試験が見る）
+        return None if self.camera_jpeg is None else (self.camera_jpeg, 0)
+
     def release(self):
         pass
 
@@ -419,6 +423,9 @@ class CountingPipeline:
         return b"\xff\xd8" + str(self.calls).encode() + b"\xff\xd9"
 
     def latest_jpeg(self):
+        return None
+
+    def latest_jpeg_stamped(self):
         return None
 
     def release(self):

@@ -86,6 +86,10 @@ class VideoPipeline:
         """最後に受けたカメラの JPEG をそのまま返す（作り直さない・切り出さない）。"""
         return self._source.latest_jpeg()
 
+    def latest_jpeg_stamped(self) -> tuple[bytes, int] | None:
+        """`latest_jpeg()` と、その 1 枚を受けてからの経過 ms。"""
+        return self._source.latest_jpeg_stamped()
+
     @property
     def capture_wanted(self) -> bool:
         """`/capture` で望まれている値。偽のとき、配信は 1 枚も送らない。"""
@@ -115,6 +119,10 @@ class VideoPipeline:
     def wait_latest_jpeg(self, timeout: float) -> bytes | None:
         """カメラの JPEG を返す。無ければ新しい 1 枚が来るまで最大 `timeout` 秒待つ。"""
         return self._source.wait_latest_jpeg(timeout)
+
+    def wait_latest_jpeg_stamped(self, timeout: float) -> tuple[bytes, int] | None:
+        """`wait_latest_jpeg()` と、返す 1 枚を受けてからの経過 ms。"""
+        return self._source.wait_latest_jpeg_stamped(timeout)
 
     def release(self) -> None:
         """取り込み元を解放する。"""

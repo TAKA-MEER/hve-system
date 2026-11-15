@@ -244,25 +244,31 @@ async def _snapshot(request: web.Request) -> web.Response:
     """静止画（spec `H-U9`）。最後に受けたカメラの JPEG をそのまま返す。無ければ 503。
 
     倍率に関わらず、作り直さない・切り出さない。接続元は問わない（外の端末から受ける）。
+    応答ヘッダ `X-Frame-Age-Ms` は、返す時点で、その 1 枚を受けてからの経過 ms（整数。単調時計）。
     **取り込みを止めている間は古い 1 枚を返さない**: 起こして新しい 1 枚を最大
     `snapshot_wake_wait_ms` 待ち、来なければ 503。待ち終わったら止めた状態へ戻す。
     """
     pipeline: VideoPipeline = request.app["pipeline"]
     loop = asyncio.get_running_loop()
     if pipeline.capture_wanted:
-        jpeg = await loop.run_in_executor(None, pipeline.latest_jpeg)
+        stamped = await loop.run_in_executor(None, pipeline.latest_jpeg_stamped)
     else:
         wait_s: float = request.app["snapshot_wake_wait"]
         await loop.run_in_executor(None, pipeline.acquire_wake)
         try:
-            jpeg = await loop.run_in_executor(None, pipeline.wait_latest_jpeg, wait_s)
+            stamped = await loop.run_in_executor(
+                None, pipeline.wait_latest_jpeg_stamped, wait_s
+            )
         finally:
             # 呼び出しが切られても必ず戻す（起こしたままにしない）
             pipeline.release_wake()
-    if jpeg is None:
+    if stamped is None:
         return web.json_response({"error": "まだ 1 枚も受けていない"}, status=503)
+    jpeg, frame_age_ms = stamped
     return web.Response(
-        body=jpeg, content_type="image/jpeg", headers={"Cache-Control": "no-store"}
+        body=jpeg,
+        content_type="image/jpeg",
+        headers={"Cache-Control": "no-store", "X-Frame-Age-Ms": str(frame_age_ms)},
     )
 
 
