@@ -18,6 +18,10 @@ enum class StopReason : uint8_t {
   MAX_RUN,
   ENCODER_STALL,  // モータへ出力しているのにエンコーダが回らない・逆に回る（spec #4d）
   OUT_OF_RANGE,  // 天井の理由のみ（停止理由ではない）。反射が返らない。上昇は許す
+  // goto（protocol-modules §2.2・§3.1。WP-LIFT-14）
+  ARRIVED,       // 目標の高さに着いた
+  PREEMPTED,     // 取って代わられた（goto.reason だけ。state.reason には出ない）
+  TARGET_RANGE,  // goto の目標が範囲の外
 };
 
 // 判定に使う定数（DetailedDesign-names.md §5.1）
