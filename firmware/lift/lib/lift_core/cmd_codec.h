@@ -43,6 +43,19 @@ struct HoldMsg {
 
 bool decode_hold(const char* text, HoldMsg* out, uint32_t received_at_ms);
 
+// goto（目標の高さへの移動。protocol-modules §2.2）。press・target_mm・speed が読めなければ
+// 捨てて false。ceiling の扱いは hold と同じ（欠けている・読めない → has_ceiling を偽）。
+// target_mm の範囲の判定は受け付けのときに LiftController が行う（ここでは整数かだけ見る）
+struct GotoMsg {
+  int press = 0;
+  int target_mm = 0;
+  int speed = 0;  // 目標の速さ [mm/s]（0 以上の整数）
+  bool has_ceiling = false;
+  CeilingReport ceiling;
+};
+
+bool decode_goto(const char* text, GotoMsg* out, uint32_t received_at_ms);
+
 // release。t == "release" で press が読めれば true
 struct ReleaseMsg {
   int press = 0;

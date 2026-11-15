@@ -230,15 +230,16 @@ void LiftController::on_ceiling(const ConnId& conn, const CeilingReport& report)
   remember_ceiling(find(conn.id), report);
 }
 
-void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t now_ms) {
-  // observe の接続からは昇降を命じられない（捨てる。protocol-modules §2.1）
-  if (conn.kind == ConnKind::MODULE && is_observer(conn.id)) {
-    return;
-  }
-  const bool accepted = arbiter_.on_hold(conn, hold.press, now_ms);
+bool LiftController::accept_command(const ConnId& conn, int press, bool has_ceiling,
+                                    const CeilingReport& ceiling_in, uint32_t now_ms,
+                                    bool* new_owner) {
+  ConnId prev;
+  int prev_press = 0;
+  const bool had = arbiter_.owner(&prev, &prev_press);
+  const bool accepted = arbiter_.on_hold(conn, press, now_ms);
   CeilingReport report;
-  if (hold.has_ceiling) {
-    report = hold.ceiling;
+  if (has_ceiling) {
+    report = ceiling_in;
   } else {
     // 型の違う中身・欠けは MISSING として受け取り、その場で止める。
     // 前の hold の値で動き続けない（DetailedDesign-protocol.md §2.1）
@@ -249,14 +250,16 @@ void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t n
   }
   // 値は持ち主でない接続の hold に載っていても新しい測定なので、出どころなら覚える。
   // 載っていない hold は、持ち主のものだけ MISSING として覚える（古い hold で汚さない）
-  if (conn.kind == ConnKind::MODULE && (hold.has_ceiling || accepted)) {
+  if (conn.kind == ConnKind::MODULE && (has_ceiling || accepted)) {
     remember_ceiling(find(conn.id), report);
   }
   if (!accepted) {
-    return;
+    return false;
   }
-  owner_cmd_.dir = hold.dir;
-  owner_cmd_.speed_mm_s = hold.speed;
+  ConnId now_owner;
+  int now_press = 0;
+  arbiter_.owner(&now_owner, &now_press);
+  *new_owner = !had || prev.id != now_owner.id || prev_press != now_press;
   owner_cmd_.has_sensor = sensor_of(conn.id, conn.kind);
   owner_cmd_.ceiling = report;
   if (conn.kind == ConnKind::MODULE) {
@@ -267,6 +270,82 @@ void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t n
   }
   has_owner_cmd_ = true;
   had_owner_ = true;
+  return true;
+}
+
+void LiftController::end_goto(StopReason reason) {
+  if (goto_live_) {
+    state_.goto_info.status = GotoStatus::NOT_ARRIVED;
+    state_.goto_info.reason = reason;
+  }
+  goto_live_ = false;
+}
+
+bool LiftController::height_usable(uint32_t now_ms) const {
+  return hal_->height_ok() && height_is_fresh(now_ms, hal_->height_at_ms());
+}
+
+void LiftController::on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t now_ms) {
+  // observe の接続からは昇降を命じられない（捨てる。protocol-modules §2.1）
+  if (conn.kind == ConnKind::MODULE && is_observer(conn.id)) {
+    return;
+  }
+  bool new_owner = false;
+  if (!accept_command(conn, hold.press, hold.has_ceiling, hold.ceiling, now_ms, &new_owner)) {
+    return;
+  }
+  // goto の持ち主が hold に替えた（取って代わられたか、同じ持ち主が替えたか）
+  end_goto(new_owner ? StopReason::PREEMPTED : StopReason::CMD_STOP);
+  owner_cmd_.is_goto = false;
+  owner_cmd_.blocked = false;
+  owner_cmd_.dir = hold.dir;
+  owner_cmd_.speed_mm_s = hold.speed;
+}
+
+void LiftController::on_goto(const ConnId& conn, const GotoMsg& go, uint32_t now_ms) {
+  if (conn.kind == ConnKind::MODULE && is_observer(conn.id)) {
+    return;  // observe の接続からは昇降を命じられない
+  }
+  bool new_owner = false;
+  if (!accept_command(conn, go.press, go.has_ceiling, go.ceiling, now_ms, &new_owner)) {
+    return;
+  }
+  // 新しい goto（持ち主が替わった・hold から goto に替えた）。state.goto を作り直す。
+  // 前の goto が別の goto に取って代わられたときは、古い記録が新しい goto で置き換わる
+  // （PREEMPTED が state に残るのは、hold などの goto でない操作に取って代わられたとき）
+  if (new_owner || !owner_cmd_.is_goto) {
+    GotoInfo& info = state_.goto_info;
+    info.present = true;
+    const ConnInfo* conn_info = find(conn.id);
+    if (conn_info != nullptr) {
+      copy_name(info.by, sizeof(info.by), conn_info->name);
+    } else {
+      std::snprintf(info.by, sizeof(info.by), "anon-%d", conn.id);
+    }
+    info.press = go.press;
+    info.target_mm = go.target_mm;
+    info.status = GotoStatus::MOVING;
+    info.reason = StopReason::NONE;
+    goto_live_ = true;
+    owner_cmd_.blocked = false;
+    owner_cmd_.block_reason = StopReason::NONE;
+    if (!height_usable(now_ms)) {
+      owner_cmd_.blocked = true;
+      owner_cmd_.block_reason = StopReason::HEIGHT_UNKNOWN;
+    } else if (go.target_mm < 0 || (top_mm_ >= 0 && go.target_mm > top_mm_)) {
+      owner_cmd_.blocked = true;
+      owner_cmd_.block_reason = StopReason::TARGET_RANGE;
+    }
+    if (owner_cmd_.blocked) {
+      info.status = GotoStatus::NOT_ARRIVED;
+      info.reason = owner_cmd_.block_reason;
+      goto_live_ = false;
+    }
+  }
+  owner_cmd_.is_goto = true;
+  owner_cmd_.target_mm = go.target_mm;
+  owner_cmd_.dir = LiftDir::STOP;  // 向きは step が決める
+  owner_cmd_.speed_mm_s = go.speed;
 }
 
 void LiftController::on_release(const ConnId& conn, int press) {
@@ -279,6 +358,7 @@ void LiftController::on_release(const ConnId& conn, int press) {
     owner_cmd_.speed_mm_s = 0;
     idle_reason_ = StopReason::CMD_STOP;
     had_owner_ = false;
+    end_goto(StopReason::CMD_STOP);
   }
 }
 
@@ -294,6 +374,7 @@ void LiftController::on_close(int conn_id) {
     owner_cmd_.speed_mm_s = 0;
     idle_reason_ = StopReason::OWNER_GONE;
     had_owner_ = false;
+    end_goto(StopReason::OWNER_GONE);
   }
   ConnInfo* info = find(conn_id);
   if (info != nullptr) {
@@ -327,13 +408,42 @@ LiftState LiftController::step(uint32_t now_ms) {
   arbiter_.tick(now_ms);
   ConnId owner;
   int owner_press = 0;
-  const bool has_owner = arbiter_.owner(&owner, &owner_press);
+  bool has_owner = arbiter_.owner(&owner, &owner_press);
   if (had_owner_ && !has_owner) {
     // release でも close でもなく持ち主がいなくなった = hold の途絶
     idle_reason_ = StopReason::CMD_TIMEOUT;
     has_owner_cmd_ = false;
+    end_goto(StopReason::CMD_TIMEOUT);
   }
   had_owner_ = has_owner;
+
+  // goto: 目標といまの高さから向きを決める。着いたら止めて、その周期で持ち主を離す
+  // （同じ press の goto は、持ち主の規則が「前に見た press 以下」として受け付けない。§2.2）
+  StopReason goto_force = StopReason::NONE;  // goto が止める理由（受け付けなかった・高さが読めない）
+  if (has_owner && has_owner_cmd_ && owner_cmd_.is_goto) {
+    owner_cmd_.dir = LiftDir::STOP;
+    if (owner_cmd_.blocked) {
+      goto_force = owner_cmd_.block_reason;
+    } else if (!height_usable(now_ms)) {
+      goto_force = StopReason::HEIGHT_UNKNOWN;
+    } else {
+      const int diff = owner_cmd_.target_mm - hal_->height_mm();
+      if (diff <= LIFT_GOTO_TOL_MM && diff >= -LIFT_GOTO_TOL_MM) {
+        state_.goto_info.status = GotoStatus::ARRIVED;
+        state_.goto_info.reason = StopReason::NONE;
+        goto_live_ = false;
+        arbiter_.on_release(owner, owner_press);
+        has_owner = false;
+        had_owner_ = false;
+        has_owner_cmd_ = false;
+        owner_cmd_.is_goto = false;
+        owner_cmd_.speed_mm_s = 0;
+        idle_reason_ = StopReason::ARRIVED;
+      } else {
+        owner_cmd_.dir = diff > 0 ? LiftDir::UP : LiftDir::DOWN;
+      }
+    }
+  }
 
   // 直前の step から今回までのあいだ、実際に回っていた時間を足してから判定する
   // （判定のあとに足すと、止まるまでが 1 周期ぶん延びる）。
@@ -453,7 +563,17 @@ LiftState LiftController::step(uint32_t now_ms) {
   in.run_travel_um = run_travel_um_;
 
   // 判定の結果をモータへ出す。指令をそのまま流さないこと（§4.1）
-  const LiftDecideResult decided = lift_decide(in);
+  LiftDecideResult decided = lift_decide(in);
+  if (goto_force != StopReason::NONE) {
+    decided = LiftDecideResult();  // 止める。理由は goto の受け付けなかった理由・高さが読めない
+    decided.reason = goto_force;
+  }
+  if (goto_live_) {
+    // 実行中の goto: 動いている間 MOVING、安全の判定などで止まっている間は NOT_ARRIVED と理由
+    state_.goto_info.status =
+        decided.reason == StopReason::NONE ? GotoStatus::MOVING : GotoStatus::NOT_ARRIVED;
+    state_.goto_info.reason = decided.reason;
+  }
   const bool moving =
       has_owner && decided.reason == StopReason::NONE &&
       (decided.dir == LiftDir::UP || decided.dir == LiftDir::DOWN) && decided.dir == cmd_dir;

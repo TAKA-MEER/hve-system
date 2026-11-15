@@ -68,6 +68,12 @@ const char* reason_name(StopReason reason) {
       return "ENCODER_STALL";
     case StopReason::OUT_OF_RANGE:
       return "OUT_OF_RANGE";
+    case StopReason::ARRIVED:
+      return "ARRIVED";
+    case StopReason::PREEMPTED:
+      return "PREEMPTED";
+    case StopReason::TARGET_RANGE:
+      return "TARGET_RANGE";
     case StopReason::NONE:
       break;
   }
@@ -94,6 +100,9 @@ bool reason_from_name(const char* name, StopReason* out) {
       {"MAX_RUN", StopReason::MAX_RUN},
       {"ENCODER_STALL", StopReason::ENCODER_STALL},
       {"OUT_OF_RANGE", StopReason::OUT_OF_RANGE},
+      {"ARRIVED", StopReason::ARRIVED},
+      {"PREEMPTED", StopReason::PREEMPTED},
+      {"TARGET_RANGE", StopReason::TARGET_RANGE},
   };
   for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
     if (std::strcmp(name, table[i].name) == 0) {
@@ -102,6 +111,18 @@ bool reason_from_name(const char* name, StopReason* out) {
     }
   }
   return false;
+}
+
+const char* goto_status_name(GotoStatus status) {
+  switch (status) {
+    case GotoStatus::MOVING:
+      return "MOVING";
+    case GotoStatus::ARRIVED:
+      return "ARRIVED";
+    case GotoStatus::NOT_ARRIVED:
+      break;
+  }
+  return "NOT_ARRIVED";
 }
 
 const char* standalone_ceiling_name(StandaloneCeiling value) {
@@ -350,6 +371,30 @@ bool decode_hold(const char* text, HoldMsg* out, uint32_t received_at_ms) {
   return true;
 }
 
+bool decode_goto(const char* text, GotoMsg* out, uint32_t received_at_ms) {
+  *out = GotoMsg();
+  out->ceiling.received_at_ms = received_at_ms;
+  JsonDocument doc;
+  JsonObject obj;
+  if (!read_object(text, &doc, &obj) || !has_type(obj, "goto")) {
+    return false;
+  }
+  GotoMsg parsed;
+  parsed.ceiling.received_at_ms = received_at_ms;
+  if (!obj["press"].is<int>() || !obj["target_mm"].is<int>()) {
+    return false;
+  }
+  if (!obj["speed"].is<int>() || obj["speed"].as<int>() < 0) {
+    return false;
+  }
+  parsed.press = obj["press"].as<int>();
+  parsed.target_mm = obj["target_mm"].as<int>();
+  parsed.speed = obj["speed"].as<int>();
+  parsed.has_ceiling = read_ceiling(obj["ceiling"], &parsed.ceiling, received_at_ms);
+  *out = parsed;
+  return true;
+}
+
 bool decode_ceiling(const char* text, CeilingReport* out, uint32_t received_at_ms) {
   *out = CeilingReport();
   out->received_at_ms = received_at_ms;
@@ -456,6 +501,17 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
       item["ip"] = nullptr;
     }
     item["fw"] = info.fw;
+  }
+  // 最後の goto（次の goto まで残す。起動してから無ければ null）
+  if (state.goto_info.present) {
+    JsonObject go = obj["goto"].to<JsonObject>();
+    go["by"] = state.goto_info.by;
+    go["press"] = state.goto_info.press;
+    go["target_mm"] = state.goto_info.target_mm;
+    go["status"] = goto_status_name(state.goto_info.status);
+    go["reason"] = reason_name(state.goto_info.reason);
+  } else {
+    obj["goto"] = nullptr;
   }
   // 測定機構（spec §3）。中身はアームの制御器とのつなぎ方（spec H-M7）が決まるまで、
   // すべて null（「付いていない」と読まれないように。false を出さない）
@@ -603,6 +659,34 @@ bool state_decode(const char* text, LiftState* out) {
       return false;
     }
   } else if (!obj["owner_operator"].isNull()) {
+    return false;
+  }
+
+  // goto は足した欄。欠けている・null は「無い」
+  if (obj["goto"].is<JsonObject>()) {
+    JsonObject go = obj["goto"].as<JsonObject>();
+    if (!go["by"].is<const char*>() || !go["press"].is<int>() || !go["target_mm"].is<int>() ||
+        !go["status"].is<const char*>() || !go["reason"].is<const char*>()) {
+      return false;
+    }
+    const char* status = go["status"].as<const char*>();
+    if (std::strcmp(status, "MOVING") == 0) {
+      out->goto_info.status = GotoStatus::MOVING;
+    } else if (std::strcmp(status, "ARRIVED") == 0) {
+      out->goto_info.status = GotoStatus::ARRIVED;
+    } else if (std::strcmp(status, "NOT_ARRIVED") == 0) {
+      out->goto_info.status = GotoStatus::NOT_ARRIVED;
+    } else {
+      return false;
+    }
+    if (!reason_from_name(go["reason"].as<const char*>(), &out->goto_info.reason)) {
+      return false;
+    }
+    copy_text_field(out->goto_info.by, sizeof(out->goto_info.by), go["by"]);
+    out->goto_info.press = go["press"].as<int>();
+    out->goto_info.target_mm = go["target_mm"].as<int>();
+    out->goto_info.present = true;
+  } else if (!obj["goto"].isNull()) {
     return false;
   }
 

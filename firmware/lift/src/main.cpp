@@ -135,6 +135,7 @@ ConnId controller_conn(AsyncWebSocket* ws, int ours) {
 enum class PendingType : uint8_t {
   NONE = 0,
   HOLD,
+  GOTO,
   RELEASE,
   HELLO,
   CEILING,
@@ -145,6 +146,7 @@ struct PendingEvent {
   PendingType type = PendingType::NONE;
   ConnId conn;
   HoldMsg hold;
+  GotoMsg go;
   HelloMsg hello;
   CeilingReport ceiling;
   int press = 0;
@@ -244,6 +246,17 @@ void handle_frame(AsyncWebSocket* ws, AsyncWebSocketClient* client, const uint8_
     event.conn = conn;
     event.hold = hold;
     event.at_ms = hold.ceiling.received_at_ms;  // 受け取った時刻（ウォッチドッグはここから数える）
+    post_event(event);
+    return;
+  }
+  GotoMsg go;
+  if (decode_goto(text, &go, millis())) {
+    // 目標の高さへの移動（protocol-modules §2.2）。持ち主の規則は hold と同じ
+    PendingEvent event;
+    event.type = PendingType::GOTO;
+    event.conn = conn;
+    event.go = go;
+    event.at_ms = go.ceiling.received_at_ms;
     post_event(event);
     return;
   }
@@ -630,6 +643,9 @@ void loop() {
     switch (event.type) {
       case PendingType::HOLD:
         controller.on_hold(event.conn, event.hold, event.at_ms);
+        break;
+      case PendingType::GOTO:
+        controller.on_goto(event.conn, event.go, event.at_ms);
         break;
       case PendingType::RELEASE:
         controller.on_release(event.conn, event.press);

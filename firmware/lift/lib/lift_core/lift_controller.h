@@ -32,6 +32,11 @@ class LiftController {
   // hold を受ける。持ち主のものだけ覚え、それ以外は無視する
   void on_hold(const ConnId& conn, const HoldMsg& hold, uint32_t now_ms);
 
+  // goto（目標の高さへの移動。protocol-modules §2.2）を受ける。持ち主の規則は hold と同じ。
+  // 高さが読めない・目標が範囲の外なら受け付けず（持ち主にはなる）NOT_ARRIVED と理由を出す。
+  // 着いた周期で持ち主を離し、同じ press の goto では動き出さない
+  void on_goto(const ConnId& conn, const GotoMsg& go, uint32_t now_ms);
+
   // release を受ける。持ち主からのものだけ止める
   void on_release(const ConnId& conn, int press);
 
@@ -72,7 +77,20 @@ class LiftController {
     int speed_mm_s = 0;
     bool has_sensor = true;
     CeilingReport ceiling;
+    // goto（目標の高さへの移動）。向き dir は step が毎周期、目標といまの高さから決める
+    bool is_goto = false;
+    int target_mm = 0;
+    bool blocked = false;  // 受け付けなかった goto（持ち主のまま止めておく）
+    StopReason block_reason = StopReason::NONE;
   };
+
+  // hold・goto 共通の受け付け（持ち主の規則・天井の値の記憶・持ち主の命令の共通欄）。
+  // 持ち主のものとして受け付けたら true。*new_owner は持ち主が（新しい押し始めで）替わったか
+  bool accept_command(const ConnId& conn, int press, bool has_ceiling, const CeilingReport& ceiling,
+                      uint32_t now_ms, bool* new_owner);
+  // 実行中の goto が着く前に終わった（NOT_ARRIVED と、その止めた理由）
+  void end_goto(StopReason reason);
+  bool height_usable(uint32_t now_ms) const;
 
   // 接続ごとの hello の記録（role・ceiling_sensor は 1 度だけ受け付ける）
   struct ConnInfo {
@@ -121,6 +139,7 @@ class LiftController {
   bool has_owner_cmd_ = false;  // 持ち主の命令の中身を持っているか
   StopReason idle_reason_ = StopReason::CMD_TIMEOUT;  // 持ち主がいないときの停止理由
   bool had_owner_ = false;
+  bool goto_live_ = false;  // 持ち主がいま goto を実行していて、まだ着いていない
   // 上部モジュール（MODULE）の最後の hold に載っていた天井の値。持ち主がいないときの表示用
   // （判定には使わない）。無ければ has_last_module_ceiling_ が偽
   CeilingReport last_module_ceiling_;

@@ -29,6 +29,26 @@ constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進�
 // 止めずに済む進行方向への最小の進みは hal_core.h の LIFT_STALL_MIN_UM /
 // LIFT_STALL_MIN_COUNTS（µm で決めて LIFT_UM_PER_COUNT で割る。#8a）
 
+// goto で目標の高さに「着いた」とみなす幅 [mm]（仮。spec H-M6。偽の昇降部と同じ値）
+constexpr int LIFT_GOTO_TOL_MM = 10;
+
+// state.goto.status（protocol-modules §3）
+enum class GotoStatus : uint8_t {
+  MOVING = 0,
+  ARRIVED,
+  NOT_ARRIVED,
+};
+
+// state.goto（最後の goto。次の goto まで残す。起動してから無ければ present が偽 = null）
+struct GotoInfo {
+  bool present = false;
+  char by[32] = {};  // 送った接続の name（名前が無ければ anon-<接続番号>）
+  int press = 0;
+  int target_mm = 0;
+  GotoStatus status = GotoStatus::NOT_ARRIVED;
+  StopReason reason = StopReason::NONE;
+};
+
 // 上部モジュールの役割・人か自動か（hello の role / operator。
 // DetailedDesign-protocol-modules.md §1.1）
 enum class ModuleRole : uint8_t {
@@ -103,6 +123,7 @@ struct LiftState {
   ModuleInfo modules[LIFT_MODULE_LIST_MAX] = {};
   int module_count = 0;
   uint32_t cmd_age_ms = 0;
+  GotoInfo goto_info;  // state.goto（C++ の予約語を避けた名前）
 };
 
 // 判定の入力。全部「外界から受け取った値」だけで、状態を持たない。
