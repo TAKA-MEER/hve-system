@@ -1,6 +1,7 @@
 // 使い方: node camera/web/tests/browser_paths.js [http://127.0.0.1:18000/]
 //   playwright が require できないときは PLAYWRIGHT_PATH=<.../node_modules/playwright> を付ける。
 //   ブラウザは既定で /usr/bin/google-chrome（CHROME_PATH で変更）。
+//   ONLY=16,17 で番号を絞れる。
 //   先に `python -m hve_camera --fake --port 18000` を立てておく。
 //
 // ブラウザの「経路」を通す試験（brief WP-UI-01 §2 試験）。
@@ -757,13 +758,57 @@ test('16 省電力中は重ね表示を出し、押すと touch を送る（静�
   }
 });
 
+/* --- 17. ヨーの原点・向き・ss が動かしている間の表示（WP-UI-06） ------------------ */
+test('17 「機体の前を 0° に」で yaw_zero を送り、向きは原点の前は「—」・busy_label を出す', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  try {
+    // 実物のサーバーまで通す: 押すと原点が合い、state の yaw_deg が 0・yaw_zeroed が true になる
+    await page.waitForFunction(() => last_state && last_state.yaw_zeroed === false, null, {timeout: 3000});
+    await page.click('#yawZero');
+    await page.waitForFunction(() => last_state.yaw_zeroed === true && last_state.yaw_deg === 0, null, {timeout: 3000});
+    const result = await page.evaluate(() => {
+      const button = document.getElementById('yawZero');
+      const sent = [];
+      const original = send;
+      send = (message) => { sent.push(message); original(message); };
+      button.click();
+      send = original;
+      // 原点の前（yaw_deg が null）は「—」。0° と出さない
+      last_state = Object.assign({}, last_state, {yaw_deg: null, yaw_zeroed: false, busy_label: null});
+      render();
+      const before = document.getElementById('osdY').textContent;
+      const busyHidden = getComputedStyle(document.getElementById('osdBusy')).display === 'none';
+      // 原点を合わせたあと
+      last_state = Object.assign({}, last_state, {yaw_deg: -12.3, yaw_zeroed: true, busy_label: '画像認識で操作中'});
+      render();
+      const busy = document.getElementById('osdBusy');
+      return {label: button.textContent, sent, before, busyHidden,
+        after: document.getElementById('osdY').textContent,
+        busyShown: getComputedStyle(busy).display !== 'none', busyText: busy.textContent};
+    });
+    assert.equal(result.label, '機体の前を 0° に');
+    assert.deepEqual(result.sent, [{t: 'yaw_zero'}], 'ボタンが yaw_zero を送っていない');
+    assert.equal(result.before, 'ヨー —', '原点の前に向きを出している（0° と出してはいけない）');
+    assert.equal(result.busyHidden, true, 'ss が動かしていないのに busy_label が出ている');
+    assert.equal(result.after, 'ヨー -12.3°');
+    assert.equal(result.busyShown, true, 'ss が動かしている間に busy_label が出ていない');
+    assert.equal(result.busyText, '画像認識で操作中');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await cleanup();
+  }
+});
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
     args: ['--no-sandbox'],
   });
   let failed = 0;
+  // ONLY=16,17 のように番号で絞れる（Windows などで全部を通すと時間がかかるとき）
+  const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
   for (const {name, body} of tests) {
+    if (only && !only.includes(name.split(' ')[0])) continue;
     try {
       await body(browser);
       console.log(`OK ${name}`);
