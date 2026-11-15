@@ -122,6 +122,13 @@ void HalUno::servo_off() {
   interrupts();
 }
 
+int32_t HalUno::yaw_hs_total() {
+  noInterrupts();
+  const int32_t total = rate_.total();
+  interrupts();
+  return total;
+}
+
 bool HalUno::srf02_poll(uint32_t now_ms, int* st, int* cm) {
   if (st == nullptr || cm == nullptr) {
     return false;

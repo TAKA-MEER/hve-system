@@ -4,6 +4,8 @@
 #include <unity.h>
 
 #include "fake_io_hal.h"
+#include <cstring>
+
 #include "io_controller.h"
 
 namespace {
@@ -236,6 +238,103 @@ void test_newer_cmd_timestamp_does_not_stop() {
   TEST_ASSERT_TRUE(hal.yaw_moving());
 }
 
+// --- ヨーの半ステップの累計（Y 行の元。DetailedDesign-protocol-ss.md §5.1） ---
+// tick で出した速さのとおりに偽の割り込み（run_ms）が刻み、その累計を IoController が返す。
+
+void test_yaw_total_counts_forward_steps() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, 100), 0);
+  ctrl.tick(0);
+  hal.run_ms(1000);
+  TEST_ASSERT_EQUAL_INT32(100, ctrl.yaw_hs());
+}
+
+void test_yaw_total_counts_reverse_steps_negative() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, -100), 0);
+  ctrl.tick(0);
+  hal.run_ms(1000);
+  TEST_ASSERT_EQUAL_INT32(-100, ctrl.yaw_hs());
+}
+
+void test_yaw_total_adds_and_subtracts_across_direction_changes() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, 200), 0);
+  ctrl.tick(0);
+  hal.run_ms(500);  // +100
+  ctrl.on_command(cmd(0, -50), 500);
+  ctrl.tick(500);
+  hal.run_ms(1000);  // -50
+  TEST_ASSERT_EQUAL_INT32(50, ctrl.yaw_hs());
+}
+
+void test_yaw_total_does_not_change_while_stopped() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  TEST_ASSERT_EQUAL_INT32(0, ctrl.yaw_hs());
+  ctrl.on_command(cmd(0, 0), 0);
+  ctrl.tick(0);
+  hal.run_ms(1000);
+  TEST_ASSERT_EQUAL_INT32(0, ctrl.yaw_hs());  // 速さ 0 では数えない
+}
+
+void test_yaw_total_is_clamped_speed_based() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, 100000), 0);  // 丸めで YAW_HSPS_ABS_MAX
+  ctrl.tick(0);
+  hal.run_ms(1000);
+  TEST_ASSERT_EQUAL_INT32(YAW_HSPS_ABS_MAX, ctrl.yaw_hs());
+}
+
+void test_yaw_total_does_not_change_while_relaxed() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, 100), 0);
+  ctrl.tick(0);
+  hal.run_ms(500);
+  TEST_ASSERT_EQUAL_INT32(50, ctrl.yaw_hs());
+
+  ctrl.on_relax(1, 500);
+  ctrl.tick(500);
+  hal.run_ms(1000);
+  ctrl.tick(1500);  // 途絶えても力を抜いたまま
+  hal.run_ms(1000);
+  TEST_ASSERT_EQUAL_INT32(50, ctrl.yaw_hs());  // R の間は変えない
+
+  ctrl.on_command(cmd(0, 100), 1600);  // 次の M で戻ると、また数える
+  ctrl.tick(1600);
+  hal.run_ms(500);
+  TEST_ASSERT_EQUAL_INT32(100, ctrl.yaw_hs());
+}
+
+void test_yaw_total_does_not_change_after_watchdog_stop() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, 100), 0);
+  ctrl.tick(0);
+  hal.run_ms(300);
+  const int32_t before = ctrl.yaw_hs();
+  ctrl.tick(IO_CMD_TIMEOUT_MS + 1);  // 途絶えた。ヨーを止める
+  hal.run_ms(1000);
+  TEST_ASSERT_EQUAL_INT32(before, ctrl.yaw_hs());
+}
+
+void test_format_y_reports_current_total() {
+  FakeIoHal hal;
+  IoController ctrl(&hal);
+  ctrl.on_command(cmd(0, -100), 0);
+  ctrl.tick(0);
+  hal.run_ms(1000);
+  char buf[IO_LINE_MAX + 1];
+  const unsigned int n = ctrl.format_y(1234, buf, sizeof(buf));
+  TEST_ASSERT_EQUAL_UINT(strlen("Y 1234 -100"), n);
+  TEST_ASSERT_EQUAL_STRING("Y 1234 -100", buf);
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -259,6 +358,15 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_fresh_command_survives_millis_wrap);
   RUN_TEST(test_stale_command_stops_across_millis_wrap);
   RUN_TEST(test_newer_cmd_timestamp_does_not_stop);
+
+  RUN_TEST(test_yaw_total_counts_forward_steps);
+  RUN_TEST(test_yaw_total_counts_reverse_steps_negative);
+  RUN_TEST(test_yaw_total_adds_and_subtracts_across_direction_changes);
+  RUN_TEST(test_yaw_total_does_not_change_while_stopped);
+  RUN_TEST(test_yaw_total_is_clamped_speed_based);
+  RUN_TEST(test_yaw_total_does_not_change_while_relaxed);
+  RUN_TEST(test_yaw_total_does_not_change_after_watchdog_stop);
+  RUN_TEST(test_format_y_reports_current_total);
 
   return UNITY_END();
 }

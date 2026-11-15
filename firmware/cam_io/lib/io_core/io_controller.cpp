@@ -57,6 +57,10 @@ void IoController::on_relax(uint16_t /*seq*/, uint32_t now_ms) {
   relaxed_ = true;
 }
 
+unsigned int IoController::format_y(uint32_t uno_ms, char* out, unsigned int out_size) {
+  return format_y_line(uno_ms, hal_->yaw_hs_total(), out, out_size);
+}
+
 void IoController::tick(uint32_t now_ms) {
   if (relaxed_) {
     // 力を抜いた状態。途絶えても戻さない（次の M 行で解ける）。
