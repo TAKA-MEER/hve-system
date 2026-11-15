@@ -73,6 +73,10 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-CAM-13` | 9 | **カメラモジュールの外し忘れの判定**（`IdlePower`・`PowerHw`・`R` 行を送る・`/capture` を送る・`touch`・`state.power`。[-power.md](DetailedDesign-power.md) §1・§4〜§6） | IO-03・VIDEO-04（取り決め） | 不要（偽物のモード） |
 | `WP-UI-05` | 9 | カメラモジュールの画面に省電力の重ね表示と `touch`（[-power.md](DetailedDesign-power.md) §6） | CAM-13（取り決め） | 不要（偽物のモード） |
 | `WP-MEAS-07` | 9 | **電池の消費と無線の見え方の実測**（通常・省電力・電源断のあと・パルスあり／なし／`wlan0` の `operstate` が AP を切って何秒で変わるか・`poweroff` で UnitV2 が止まるか・電池が自分で出力を止めるか） | 4 つのマージ | 要（全部・USB テスター） |
+| `WP-IO-04` | 10 | **UNO に `Y` 行**（ヨーの半ステップの累計を返す。[-protocol-ss.md](DetailedDesign-protocol-ss.md) §5.1） | — | 不要（実機の確認は管理担当） |
+| `WP-VIDEO-05` | 10 | **`hve_video` の `/snapshot` に `X-Frame-Age-Ms`** | — | 不要（実機の確認は管理担当） |
+| `WP-CAM-14` | 10 | **カメラモジュールが ss-system に開く口**（`/ws/module`・`aim`・`state`・ヨーの角度と原点・`GET /api/snapshot`。[-protocol-ss.md](DetailedDesign-protocol-ss.md)） | IO-04・VIDEO-05（取り決め） | 不要（偽物のモード） |
+| `WP-UI-06` | 10 | カメラモジュールの画面に「機体の前を 0° にする」ボタン・ss が動かしている間の表示・ヨーの向き | CAM-14（取り決め） | 不要（偽物のモード） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -87,6 +91,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **段階 8（2026-11-06。天井の閾値を設定に。[-protocol.md](DetailedDesign-protocol.md) §3）**: 3 つは互換を崩さず別々に入れてよい（`ceiling_margin_mm` は設定 API で欠けてもよい）。**3 つとも、設定画面に行が 1 つ増えるので背の低い画面のスクロール検査に気をつける**（spec のモックアップは、背の低い画面で仮値の一覧を省いて収めた）。
 
 **段階 9（2026-11-10。外し忘れの省電力・電源断。[-power.md](DetailedDesign-power.md)）**: 取り決めは書いてあるので 4 つ並べてよい。**互換は崩れない**（古い UNO は `R` を捨てて今までどおり保つ・古い `hve_video` は `/capture` に 404 を返すだけで取り込みを続ける）。**`WP-MEAS-07` の結果で `ap_absent_ms`・`power_save_pitch_deg` と、提案 `P-15` を決める。**
+
+**段階 10（2026-11-16。カメラモジュールが ss-system に開く口。[-protocol-ss.md](DetailedDesign-protocol-ss.md)。2026-11-16 に ss-system が確かめた）**: `WP-IO-04` と `WP-VIDEO-05` は並べてよい。**互換は崩れない**（古い UnitV2 は `Y` 行を捨てる・古い `hve_camera` は `X-Frame-Age-Ms` を読まない）。`WP-CAM-14` は 2 つの取り決めがあれば並べて始められるが、マージは 2 つのあと。`WP-UI-06` は `WP-CAM-14` のあと。**実機に入ったら ss-system に知らせる。**
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -554,3 +560,28 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - `th-rpi-ap` を止め、`wlan0` の `operstate` が何秒で `up` 以外になるか（変わらなければ [-power.md](DetailedDesign-power.md) §4 の代わりの方法）
 - `poweroff` で UnitV2 が止まるか・電源断のあと電池が自分で出力を止めるか（`D-9`）
 - 結果で `ap_absent_ms`（`H-V16`）・`power_save_pitch_deg`（`H-V15`）・`P-15`・`H-V7` を決める
+
+### `WP-IO-04` UNO に `Y` 行
+
+- 読む節: [-protocol-ss.md](DetailedDesign-protocol-ss.md) §5.1、[-protocol.md](DetailedDesign-protocol.md) §5、[DetailedDesign.md](DetailedDesign.md) §3.4・§4.5
+- 作るもの: `IoController` に半ステップの累計（ヨーを 1 半ステップ進めるたびに向きつきで足し引き。`R` で止めている間は変えない）・`io_codec`（`Y` 行の組み立て）・`main.cpp`（`C` 行と同じ周期で `Y` を送る）・`io_core_version` を上げる
+- 受け入れ: `pio test -d firmware/cam_io -e native`・`pio run -d firmware/cam_io -e uno` が通る。**変異**（`tick` の呼び出し側で縛る）: 逆向きでも足す／半ステップを進めないのに数える／`Y` を送らない／`R` の間も数える → 赤
+
+### `WP-VIDEO-05` `hve_video` の `/snapshot` に `X-Frame-Age-Ms`
+
+- 読む節: [-protocol-ss.md](DetailedDesign-protocol-ss.md) §4・§5.1、[-power.md](DetailedDesign-power.md) §3
+- 作るもの: `camera/hve_video/sources.py`（最後の JPEG を受けた時刻を持つ。`FakeSource` も）・`server.py`（`/snapshot` に `X-Frame-Age-Ms`。止めている間に起こして待った 1 枚も同じ）
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**変異**: 経過の代わりに受けた時刻そのものを返す／止めている間に起こした 1 枚で古い時刻を返す → 赤
+
+### `WP-CAM-14` カメラモジュールが ss-system に開く口
+
+- 読む節: [-protocol-ss.md](DetailedDesign-protocol-ss.md) 全部、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.1・§2.2（同じ形の見本）、[-power.md](DetailedDesign-power.md) §5（`touch()`）、spec [Spec-ui.md](../spec/Spec-ui.md) §1.4・§1.5.1
+- 作るもの: `app.py`（`/ws/module`・`hello`・`aim`・`release`・`state` の配信・`GET /api/snapshot`〈`hve_video` の取り次ぎ・ヘッダ・200 ms の制限で `429`〉・`touch()`・画面の WS の `yaw_zero`）・ヨーの角度（`Y` 行・原点・`B` で捨てる）・`aim` の制御（近い回り方・幅・途切れ）・持ち主（画面と `/ws/module` で 1 つ）・`uno_link.py`（`Y` 行を読む）・偽物のモード（偽の UNO も `Y` を返す）・`params.toml`（[-protocol-ss.md](DetailedDesign-protocol-ss.md) §5.1 の名前。仮のものは `provisional` へ）・-names.md
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る（Windows では `--ignore=camera/tests/test_server.py` を付け、`main` で前から落ちる 6 件と比べる）。**変異**（**呼び出し側で縛る**。純関数だけで縛らない）: 着いても持ち主を離さない／同じ `press` で着いたあと動き出す／画面が押しても `PREEMPTED` にしない／原点の前の `yaw_deg` を受け付ける／`B` 行で原点を捨てない／ピッチを範囲に丸めて受け付ける／途切れてもヨーが止まらない／遠い回り方をする／`aim`・静止画で `touch()` しない／200 ms より早い静止画を返す／`X-Still-Ms` を動いたときに数え直さない → 赤
+- **偽の UNO で、`aim` のヨーが目標に着いて `ARRIVED` になるまでを通しの試験で確かめる**
+
+### `WP-UI-06` 「機体の前を 0° にする」ボタン
+
+- 読む節: [-protocol-ss.md](DetailedDesign-protocol-ss.md) §5、spec [Spec-ui.md](../spec/Spec-ui.md) §1.4・§1.6
+- 作るもの: `camera/web/app.js`（ボタンで `yaw_zero` を送る・ss が持ち主の間は `busy_label` を出す・ヨーの向き〈原点の前は「—」〉）・`index.html`・`style.css`・spec のモックアップ・**`docs/使い方.md`**（「カメラを機体の前に向けてから押す」）
+- 受け入れ: `node --test camera/web/tests/web.test.js`・スクロール検査・`browser_paths.js` が通る。**変異**: ボタンで `yaw_zero` を送らない／ss が動かしている間に `busy_label` を出さない／原点の前に 0° と出す → 赤

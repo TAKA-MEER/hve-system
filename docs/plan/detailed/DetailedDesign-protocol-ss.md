@@ -118,6 +118,17 @@ ss の使い方: `yaw_zeroed` が `false`、または `boot_id` が変わった�
 | ヨーの原点 | 画面に「ヨーの正面を 0° にする」ボタン（spec Spec-ui §1.4）。押すと `yaw_deg = 0`・`yaw_zeroed = true`。ss が動かしている間に押したら、ss の `aim` は `PREEMPTED` |
 | ヨーの向きの表示 | 画面にも `yaw_deg` を出すか（`H-A11` の残り）は画面の作業パケットで決める |
 
+## 5.1 実装の形（2026-11-16。ss の確認のあと）
+
+| 所 | 形 |
+| --- | --- |
+| ヨーの向きの数え方 | **UNO が、回した半ステップの数（起動から足し引きした累計。符号つき 32 bit）を新しい行 `Y <uno_ms> <yaw_hs>` で返す**（[-protocol.md](DetailedDesign-protocol.md) §5。`C` 行と同じ周期）。`hve_camera` は、原点を合わせたときの `yaw_hs` を覚え、`yaw_deg ＝ (yaw_hs − 原点) × 360 ÷ yaw_steps_per_rev` を -180 以上 180 未満に収める。**画面の「左」で `yaw_hs` が増える向きに数える**（符号が逆なら `hve_camera` の符号の定数で直す）。**`B` 行（UNO の再起動）を受けたら原点を捨てる**（`yaw_zeroed: false`・`yaw_deg: null`）。`hve_camera` が再起動しても原点は捨てる（`boot_id` が変わる） |
+| `aim` のヨー | 今までどおり `M` 行の速さで回す。`hve_camera` が `yaw_deg` と目標の差から、近い回り方の向きと `yaw_dps`（設定のヨーの初期値）の速さを決め、`aim_yaw_tol_deg` 以内で 0 を送る |
+| `aim` のピッチ | `M` 行の `pitch_ddeg` に目標角を入れる（今と同じ）。範囲は `pitch_min_deg`〜`pitch_max_deg` |
+| 持ち主 | `hve_camera` のヨー・ピッチの持ち主を、画面（`/ws`）と `/ws/module` の接続で 1 つにする（`press` の規則）。画面が押せば取って代わる |
+| 静止画の撮った時刻 | `hve_video` の `/snapshot` が応答ヘッダ `X-Frame-Age-Ms`（最後の JPEG を受けてからの経過）を付ける。`hve_camera` の `GET /api/snapshot` が `127.0.0.1:8080/snapshot` を取り次ぎ、`X-Boot-Id`・`X-Pitch-Deg`・`X-Yaw-Deg`・`X-Still-Ms` を足す |
+| 名前 | `aim_cmd_timeout_ms`（仮 600）・`aim_yaw_tol_deg`（仮 1）・`module_ws_max_conn`（仮 4）・`snapshot_min_interval_ms`（200。spec Spec-ui §1.5.1）・`YAW_UNKNOWN`（停止理由） |
+
 ## 6. ss-system に確かめてほしいこと
 
 1. 口（`/ws/module` と `GET /api/snapshot`）と名乗り（`hello` は昇降部と同じ）。
