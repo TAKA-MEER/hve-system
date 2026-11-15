@@ -14,7 +14,8 @@
       拡大・移動する（CSS の transform。`{"t":"zoom"}` は送らない。spec §1.5.1）。
    3. **速度スライダーの位置は保存しない。**画面を開くたびに設定の初期値から
       始める（spec §1）。
-   4. **スライダーの値は保存し、ヨーの角度は出さない**（spec §1.4・§2）。
+   4. **スライダーの値は保存しない。ヨーの向きは `state.yaw_deg`（原点の前は null）をそのまま出し、
+      原点は人が「機体の前を 0° に」で `yaw_zero` を送って合わせる**（spec §1.4・§2。WP-UI-06）。
    ============================================================ */
 
 /* --- 画面が使う値（names §5。仮値） --- */
@@ -86,6 +87,25 @@ function touchMessage() {
  */
 function powerText(power) {
   return power && power.mode === 'saving' ? POWER_SAVING_TEXT : null;
+}
+
+/** 送る `yaw_zero` の JSON。**原点（機体の前）を今の向きに合わせる**（人だけが送れる。DetailedDesign-protocol-ss.md §5） */
+function yawZeroMessage() {
+  return {t: 'yaw_zero'};
+}
+
+/**
+ * ヨーの向きの文言。`yaw_deg` が数でなければ（原点の前は null・古いアプリは無い）「—」。
+ * **原点の前に 0° と出さない**（0° は「機体の前」を意味するため。spec §1.4）
+ */
+function yawText(yawDeg) {
+  if (typeof yawDeg !== 'number' || !isFinite(yawDeg)) return '—';
+  return `${yawDeg.toFixed(1)}°`;
+}
+
+/** ss など別の持ち主が動かしている間の表示（`state.busy_label`）。無い・空なら何も出さない */
+function busyText(busyLabel) {
+  return typeof busyLabel === 'string' && busyLabel !== '' ? busyLabel : null;
 }
 
 /** 「＋」「−」で次に送る倍率。1〜`zoom_max` に丸め `zoom_step` の倍数にそろえる */
@@ -616,6 +636,11 @@ function render() {
   $('osdH').textContent = heightText(lift);
   $('osdP').textContent = `ピッチ ${Number(state.pitch_deg).toFixed(1)}°`;
   $('cP').textContent = `↕ ${Math.round(Number(state.pitch_deg))}°`;
+  const yaw = yawText(state.yaw_deg);
+  $('osdY').textContent = `ヨー ${yaw}`;
+  const busy = busyText(state.busy_label);
+  $('osdBusy').style.display = busy !== null ? '' : 'none';
+  $('osdBusy').textContent = busy || '';
 
   // 注意の帯は 1 本（物理ボタンの注意と腕の警告を並べる。ヘッダを伸ばさない）
   const note = [buttonNoteText(lift.owner), armText(state.arm)].filter(Boolean).join(' ／ ') || null;
@@ -697,6 +722,9 @@ function initApp() {
     applySettings(event.detail);
   });
 
+  // 原点（機体の前）を今の向きに合わせる。ss が動かしている間に押しても拒否しない（ss の aim は PREEMPTED になる）
+  $('yawZero').addEventListener('click', () => send(yawZeroMessage()));
+
   // 静止画は hve_video へ直接取りに行くので、カメラ部には `touch` で操作を知らせる
   $('snapBtn').addEventListener('click', () => {
     send(touchMessage());
@@ -744,7 +772,7 @@ if (typeof document !== 'undefined') initApp();
 
 if (typeof module === 'object' && module !== null) {
   module.exports = {
-    holdMessage, releaseMessage, zoomMessage, touchMessage, powerText, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
+    holdMessage, releaseMessage, zoomMessage, touchMessage, powerText, yawZeroMessage, yawText, busyText, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, standaloneCeilingText, heightText, holdBlocked, stateStale,
     topDetectText, ownerText, armText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,

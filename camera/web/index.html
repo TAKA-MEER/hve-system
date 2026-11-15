@@ -29,7 +29,7 @@
     <!-- 映像は hve_video が送る（protocol §1）。URL は state の video_port から app.js が組む -->
     <img class="frame" id="videoImage" alt="カメラ映像">
     <div class="guide" id="guide"><div class="h"></div><div class="v"></div><div class="box"></div></div>
-    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ —</span></div>
+    <div class="osd"><span id="osdH">高さ —</span><span id="osdP">ピッチ —</span><span id="osdY">ヨー —</span><span class="busy" id="osdBusy" style="display:none"></span></div>
 <button class="snapbtn" id="snapBtn" title="静止画を取り寄せて重ねて表示する">静止画</button>
     <button class="guidebtn" id="toggleGuide" title="ガイド線の表示を切り替える">ガイド線</button>
     <div class="zoom" aria-label="デジタルズーム">
@@ -76,11 +76,11 @@
     </section>
 
     <section class="card">
-      <h2><span>カメラの向き</span></h2>
+      <h2><span class="ttl">カメラの向き</span><button class="hbtn yawzero" id="yawZero" title="カメラを機体の前に向けてから押すと、いまの向きが 0° になります">機体の前を 0° に</button></h2>
       <div class="pad">
         <div></div><button class="hold" data-axis="pitch_up">▲</button><div></div>
         <button class="hold" data-axis="yaw_left">◀</button>
-        <div class="c" title="ピッチ（ヨーの向きは扱わない）"><span id="cP">↕ —</span></div>
+        <div class="c" title="ピッチ（ヨーの向きは映像の左上に出る）"><span id="cP">↕ —</span></div>
         <button class="hold" data-axis="yaw_right">▶</button>
         <div></div><button class="hold" data-axis="pitch_down">▼</button><div></div>
       </div>

@@ -28,6 +28,19 @@ test('touch の JSON と省電力の重ね表示（DetailedDesign-power.md §6�
   assert.equal(app.powerText({}), null);
 });
 
+test('yaw_zero の JSON・ヨーの向き（原点の前は「—」で 0° と出さない）・持ち主の表示（WP-UI-06）', () => {
+  assert.deepEqual(app.yawZeroMessage(), {t: 'yaw_zero'});
+  assert.equal(app.yawText(null), '—');
+  assert.equal(app.yawText(undefined), '—'); // 古いアプリ（yaw_deg が無い）
+  assert.equal(app.yawText(NaN), '—');
+  assert.equal(app.yawText(0), '0.0°');      // 原点を合わせた直後の 0 は「機体の前」。null とは別
+  assert.equal(app.yawText(-123.45), '-123.5°');
+  assert.equal(app.busyText('画像認識で操作中'), '画像認識で操作中');
+  assert.equal(app.busyText(null), null);
+  assert.equal(app.busyText(''), null);
+  assert.equal(app.busyText(undefined), null);
+});
+
 test('「＋」「−」の 1 段は zoom_step の倍数で 1〜zoom_max に収まる', () => {
   assert.equal(app.zoomTarget(1, 0.5), 1.5);   // 開いた直後の「＋」は 1.5
   assert.equal(app.zoomTarget(1, -0.5), 1);    // 1 倍より小さくはならない

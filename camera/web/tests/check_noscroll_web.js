@@ -29,6 +29,8 @@ const states = [
   // 省電力の重ね表示（WP-UI-05）。`state.power` は WP-CAM-13 が入れるので、
   // ここでは画面の state を直接 saving にして見た目だけを作る
   {name: '省電力中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, power: true},
+  // ヨーの向きが出ている＋ ss が動かしている間の表示（WP-UI-06）。`state.yaw_deg`・`busy_label` は画面の state を直接作る
+  {name: 'ヨーの向きと ss の表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, yaw: true},
   // 別の上部モジュールが持ち主（長い busy_label）＋腕が出ている（WP-CAM-10）
   {name: '別の上部モジュール操作中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: true, other_owner: {name: 'ss', busy_label: '画像認識で操作中（長い表示の確認）'}}},
 ];
@@ -120,6 +122,12 @@ const MEASURE = () => {
         // `state.power` は WP-CAM-13 が入れる。ここでは画面の state を直接 saving にして重ね表示を出す
         await page.evaluate(() => {
           last_state = Object.assign({}, last_state, {power: {mode: 'saving'}});
+          render();
+        });
+      }
+      if (state.yaw) {
+        await page.evaluate(() => {
+          last_state = Object.assign({}, last_state, {yaw_deg: -123.4, yaw_zeroed: true, busy_label: '画像認識で操作中（長い表示の確認）'});
           render();
         });
       }
