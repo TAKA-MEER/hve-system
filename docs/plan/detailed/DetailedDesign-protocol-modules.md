@@ -81,7 +81,7 @@
 | 送り方 | **`hold` と同じく送り続ける**（`LIFT_CMD_TIMEOUT_MS` より短い間隔）。持ち主の規則も `hold` と同じ（`press`。[DetailedDesign.md](DetailedDesign.md) §3.3）。`ceiling` は距離計を持つ接続だけが載せる |
 | 向き | 目標といまの高さから昇降部が決める |
 | 着いた | 目標から `LIFT_GOTO_TOL_MM`（仮。spec `H-M6`）以内に入ったら止め、`state.goto.status` を `ARRIVED` にする |
-| 着いたあと | **同じ `press` の `goto` は無視する**（動き出さない。spec §4 の「止まったあとは、新しく押し始めた操作でなければ動かない」と同じ）。次の移動は新しい `press` で送る |
+| 着いたあと | **着いた周期で持ち主を離す**（`owner` は `null`、`state.reason` は `ARRIVED`。2026-11-16。偽の昇降部と同じ。ss-system は、着いたあと `owner` が `null` でなく自分でもなければ、人などが割り込んだとみなす）。**同じ `press` の `goto` は無視する**（動き出さない。spec §4 の「止まったあとは、新しく押し始めた操作でなければ動かない」と同じ）。次の移動は新しい `press` で送る |
 | 受け付けない | 高さが読めない（原点を取る前を含む）→ `HEIGHT_UNKNOWN`。目標が 0 未満、または上端の閾値より上（設定されていれば）→ `TARGET_RANGE`。どちらも `NOT_ARRIVED` |
 | 着く前に止まった | 安全の判定・命令の途切れ・`release`・接続が閉じた → `NOT_ARRIVED` と、その止めた理由。**取って代わられた → `PREEMPTED`** |
 
