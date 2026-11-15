@@ -114,6 +114,20 @@ unsigned int format_c_line(uint32_t uno_ms, int st, int cm, char* out, unsigned 
   return static_cast<unsigned int>(written);
 }
 
+unsigned int format_y_line(uint32_t uno_ms, int32_t yaw_hs, char* out, unsigned int out_size) {
+  if (out == nullptr || out_size == 0) {
+    return 0;
+  }
+  const int written = snprintf(out, out_size, "Y %lu %ld", static_cast<unsigned long>(uno_ms),
+                               static_cast<long>(yaw_hs));
+  if (written <= 0 || static_cast<unsigned int>(written) >= out_size ||
+      static_cast<unsigned int>(written) > IO_LINE_MAX) {
+    out[0] = '\0';
+    return 0;
+  }
+  return static_cast<unsigned int>(written);
+}
+
 unsigned int format_b_line(uint32_t uno_ms, const char* fw, char* out, unsigned int out_size) {
   if (out == nullptr || out_size == 0 || fw == nullptr || *fw == '\0') {
     return 0;

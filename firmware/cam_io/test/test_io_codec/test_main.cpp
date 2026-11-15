@@ -148,6 +148,26 @@ void test_format_c_line() {
   TEST_ASSERT_EQUAL_STRING("C 123 0 150", buf);
 }
 
+void test_format_y_line() {
+  char buf[IO_LINE_MAX + 1];
+  TEST_ASSERT_EQUAL_UINT(5, format_y_line(0, 0, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("Y 0 0", buf);
+  TEST_ASSERT_EQUAL_UINT(10, format_y_line(123, -100, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("Y 123 -100", buf);
+  // 最悪の長さ（uno_ms 10 桁・符号つき 32 bit の最小値）が IO_LINE_MAX に収まる
+  const unsigned int n = format_y_line(4294967295u, -2147483647 - 1, buf, sizeof(buf));
+  TEST_ASSERT_EQUAL_UINT(24, n);
+  TEST_ASSERT_TRUE(n <= IO_LINE_MAX);
+  TEST_ASSERT_EQUAL_STRING("Y 4294967295 -2147483648", buf);
+  TEST_ASSERT_EQUAL_UINT(23, format_y_line(4294967295u, 2147483647, buf, sizeof(buf)));
+}
+
+void test_format_y_line_reports_zero_when_buffer_is_short() {
+  char buf[8];
+  TEST_ASSERT_EQUAL_UINT(0, format_y_line(4294967295u, -1, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_UINT(0, format_y_line(0, 0, nullptr, 0));
+}
+
 void test_format_c_line_reports_zero_when_buffer_is_short() {
   char buf[8];
   buf[0] = 'x';
@@ -194,6 +214,8 @@ int main(int /*argc*/, char** /*argv*/) {
 
   RUN_TEST(test_format_c_line);
   RUN_TEST(test_format_c_line_reports_zero_when_buffer_is_short);
+  RUN_TEST(test_format_y_line);
+  RUN_TEST(test_format_y_line_reports_zero_when_buffer_is_short);
   RUN_TEST(test_format_b_line);
   RUN_TEST(test_format_b_line_rejects_unreadable_fw);
 
