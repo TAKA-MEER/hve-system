@@ -193,7 +193,8 @@ class CameraJpegSource:
         return self.camera_jpeg
 
     def latest_jpeg_stamped(self):
-        return self.camera_jpeg, 0
+        # まだ 1 枚も無いときは None（本物の取り込み元と同じ。503 の試験が見る）
+        return None if self.camera_jpeg is None else (self.camera_jpeg, 0)
 
     def release(self):
         pass
