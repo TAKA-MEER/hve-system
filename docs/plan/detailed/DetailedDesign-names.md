@@ -176,6 +176,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | `state` のフィールド | **`owner_name`**・**`owner_operator`**・**`homed`**・**`modules`**（今の `module` を置き換える）・**`goto`**・**`arm`**・`ceiling.from` を足す。`owner` に `arm` を足す（名前だけ） |
 | **`LiftHal::homed`** | 原点を取ったか（`EncoderHeight` から。`state.homed` の元。`WP-LIFT-13`） |
 | **`decode_ceiling`**・**`LiftController::on_ceiling`** | `cmd_codec.h`・`lift_controller.h` | `t: "ceiling"` を読む・天井の値の出どころになれる接続のものだけ覚える（`WP-LIFT-13`） |
+| **`GotoMsg`**・**`decode_goto`**・**`LiftController::on_goto`**・**`GotoInfo`**・**`GotoStatus`**・`LiftState::goto_info`（`state.goto`。`goto` は C++ の予約語） | `cmd_codec.h`・`lift_controller.h`・`lift_decide.h` | `t: "goto"` を読む・受け付ける（持ち主の規則は `hold` と同じ）・最後の `goto` の記録（`WP-LIFT-14`） |
 | **`ModuleRole`**（`CONTROL`・`OBSERVE`）・**`ModuleOperator`**（`HUMAN`・`AUTO`）・**`ModuleInfo`** | `lift_decide.h` | `hello` の `role`・`operator` と、`state.modules` の 1 要素（`LiftState::modules`・`module_count`・`owner_name`・`owner_operator`・`homed`・`ceiling_from`） |
 | **`HelloMsg`** の `role`・`op`・`busy_label`・`sensor_explicit`・`ip` | `cmd_codec.h` | `sensor_explicit` は `ceiling_sensor` を明示したか（天井の値の出どころにできるのは明示した接続だけ）。`ip` は JSON には載らず `main.cpp` が入れる |
 | **`LIFT_MODULE_LIST_MAX`**・**`LIFT_CONN_SLOTS`** | `lift_decide.h` | `state.modules` の長さ（`LIFT_MODULE_MAX_CONN` と同じ 6。`main.cpp` の `static_assert`）・`LiftController`／`LiftArbiter` が覚える接続の数（画面 4＋上部モジュール 6＋物理ボタン 1） |

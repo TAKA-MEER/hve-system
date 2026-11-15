@@ -310,10 +310,9 @@ void LiftController::on_goto(const ConnId& conn, const GotoMsg& go, uint32_t now
   if (!accept_command(conn, go.press, go.has_ceiling, go.ceiling, now_ms, &new_owner)) {
     return;
   }
-  if (new_owner) {
-    end_goto(StopReason::PREEMPTED);  // 取って代わられた
-  }
-  // 新しい goto（持ち主が替わった・hold から goto に替えた）。state.goto を作り直す
+  // 新しい goto（持ち主が替わった・hold から goto に替えた）。state.goto を作り直す。
+  // 前の goto が別の goto に取って代わられたときは、古い記録が新しい goto で置き換わる
+  // （PREEMPTED が state に残るのは、hold などの goto でない操作に取って代わられたとき）
   if (new_owner || !owner_cmd_.is_goto) {
     GotoInfo& info = state_.goto_info;
     info.present = true;
