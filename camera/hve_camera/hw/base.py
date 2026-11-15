@@ -73,5 +73,13 @@ class HardwareBase(ABC):
         - `POWER_SAVING`: ピッチの力を抜き、ヨーを止める（UART では `M` の代わりに `R` を送る）
         """
 
+    def yaw_hs_total(self) -> int | None:
+        """ヨーの半ステップの累計（UNO の `Y` 行。符号つき。**正は `drive_yaw` の `left`**）。まだ 1 行も来ていない・再起動の直後は `None`。"""
+        return None
+
+    def yaw_epoch(self) -> int:
+        """UNO の再起動（`B` 行）を受けた回数。**変わったら累計の数え始めが変わった**（ヨーの原点を捨てる）。"""
+        return 0
+
     async def close(self) -> None:
         """ハードウェアを片付ける。当面は何もしない（実物は `WP-CAM-03`）。"""

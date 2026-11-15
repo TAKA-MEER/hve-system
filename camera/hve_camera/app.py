@@ -14,7 +14,10 @@
 2. **画面が新しく繋がったら倍率を 1 に戻し、全画面に配る**（spec §1.5）。
 3. **`hve_video` が居なくてもアプリは止まらない。**倍率は `VideoZoom` が送れるまで覚えておく。
 4. **`POST /api/fake` は偽物のモードのときだけ存在させる。**（偽物でなければ 404）
-5. **外し忘れの省電力（[DetailedDesign-power.md](../../docs/plan/detailed/DetailedDesign-power.md)）。**
+5. **ss-system の口（`/ws/module`・`GET /api/snapshot`。[DetailedDesign-protocol-ss.md](../../docs/plan/detailed/DetailedDesign-protocol-ss.md)）。**
+   持ち主は画面の `hold` と `/ws/module` の `aim` で 1 つ（`ModulePort`）。`aim`・静止画の要求は `touch()` を呼ぶ。
+   ヨーの原点は人だけが画面の WS の `yaw_zero` で合わせる（`/ws/module` からは受けない）。
+6. **外し忘れの省電力（[DetailedDesign-power.md](../../docs/plan/detailed/DetailedDesign-power.md)）。**
    `touch()` を呼ぶのは画面の WS の `hold`・`release`・`zoom`・`touch` と `PUT /api/settings` **だけ**
    （画面を開く・映像の接続・状態を読むだけでは呼ばない）。`control_step()` のたびに `IdlePower.step()` を回し、
    段階が変わったら `HardwareBase.set_power_mode()` と `hve_video` の `/capture` へ伝える。
@@ -27,12 +30,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import aiohttp
 from aiohttp import web
 
+from hve_camera.aim import YawTracker
 from hve_camera.control import ControlLoop
 from hve_camera.hw.base import (
     POWER_ACTIVE,
@@ -44,6 +49,7 @@ from hve_camera.hw.base import (
 from hve_camera.hw.fake_power import FakePower
 from hve_camera.lift_link import LiftPort
 from hve_camera.lift_resolve import resolve_lift_host
+from hve_camera.module_port import ModulePort
 from hve_camera.power import IdlePower, PowerState
 from hve_camera.settings import (
     LIFT_AXES,
@@ -245,6 +251,25 @@ class CameraApp:
         )
         self._task: asyncio.Task[None] | None = None
 
+        #: 起動ごとに変わる文字列（ss は変わったら再起動したと知る）と、起動した時刻
+        self._boot_id = uuid.uuid4().hex[:16]
+        self._start_ms = clock()
+        self._state_seq = 0
+        #: ヨーの向き（原点は人だけが合わせる）と、ss-system の口
+        self.yaw = YawTracker(hw, params)
+        self.port = ModulePort(
+            control=self.control,
+            yaw=self.yaw,
+            params=params,
+            settings=settings,
+            clock=clock,
+            touch=self._touch,
+            release_ui=self._release_ui,
+        )
+        #: 静止画の取り次ぎ（`hve_video` の `/snapshot`）。`?by=ss` の最後に受け付けた時刻で間隔を見る
+        self._snapshot_session: aiohttp.ClientSession | None = None
+        self._snapshot_ss_at_ms: float | None = None
+
     # --- 制御ループと配信 --------------------------------------------------------------------------
 
     async def start(self) -> None:
@@ -265,10 +290,16 @@ class CameraApp:
         await self._video_zoom.close()
         if self._video_capture is not None:
             await self._video_capture.close()
+        if self._snapshot_session is not None:
+            with contextlib.suppress(Exception):
+                await self._snapshot_session.close()
+            self._snapshot_session = None
 
     async def control_step(self) -> None:
         """制御ループ 1 回。**立ち上げたタスクも試験もこの関数を使う。**"""
         await self.control.step()
+        # `aim`（ss）の途切れ・Arduino の行・ヨーの進み具合。行を読んだあとに見る
+        await self.port.step()
         await self._power_step()
 
     # --- 外し忘れの省電力（power.md） --------------------------------------------------------------
@@ -331,13 +362,58 @@ class CameraApp:
         """`state` を組み立てて全画面へ配る。**繋がっている画面の数つきで**。"""
         state = self.control.build_state(len(self._clients))
         state["power"] = {"mode": self.power_mode()}
+        # 画面が使う（`WP-UI-06`）: ヨーの向き（原点の前は `null`）・持ち主の `busy_label`（ss が動かしている間）
+        state["yaw_deg"] = self._yaw_deg_rounded()
+        state["yaw_zeroed"] = self.yaw.zeroed()
+        state["busy_label"] = self.port.busy_label()
         payload = json.dumps(state, ensure_ascii=False)
         for ws in list(self._clients):
             try:
                 await ws.send_str(payload)
             except Exception:  # noqa: BLE001 - 切れている画面は一覧から外す
                 self._drop_client(ws)
+        # ss-system の口の `state` も同じ周期で全接続へ
+        await self.port.broadcast(self.build_module_state())
         return state
+
+    def _yaw_deg_rounded(self) -> float | None:
+        """ヨーの向き（小数 3 桁。丸めても 180 以上にならない）。原点の前は `None`。"""
+        deg = self.yaw.deg()
+        if deg is None:
+            return None
+        deg = round(deg, 3)
+        return -180.0 if deg >= 180.0 else deg
+
+    def build_module_state(self) -> dict[str, Any]:
+        """`/ws/module` の `state`（[DetailedDesign-protocol-ss.md](../../docs/plan/detailed/DetailedDesign-protocol-ss.md) §3）。"""
+        now = self._clock()
+        self._state_seq += 1
+        if self.port.owner is not None:
+            owner, owner_name, owner_operator = (
+                "module", self.port.owner.display_name, self.port.owner.operator,
+            )
+        elif self._owner is not None and self.control.active_axis(now) is not None:
+            owner, owner_name, owner_operator = "ui", None, "human"  # 人（画面）
+        else:
+            owner, owner_name, owner_operator = None, None, None
+        return {
+            "t": "state",
+            "seq": self._state_seq,
+            "boot_id": self._boot_id,
+            "uptime_ms": int(now - self._start_ms),
+            "pitch_deg": round(self.control.pitch_deg, 3),
+            "pitch_min_deg": self._params["pitch_min_deg"],
+            "pitch_max_deg": self._params["pitch_max_deg"],
+            "yaw_deg": self._yaw_deg_rounded(),
+            "yaw_dps": self._settings["yaw"]["init"],
+            "yaw_zeroed": self.yaw.zeroed(),
+            "owner": owner,
+            "owner_name": owner_name,
+            "owner_operator": owner_operator,
+            "power": "ACTIVE" if self._idle.state is PowerState.ACTIVE else "SAVE",
+            "io": "ok" if self.control.io_ok(now) else "lost",
+            "aim": self.port.record,
+        }
 
     async def _run_loop(self) -> None:
         """`lift_cmd_period_ms` ごとに制御ループ、`state_period_ms` ごとに配信。"""
@@ -395,12 +471,14 @@ class CameraApp:
 
         kind = data.get("t")
         # **操作の入口だけが `touch()` を呼ぶ**（画面を開く・映像の接続・状態を読むだけでは呼ばない）
-        if kind in ("hold", "release", "zoom", "touch"):
+        if kind in ("hold", "release", "zoom", "touch", "yaw_zero"):
             await self._touch()
         if kind == "touch":
             return  # 静止画のボタンなど。`hve_camera` に操作を知らせるだけ
         if kind == "hold":
             if self.control.hold(data.get("axis"), data.get("speed"), owner=ws):
+                # 画面が押したら取って代わる（ss の `aim` は `PREEMPTED`）
+                await self.port.preempt_by_ui()
                 self._owner = ws
             return
         if kind == "release":
@@ -409,10 +487,83 @@ class CameraApp:
                 self._owner = None
                 self.control.release()
             return
+        if kind == "yaw_zero":
+            # ヨーの原点合わせは人だけ（`/ws/module` からは受けない）。ss が持ち主の間なら `PREEMPTED`
+            if self.yaw.zero():
+                self.control.mark_motion()
+                await self.port.preempt_by_ui()
+            else:
+                log.warning("ヨーの累計がまだ来ていないので原点を合わせられない")
+            return
         if kind == "zoom":
             await self.control.set_zoom(data.get("level"))
             return
         log.warning("知らない種類のメッセージなので無視した: %r", kind)
+
+    def _release_ui(self) -> None:
+        """ss が新しく持ち主になる。画面の操作を離す（最後に押したものが勝つ）。"""
+        if self._owner is not None:
+            self._owner = None
+            self.control.release()
+
+    # --- ss-system の口 ---------------------------------------------------------------------------
+
+    async def ws_module(self, request: web.Request) -> web.StreamResponse:
+        """`WS /ws/module`。`hello`・`aim`・`release` を受け、`state` を配る。上限を超えたら閉じる。"""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        conn = self.port.add_conn(ws)
+        if conn is None:
+            log.warning("/ws/module の接続が上限を超えたので閉じた")
+            await ws.close(code=1013, message=b"too many connections")
+            return ws
+        try:
+            async for message in ws:
+                if message.type is not aiohttp.WSMsgType.TEXT:
+                    continue
+                await self.port.on_message(conn, message.data)
+        finally:
+            await self.port.remove_conn(conn)
+        return ws
+
+    async def get_snapshot(self, request: web.Request) -> web.StreamResponse:
+        """`GET /api/snapshot`。`hve_video` の `/snapshot` を取り次ぎ、向きのヘッダを足す（protocol-ss §4）。"""
+        by = request.query.get("by")
+        now = self._clock()
+        if by == "ss":
+            last = self._snapshot_ss_at_ms
+            if last is not None and now - last < float(self._params["snapshot_min_interval_ms"]):
+                return web.json_response({"error": "要求が早すぎる"}, status=429)
+            self._snapshot_ss_at_ms = now
+        await self._touch()  # 静止画の要求も操作に数える（省電力の間なら取り込みを戻す）
+
+        url = "http://127.0.0.1:%d/snapshot" % int(self._params["video_port"])
+        timeout = aiohttp.ClientTimeout(total=float(self._params["snapshot_wake_wait_ms"]) / 1000.0 + 2.0)
+        if self._snapshot_session is None or self._snapshot_session.closed:
+            self._snapshot_session = aiohttp.ClientSession(timeout=timeout)
+        try:
+            async with self._snapshot_session.get(url) as upstream:
+                if upstream.status != 200:
+                    return web.json_response({"error": "静止画を取れない"}, status=503)
+                body = await upstream.read()
+                age = upstream.headers.get("X-Frame-Age-Ms")
+        except Exception as exc:  # noqa: BLE001 - hve_video が居ない・遅いのは 503 にするだけ
+            log.info("静止画を取れない: %s", exc)
+            return web.json_response({"error": "静止画を取れない"}, status=503)
+
+        now = self._clock()
+        headers = {
+            "Cache-Control": "no-store",
+            "X-Boot-Id": self._boot_id,
+            "X-Pitch-Deg": str(round(self.control.pitch_deg, 3)),
+            "X-Still-Ms": str(max(0, int(now - self.control.motion_at_ms))),
+        }
+        if age is not None:
+            headers["X-Frame-Age-Ms"] = age
+        yaw = self._yaw_deg_rounded()
+        if yaw is not None:
+            headers["X-Yaw-Deg"] = str(yaw)
+        return web.Response(body=body, content_type="image/jpeg", headers=headers)
 
     def _drop_client(self, ws: web.WebSocketResponse) -> None:
         """画面を一覧から外す。**その画面が押していた操作は `release` 扱いにする。**"""
@@ -754,6 +905,8 @@ def create_app(
             web.get("/api/settings", camera.get_settings),
             web.put("/api/settings", camera.put_settings),
             web.get("/ws", camera.ws),
+            web.get("/ws/module", camera.ws_module),
+            web.get("/api/snapshot", camera.get_snapshot),
         ]
     )
     if fake:

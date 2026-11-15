@@ -129,6 +129,11 @@ class ControlLoop:
         #: 前の `step()` の時刻。ピッチの積分に使う
         self._last_step_at_ms: Optional[float] = None
 
+        #: `aim`（ss-system）が回しているヨーの速さ [deg/s]（正が左。0 は回していない）
+        self._aim_yaw_dps = 0.0
+        #: ヨー・ピッチの目標が最後に変わった（動かした）時刻。静止画の `X-Still-Ms` の元
+        self.motion_at_ms: float = clock()
+
     # --- 画面から受け取った操作 ------------------------------------------------------------------
 
     def hold(self, axis: str, speed: Any, owner: Any = None) -> bool:
@@ -156,6 +161,52 @@ class ControlLoop:
         self._speed = 0.0
         self._hold_at_ms = None
         self._owner = None
+
+    # --- `aim`（ss-system）が使う口 ----------------------------------------------------------------
+
+    @property
+    def pitch_deg(self) -> float:
+        """ピッチの目標角（実際の角度ではない）。"""
+        return self._pitch_deg
+
+    def mark_motion(self) -> None:
+        """ヨー・ピッチが動いた（目標が変わった）時刻を、いまにする（`X-Still-Ms`）。"""
+        self.motion_at_ms = self._clock()
+
+    async def set_pitch_target(self, angle_deg: float) -> None:
+        """ピッチの目標角を直接置いてサーボへ出す（`aim`。範囲は呼び出し側が先に確かめる）。"""
+        if float(angle_deg) != self._pitch_deg:
+            self.mark_motion()
+        self._pitch_deg = float(angle_deg)
+        self._pitch_reason = "NONE"
+        await self._hw.set_pitch(self._pitch_deg)
+
+    async def drive_aim_yaw(self, signed_dps: float) -> None:
+        """`aim` のヨーを回す（正が左）。0 なら止める。**画面の操作が無い間だけ効く**（`_step_axes`）。"""
+        self._aim_yaw_dps = float(signed_dps)
+        await self._apply_aim_yaw()
+
+    async def stop_aim_yaw(self) -> None:
+        """`aim` のヨーを止める。"""
+        await self.drive_aim_yaw(0.0)
+
+    async def _apply_aim_yaw(self) -> None:
+        dps = self._aim_yaw_dps
+        if dps == 0.0:
+            await self._hw.stop_yaw()
+            return
+        self.mark_motion()
+        direction = "yaw_left" if dps > 0 else "yaw_right"
+        steps_per_s, turn = yaw_step_rate(abs(dps), direction, self._params)
+        await self._hw.drive_yaw(steps_per_s, turn)
+
+    def active_axis(self, now_ms: float) -> Optional[str]:
+        """いま画面が押している軸（途絶えていれば `None`）。"""
+        return self._active_axis(now_ms)[0]
+
+    def io_ok(self, now_ms: float) -> bool:
+        """Arduino から行が来ているか（`io_lost_ms`。まだ 1 行も来ていなければ偽）。"""
+        return not self._io_lost(now_ms)
 
     async def set_zoom(self, level: Any) -> float:
         """倍率を丸めて持ち、**変わったときだけ** `hve_video` へ渡す。実際の倍率を返す。
@@ -255,16 +306,23 @@ class ControlLoop:
         """ピッチを積分してサーボへ、ヨーは押している間だけ回す。"""
         if axis in _PITCH_AXES:
             signed = speed if axis == "pitch_up" else -speed
+            before = self._pitch_deg
             self._pitch_deg, self._pitch_reason = pitch_step(
                 self._pitch_deg, signed, dt_ms, self._params
             )
+            if self._pitch_deg != before:
+                self.mark_motion()
             await self._hw.set_pitch(self._pitch_deg)
         else:
             self._pitch_reason = "NONE"
 
         if axis in _YAW_AXES:
             steps_per_s, direction = yaw_step_rate(speed, axis, self._params)
+            self.mark_motion()
             await self._hw.drive_yaw(steps_per_s, direction)
+        elif self._aim_yaw_dps != 0.0:
+            # `aim` が回している間は止めない（画面が押していない間だけここに来る）
+            await self._apply_aim_yaw()
         else:
             # 離している間はコイルの電流を切る（stop_yaw の責務）
             await self._hw.stop_yaw()

@@ -98,6 +98,17 @@
 | `VideoCapture.send_capture(on)` ／ `create_app(video_capture=…)` | `camera/hve_camera/app.py` | `hve_video` の `POST /capture` を `power_check_period_ms` ごとに送り直す（居なくても・404 でも落ちない） |
 | `state.power.mode` | `camera/hve_camera/app.py`（`broadcast_state`） | `active` / `saving`（`SETTLING`・`SAVING` はどちらも `saving`。`OFF` も `saving`） |
 
+### 1.7 ss-system に開く口の名前（2026-11-16。[-protocol-ss.md](DetailedDesign-protocol-ss.md)。`WP-IO-04`・`WP-VIDEO-05`・`WP-CAM-14`）
+
+| 名前 | 場所 | 中身 |
+| --- | --- | --- |
+| `StepRate::total` ／ `IoHal::yaw_hs_total` ／ `format_y_line` ／ `IoController::format_y` | `firmware/cam_io/lib/io_core/` | ヨーの半ステップの累計と `Y` 行 |
+| `latest_jpeg_stamped` ／ `wait_latest_jpeg_stamped` | `camera/hve_video/sources.py` | 静止画と、受けてからの経過（`X-Frame-Age-Ms`） |
+| `aim.py`（`YawTracker`・`YAW_SIGN`・`wrap_deg`） | `camera/hve_camera/` | `Y` 行からヨーの向き・原点・`B` で捨てる。`YAW_SIGN = +1`（正の `yaw_hsps`＝画面の左で累計が増える。実機で逆なら -1） |
+| `module_port.py` | `camera/hve_camera/` | `/ws/module`（`hello`・`aim`・`release`・`state`）と持ち主の規則 |
+| `GET /api/snapshot` | `camera/hve_camera/app.py` | `hve_video` の取り次ぎ・`X-Boot-Id`・`X-Pitch-Deg`・`X-Yaw-Deg`・`X-Still-Ms` |
+| `HardwareBase.yaw_hs_total`・`yaw_epoch` ／ `ControlLoop.motion_at_ms`・`mark_motion` | `camera/hve_camera/` | ヨーの累計と UNO の再起動の回数／最後にヨー・ピッチの目標が変わった時刻 |
+
 ### 1.4 カメラモジュールの画面の名前（`WP-UI-02` で足した。2026-10-07 に管理担当が登録）
 
 | 名前 | 置き場 | 中身 |
@@ -160,6 +171,7 @@
 | `LINK_LOST` | カメラモジュール | 昇降部と繋がっていない |
 | **`IO_LOST`** | カメラモジュール | Arduino から行が来ない（ヨー・ピッチが動かない・天井が読めない） |
 | `AXIS_LIMIT` | カメラモジュール | ピッチが可動範囲の端 |
+| **`YAW_UNKNOWN`** | カメラモジュール（ss の `aim.reason`） | ヨーの原点を合わせる前・UNO の再起動のあとで、向きが分からない（[-protocol-ss.md](DetailedDesign-protocol-ss.md) §2.1。`WP-CAM-14`）。ss の `aim` では `ARRIVED`・`PREEMPTED`・`TARGET_RANGE`・`CMD_TIMEOUT`・`CMD_STOP`・`OWNER_GONE`・`IO_LOST` も使う |
 
 ## 4. メッセージ
 
@@ -289,6 +301,10 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`power_save_settle_ms`** | 1500 | **仮**（その角度へ動き終わるのを待つ時間） |
 | **`power_check_period_ms`** | 1000 | **仮**（無線を見る・`/capture` を送り直す周期） |
 | **`snapshot_wake_wait_ms`** | 3000 | **仮**（取り込みを止めている間の静止画の要求で、新しい 1 枚を待つ上限） |
+| **`aim_cmd_timeout_ms`** | 600 | **仮**（ss の `aim` が途切れてから止めるまで。`WP-CAM-14`） |
+| **`aim_yaw_tol_deg`** | 1 | **仮**（ss の `aim` でヨーが着いたとみなす幅） |
+| **`module_ws_max_conn`** | 4 | **仮**（カメラモジュールの `/ws/module` の上限。超えた新しい接続は閉じる） |
+| `snapshot_min_interval_ms` | 200 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5.1（ss の静止画は 1 秒 5 枚まで。早すぎれば `429`） |
 
 ### 5.3.1 カメラモジュールの画面（`camera/web/app.js`）
 

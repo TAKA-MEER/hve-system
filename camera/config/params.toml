@@ -67,6 +67,15 @@ power_save_pitch_deg = 0         # 仮（H-V15）
 power_save_settle_ms = 1500      # 仮
 # 無線を見る・hve_video へ /capture を送り直す周期
 power_check_period_ms = 1000     # 仮
+# ss-system の口（DetailedDesign-protocol-ss.md §5.1）
+# aim が途切れて（これだけ届かなくて）CMD_TIMEOUT にするまでの時間
+aim_cmd_timeout_ms = 600         # 仮
+# aim のヨーが目標からこの角度以内に入ったら着いたとみなして止める
+aim_yaw_tol_deg = 1              # 仮
+# /ws/module の接続の上限（超えた新しい接続は閉じる）
+module_ws_max_conn = 4           # 仮
+# ss からの静止画の要求の最短の間隔（これより早い要求は 429）
+snapshot_min_interval_ms = 200   # spec Spec-ui.md §1.5.1（デモは 1 秒 5 枚まで）
 # 映像の配信プロセス hve_video のポート（倍率の送り先。127.0.0.1 だけ）
 video_port = 8080
 # 仮値のまま動いているパラメータ名の一覧（DD-3、画面に出す）。DetailedDesign-names.md §5 の
@@ -93,4 +102,7 @@ provisional = [
   "power_save_pitch_deg",
   "power_save_settle_ms",
   "power_check_period_ms",
+  "aim_cmd_timeout_ms",
+  "aim_yaw_tol_deg",
+  "module_ws_max_conn",
 ]
