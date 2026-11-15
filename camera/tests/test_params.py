@@ -40,6 +40,10 @@ EXPECTED = {
     "ceiling_read_stale_ms": 600,
     "uno_clock_window": 20,
     "video_port": 8080,
+    "aim_cmd_timeout_ms": 600,
+    "aim_yaw_tol_deg": 1,
+    "module_ws_max_conn": 4,
+    "snapshot_min_interval_ms": 200,
     "idle_save_ms": 1800000,
     "ap_absent_ms": 60000,
     "power_save_pitch_deg": 0,
@@ -66,6 +70,9 @@ EXPECTED = {
         "power_save_pitch_deg",
         "power_save_settle_ms",
         "power_check_period_ms",
+        "aim_cmd_timeout_ms",
+        "aim_yaw_tol_deg",
+        "module_ws_max_conn",
     ],
 }
 
