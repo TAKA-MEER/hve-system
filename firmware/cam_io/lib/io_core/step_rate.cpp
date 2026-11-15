@@ -9,7 +9,7 @@ const int64_t kPhasePerHalfStep = 1000000;
 
 }  // namespace
 
-StepRate::StepRate(uint32_t tick_us) : tick_us_(tick_us), hsps_(0), phase_(0) {}
+StepRate::StepRate(uint32_t tick_us) : tick_us_(tick_us), hsps_(0), total_(0), phase_(0) {}
 
 void StepRate::set_hsps(int32_t hsps) {
   hsps_ = hsps;
@@ -24,11 +24,13 @@ bool StepRate::tick(int* dir_step) {
   if (phase_ >= kPhasePerHalfStep) {
     phase_ -= kPhasePerHalfStep;
     *dir_step = 1;
+    total_ = static_cast<int32_t>(static_cast<uint32_t>(total_) + 1u);
     return true;
   }
   if (phase_ <= -kPhasePerHalfStep) {
     phase_ += kPhasePerHalfStep;
     *dir_step = -1;
+    total_ = static_cast<int32_t>(static_cast<uint32_t>(total_) - 1u);
     return true;
   }
   return false;

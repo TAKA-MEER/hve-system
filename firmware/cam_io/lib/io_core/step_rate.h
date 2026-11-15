@@ -18,8 +18,13 @@ class StepRate {
   // 割り込み 1 回ごとに呼ぶ。刻むとき true を返し、dir_step に +1（正転）・-1（逆転）を入れる
   bool tick(int* dir_step);
 
+  // 刻んだ半ステップの累計（向きつき。+1 / -1 を足し引き。符号つき 32 bit）。
+  // 起動からの値で、set_hsps では戻さない。32 bit を一周しても未定義動作にならない
+  int32_t total() const { return total_; }
+
  private:
   uint32_t tick_us_;
   int32_t hsps_;
+  int32_t total_;
   int64_t phase_;  // 溜まった分 [半ステップ・µs / 秒]。1000000 で 1 刻み
 };

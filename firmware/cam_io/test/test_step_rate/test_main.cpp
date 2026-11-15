@@ -69,6 +69,20 @@ void test_null_dir_is_rejected() {
   TEST_ASSERT_FALSE(rate.tick(nullptr));
 }
 
+void test_total_follows_steps_with_direction() {
+  StepRate rate(100);
+  TEST_ASSERT_EQUAL_INT32(0, rate.total());
+  rate.set_hsps(100);
+  count_steps(&rate, 10000, 1);
+  TEST_ASSERT_EQUAL_INT32(100, rate.total());
+  rate.set_hsps(-300);
+  count_steps(&rate, 10000, -1);
+  TEST_ASSERT_EQUAL_INT32(-200, rate.total());
+  rate.set_hsps(0);  // 止めても・速さを替えても累計は戻さない
+  count_steps(&rate, 1000, 1);
+  TEST_ASSERT_EQUAL_INT32(-200, rate.total());
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
 
@@ -79,6 +93,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_slow_rate_steps_once_per_10000_ticks);
   RUN_TEST(test_changing_rate_resets_phase);
   RUN_TEST(test_null_dir_is_rejected);
+  RUN_TEST(test_total_follows_steps_with_direction);
 
   return UNITY_END();
 }
