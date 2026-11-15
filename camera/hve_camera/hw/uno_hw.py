@@ -73,6 +73,9 @@ class UnoHardware(HardwareBase):
 
         #: 前回 `read_ceiling()` で読み出した時刻（窓の空きの判定用）。
         self._last_drain_ms: Optional[float] = None
+        #: ヨーの半ステップの累計（最後の `Y` 行。`B` で `None` に戻す）と、`B` を受けた回数
+        self._yaw_hs: Optional[int] = None
+        self._yaw_epoch = 0
 
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._send_loop, name="hve-uno", daemon=True)
@@ -88,6 +91,14 @@ class UnoHardware(HardwareBase):
         """
         now = self._clock()
         received = self._drain(now)
+        # ヨーの累計は天井と別に、**必ず**（窓が空いて行を捨てる回でも）順番どおりに見る
+        for kind in received:
+            if kind[0] == "Y":
+                self._yaw_hs = kind[2]
+            elif kind[0] == "B":
+                # UNO の再起動。累計は 0 から数え直す（ヨーの原点を捨てさせる）
+                self._yaw_hs = None
+                self._yaw_epoch += 1
 
         gap_ms = float(self._params["ceiling_read_stale_ms"])
         idle_ms = None if self._last_drain_ms is None else now - self._last_drain_ms
@@ -103,8 +114,10 @@ class UnoHardware(HardwareBase):
 
         newest = None
         restarted = False
+        saw_b = False
         for kind in received:
             if kind[0] == "B":
+                saw_b = True
                 _, uno_ms, _fw = kind
                 # 再起動の印。記録を捨てて、この行からやり直す（§3.5）。
                 # `B` の後の `C` は新しい世代の行なので、そのまま使える。
@@ -120,6 +133,8 @@ class UnoHardware(HardwareBase):
                 if newest is None or uno_ms >= newest[1]:
                     newest = (kind, age)
         if newest is None:
+            if not saw_b:
+                return None  # `Y` だけだった。天井の読み値は変えない
             # `B` だけだった。天井の測定は無い。
             return CeilingReading(CeilingStatus.READ_ERROR, at_ms=now)
         if restarted:
@@ -129,6 +144,14 @@ class UnoHardware(HardwareBase):
         age = max(0.0, age)
         status, mm = classify_srf02(st, cm, age, self._params)
         return CeilingReading(status, distance_mm=mm, at_ms=now - age)
+
+    def yaw_hs_total(self) -> Optional[int]:
+        """最後の `Y` 行のヨーの半ステップの累計。`B` のあと次の `Y` が来るまでは `None`。"""
+        return self._yaw_hs
+
+    def yaw_epoch(self) -> int:
+        """`B` 行（UNO の再起動）を受けた回数。"""
+        return self._yaw_epoch
 
     async def set_pitch(self, angle_deg: float) -> None:
         """ピッチの目標角を覚えるだけ（送るのは `io_cmd_period_ms` ごとのスレッド）。"""

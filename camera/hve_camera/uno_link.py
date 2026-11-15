@@ -1,7 +1,7 @@
 """Arduino（UNO）との UART の行の組み立て・読み取りと時計の直し。
 
 [DetailedDesign-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §5。
-行の形は `firmware/cam_io/lib/io_core/io_codec.{h,cpp}`（`M`・`C`・`B`・`R`）と同じ。
+行の形は `firmware/cam_io/lib/io_core/io_codec.{h,cpp}`（`M`・`C`・`B`・`R`・`Y`）と同じ。
 **読めない行は捨てる**（`None` を返し、呼び出し側は生存確認を延ばさない）。
 
 `UnoClock` は [DetailedDesign.md](../../docs/plan/detailed/DetailedDesign.md) §3.5 の
@@ -24,8 +24,11 @@ CLine = Tuple[str, int, int, int]
 #: `parse_io_line()` が返す `B` 行。`(種別, uno_ms, fw)`。
 BLine = Tuple[str, int, str]
 
+#: `parse_io_line()` が返す `Y` 行。`(種別, uno_ms, yaw_hs)`。`yaw_hs` はヨーの半ステップの累計（符号つき 32 bit）。
+YLine = Tuple[str, int, int]
+
 #: `parse_io_line()` の戻り値。読めない行は `None`。
-IoLine = Union[CLine, BLine, None]
+IoLine = Union[CLine, BLine, YLine, None]
 
 
 def encode_io_cmd(seq: int, pitch_ddeg: int, yaw_hsps: int) -> str:
@@ -53,11 +56,12 @@ def encode_relax_cmd(seq: int) -> str:
 _LEADING_JUNK = "".join(chr(c) for c in range(0x20)) + "\x7f"
 
 
-def parse_io_line(line: object) -> Union[CLine, BLine, None]:
-    """`C`・`B` 行を読む。読めたらタプル、読めなければ `None`。
+def parse_io_line(line: object) -> Union[CLine, BLine, YLine, None]:
+    """`C`・`B`・`Y` 行を読む。読めたらタプル、読めなければ `None`。
 
     `C <uno_ms> <st> <cm>` → `("C", uno_ms, st, cm)`、
-    `B <uno_ms> <fw>` → `("B", uno_ms, fw)`。
+    `B <uno_ms> <fw>` → `("B", uno_ms, fw)`、
+    `Y <uno_ms> <yaw_hs>` → `("Y", uno_ms, yaw_hs)`（[-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §5）。
     `M` 行（UnitV2 から Arduino への向き）や形の違う行は `None`。
     """
     if not isinstance(line, str):
@@ -75,6 +79,16 @@ def parse_io_line(line: object) -> Union[CLine, BLine, None]:
         if not 0 <= uno_ms <= 4294967295:
             return None
         return ("C", uno_ms, st, cm)
+    if parts[0] == "Y" and len(parts) == 3:
+        numbers = _take_ints(parts[1:3])
+        if numbers is None:
+            return None
+        uno_ms, yaw_hs = numbers
+        if not 0 <= uno_ms <= 4294967295:
+            return None
+        if not -2147483648 <= yaw_hs <= 2147483647:
+            return None
+        return ("Y", uno_ms, yaw_hs)
     if parts[0] == "B" and len(parts) == 3:
         numbers = _take_ints(parts[1:2])
         if numbers is None:

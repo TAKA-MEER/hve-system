@@ -47,6 +47,33 @@ class FakeHardware(HardwareBase):
         self.power_pitch_deg: float = 0.0
         self.power_history: list[tuple[str, float]] = []
         self.closed = False
+        #: 偽の UNO のヨーの累計（`Y` 行の元）。**速さに合わせて時計で進める**（符号は `left` が正）
+        self._yaw_total = 0.0
+        self._yaw_hsps = 0.0
+        self._yaw_at_ms = clock()
+        self._yaw_epoch = 0
+
+    # --- 偽の UNO のヨーの累計 -------------------------------------------------------------------------
+
+    def _integrate_yaw(self) -> None:
+        """前回から今までの時計の進みぶん、今の速さで累計を進める（速さは区間の中で一定）。"""
+        now = self._clock()
+        self._yaw_total += self._yaw_hsps * (now - self._yaw_at_ms) / 1000.0
+        self._yaw_at_ms = now
+
+    def yaw_hs_total(self) -> int | None:
+        self._integrate_yaw()
+        return int(round(self._yaw_total))
+
+    def yaw_epoch(self) -> int:
+        return self._yaw_epoch
+
+    def reboot_uno(self) -> None:
+        """偽の UNO が再起動した（`B` 行を送った）ことにする。累計は 0 から数え直す。"""
+        self._yaw_total = 0.0
+        self._yaw_hsps = 0.0
+        self._yaw_at_ms = self._clock()
+        self._yaw_epoch += 1
 
     # --- 外から天井の読み値を差し替える ----------------------------------------------------------
 
@@ -96,12 +123,16 @@ class FakeHardware(HardwareBase):
         self.pitch_history.append(self.pitch_deg)
 
     async def drive_yaw(self, steps_per_s: float, direction: str) -> None:
+        self._integrate_yaw()
+        self._yaw_hsps = float(steps_per_s) * (1.0 if direction == "left" else -1.0)
         self.yaw_steps_per_s = float(steps_per_s)
         self.yaw_direction = direction
         self.yaw_running = True
         self.yaw_history.append((self.yaw_steps_per_s, direction))
 
     async def stop_yaw(self) -> None:
+        self._integrate_yaw()
+        self._yaw_hsps = 0.0
         self.yaw_running = False
         self.yaw_steps_per_s = 0.0
         self.yaw_direction = None
