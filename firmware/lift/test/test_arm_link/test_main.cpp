@@ -827,6 +827,92 @@ void test_goto_while_4e_reports_arm_link_not_height_unknown() {
   TEST_ASSERT_FALSE(rig.hal.motor_moving());
 }
 
+// --- #4e が立ち始めたとき持ち主を離す（解けたあとは新しく押し始めた操作でなければ動かない。Spec-module §4）---
+
+// 画面が hold up を送り続けている間に #4e が立つ（arm が来なくなる）。戻り値は #4e が立った周期の confirm
+int hold_up_until_4e(Rig* rig, int press) {
+  for (int i = 0; i < 20; ++i) {
+    rig->hold_ui(LiftDir::UP, press, 100);
+    if (rig->st.arm.confirm > 0) {
+      return rig->st.arm.confirm;
+    }
+  }
+  TEST_FAIL_MESSAGE("#4e が立たなかった");
+  return 0;
+}
+
+void test_same_press_does_not_resume_after_confirm_but_new_press_does() {
+  Rig rig;
+  rig.arm_out_and_settled();
+  rig.hold_ui(LiftDir::UP, 1, 200);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  const int shown = hold_up_until_4e(&rig, 1);
+  assert_reason(StopReason::ARM_LINK, rig.st);
+  TEST_ASSERT_TRUE(rig.confirm(shown, ui()));
+  rig.hold_ui(LiftDir::UP, 1, 300);  // 同じ press を送り続けても動かない
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_FALSE(rig.st.has_owner);
+  assert_reason(StopReason::CMD_STOP, rig.st);
+  rig.hold_ui(LiftDir::UP, 2, 200);  // 新しく押し始めれば動く
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+  assert_reason(StopReason::NONE, rig.st);
+}
+
+void test_same_press_does_not_resume_after_link_returns_but_new_press_does() {
+  Rig rig;
+  rig.arm_out_and_settled();
+  rig.hold_ui(LiftDir::UP, 1, 200);
+  hold_up_until_4e(&rig, 1);
+  rig.arm(kArm, ArmTri::YES);  // 通信が戻って解ける
+  rig.hold_ui(LiftDir::UP, 1, 300);
+  TEST_ASSERT_EQUAL_INT(0, rig.st.arm.confirm);
+  TEST_ASSERT_FALSE(rig.hal.motor_moving());
+  TEST_ASSERT_FALSE(rig.st.has_owner);
+  rig.arm(kArm, ArmTri::YES);
+  rig.hold_ui(LiftDir::UP, 2, 200);
+  TEST_ASSERT_TRUE(rig.hal.motor_moving());
+}
+
+void test_held_physical_button_stops_in_4e_and_needs_a_new_press_after() {
+  // button_step 経由。押し続けている間に #4e → 解けても、押し直すまで動かない
+  Rig rig;
+  rig.join_arm(kArm);
+  ButtonInput button_in;
+  LiftSettings settings;
+  uint32_t t = 1000;
+  bool up_low = false;
+  int phase_checked = 0;
+  for (int i = 0; i < 400; ++i) {
+    t += 10;
+    rig.t = t;
+    rig.hal.set_height(500, true, t);
+    if (i % 10 == 0 && (t < 1500 || t >= 3500)) {
+      rig.ctrl.on_arm(module(kArm), arm_out(ArmTri::YES), t);  // 1500 ms〜3500 ms は来ない
+    }
+    up_low = i >= 10 && !(i >= 300 && i < 320);  // 押す・4000 ms ごろ一度離す・また押す
+    button_step(button_in, rig.ctrl, up_low ? 0 : 1, 1, settings, t);
+    rig.service();
+    rig.st = rig.ctrl.step(t);
+    if (t > 2800 && t < 3000) {  // #4e の間（押し続けている）
+      assert_reason(StopReason::ARM_LINK, rig.st);
+      TEST_ASSERT_FALSE(rig.hal.motor_moving());
+      phase_checked |= 1;
+    }
+    if (t > 3600 && t < 3990) {  // 通信が戻り、解けた。まだ押し続けている（同じ押し始め）
+      if (i < 300) {
+        TEST_ASSERT_EQUAL_INT(0, rig.st.arm.confirm);
+        TEST_ASSERT_FALSE(rig.hal.motor_moving());
+        phase_checked |= 2;
+      }
+    }
+    if (i >= 335 && i < 345) {  // 4000〜4200 ms に一度離して押し直した。押し直したあとは動く
+      TEST_ASSERT_TRUE(rig.hal.motor_moving());
+      phase_checked |= 4;
+    }
+  }
+  TEST_ASSERT_EQUAL_INT(7, phase_checked);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_unknown_arm_does_not_stop_and_state_is_all_null);
@@ -870,5 +956,8 @@ int main(int, char**) {
   RUN_TEST(test_arm_climb_without_camera_ceiling_stops_with_stale_even_if_it_sends_one);
   RUN_TEST(test_arm_own_command_is_stopped_by_4e_too);
   RUN_TEST(test_goto_while_4e_reports_arm_link_not_height_unknown);
+  RUN_TEST(test_same_press_does_not_resume_after_confirm_but_new_press_does);
+  RUN_TEST(test_same_press_does_not_resume_after_link_returns_but_new_press_does);
+  RUN_TEST(test_held_physical_button_stops_in_4e_and_needs_a_new_press_after);
   return UNITY_END();
 }

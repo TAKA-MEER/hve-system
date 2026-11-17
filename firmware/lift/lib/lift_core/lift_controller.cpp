@@ -525,6 +525,27 @@ void LiftController::apply_settings(const LiftSettings& settings) {
 }
 
 LiftState LiftController::step(uint32_t now_ms) {
+  // 測定機構の #4e（protocol-arm §5・§7・§8）。止め始めるたびに確認の番号を 1 増やし、
+  // そのとき持ち主を離す（解けたあとは、#4e の前から押していた同じ press では動き出さず、
+  // 新しく押し始めた操作でなければ動かない。spec Spec-module §4）
+  const bool arm_stop = arm_stop_active(now_ms);
+  if (arm_stop && !arm_stop_prev_) {
+    ++arm_stop_;
+    ConnId stop_owner;
+    int stop_press = 0;
+    if (arbiter_.owner(&stop_owner, &stop_press)) {
+      arbiter_.on_release(stop_owner, stop_press);
+      has_owner_cmd_ = false;
+      owner_cmd_.dir = LiftDir::STOP;
+      owner_cmd_.speed_mm_s = 0;
+      idle_reason_ = StopReason::CMD_STOP;
+      had_owner_ = false;
+      end_goto(StopReason::ARM_LINK);
+    }
+  }
+  arm_stop_prev_ = arm_stop;
+  arm_confirm_shown_ = arm_stop ? arm_stop_ : 0;
+
   arbiter_.tick(now_ms);
   ConnId owner;
   int owner_press = 0;
@@ -626,14 +647,6 @@ LiftState LiftController::step(uint32_t now_ms) {
     stall_at_ms_ = now_ms;
     stall_valid_ = true;
   }
-
-  // 測定機構の #4e（protocol-arm §5・§8）。止め始めるたびに確認の番号を 1 増やす
-  const bool arm_stop = arm_stop_active(now_ms);
-  if (arm_stop && !arm_stop_prev_) {
-    ++arm_stop_;
-  }
-  arm_stop_prev_ = arm_stop;
-  arm_confirm_shown_ = arm_stop ? arm_stop_ : 0;
 
   LiftDecideInput in;
   in.arm_link_stop = arm_stop;
