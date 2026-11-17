@@ -64,6 +64,7 @@ const REASON_TEXT = {
   ENCODER_STALL: ['warn', 'エンコーダが回らないため停止しました。反対方向へは動かせます'],
   CMD_TIMEOUT: ['warn', '操作が途絶えたため停止しました'],
   OWNER_GONE: ['warn', '操作していた画面が閉じられたため停止しました'],
+  ARM_LINK: ['ng', '測定機構と通信できないため停止しています（腕を確かめて、確認に答えてください）'],
 };
 
 /* --- DOM に触れない部分（Node の試験で見る） --- */
@@ -208,6 +209,42 @@ function armNoticeText(arm) {
   return arm && arm.out === true ? '腕が出ています' : null;
 }
 
+/**
+ * 原点の前に腕が出ている警告（spec §1.6）。**高さが読めない（`height_ok: false`）間に、
+ * 通信できていて（`arm.link: true`）腕が出ている（`arm.out: true`）と知らされたときだけ**。
+ * `out` が `null`（分からない）・`link` が `false`・`null` では出さない。止めない（#4e と取り違えない）
+ */
+function armHomeWarnText(arm, height_ok) {
+  if (height_ok !== false || !arm) return null;
+  if (arm.link !== true || arm.out !== true) return null;
+  return '腕が出ています。下げる前に腕を格納してください';
+}
+
+/**
+ * 確認ダイアログを出すか。`arm.confirm` が整数の番号のときだけ出し、番号を返す
+ * （`null`・欠けは出さない。通信が戻る・別の端末が答えると `null` になって消える。protocol-arm §7）
+ */
+function armConfirmView(arm) {
+  const stop = arm ? arm.confirm : null;
+  if (typeof stop === 'number' && Number.isInteger(stop)) return {show: true, stop: stop};
+  return {show: false, stop: null};
+}
+
+/** 答えるボタンが送る `arm_confirm`。**いま出している番号**を載せる（古い番号では昇降部が捨てる） */
+function armConfirmMessage(stop) {
+  return {t: 'arm_confirm', stop: Number(stop)};
+}
+
+/** 測定機構の表示（付いているとみなしているか・通信・確認待ち。spec Spec-ui §0.2） */
+function armStatusText(arm) {
+  if (!arm) return '—';
+  const confirm = armConfirmView(arm);
+  if (confirm.show) return '通信できない・確認待ち';
+  if (arm.attached !== true) return '未確認';
+  if (arm.link !== true) return '付いている・通信できない';
+  return arm.out === true ? '通信中・腕が出ている' : '通信中・格納位置';
+}
+
 /** 物理ボタンが持ち主の間だけ出す注意（遠隔からは動かせない。Spec-ui §0.3）。出さないときは `null` */
 function buttonNoteText(owner) {
   return owner === 'button' ? '物理ボタンで操作中（遠隔からは動かせません）' : null;
@@ -323,6 +360,7 @@ let press_seq = 0;          // 次の押し始めの `press`
 let last_dir = 'stop';      // 直前に押していた向き（`press` を増やすかの判断用）
 let sliders = null;
 let outs = null;
+let arm_confirm_stop = null;// いま出している確認ダイアログの番号（出ていなければ null）
 
 /* 画面の設定の下書き。閉じる操作では元に戻さない（保存しない） */
 let settings_draft = null;
@@ -485,9 +523,16 @@ function render() {
   $('stModule').title = modulesText(modules);
   $('stReason').textContent = state.reason || 'NONE';
 
-  const armNote = armNoticeText(state.arm);
+  $('stArm').textContent = armStatusText(state.arm);
+  // 原点の前の警告（高さが読めない間に腕が出ている）を、ふつうの「腕が出ています」より先に出す
+  const armNote = armHomeWarnText(state.arm, state.height_ok) || armNoticeText(state.arm);
   $('armNote').className = armNote ? 'stopbar show' : 'stopbar';
   $('armNote').textContent = armNote || '';
+
+  // 確認ダイアログ。番号が null になったら（通信が戻った・別の端末が答えた）消す
+  const confirm = armConfirmView(state.arm);
+  arm_confirm_stop = confirm.stop;
+  $('armConfirm').classList.toggle('show', confirm.show);
 
   const reason = reasonText(state.reason);
   const bar = $('stopbar');
@@ -685,6 +730,11 @@ function initApp() {
     current_settings = event.detail;
     applySettings(event.detail);
   });
+  // 確認ダイアログの答え。**いま出している番号**を送る
+  $('acOk').addEventListener('click', () => {
+    if (arm_confirm_stop === null) return;
+    send(armConfirmMessage(arm_confirm_stop));
+  });
   document.getElementById('stCancel').addEventListener('click', closeSettingsOverlay);
   document.getElementById('stSave').addEventListener('click', saveSettingsOverlay);
 
@@ -705,7 +755,7 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, isNewPress, sliderSpec,
     formatSpeed, reasonText, ceilingText, heightText, ownerText, buttonNoteText, moveText, stateStale,
-    ownerBusyLabel, modulesText, armNoticeText,
+    ownerBusyLabel, modulesText, armNoticeText, armHomeWarnText, armConfirmView, armConfirmMessage, armStatusText,
     validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, SETTING_CEILING_MARGIN, MOTOR_NOTE,
   };
 }

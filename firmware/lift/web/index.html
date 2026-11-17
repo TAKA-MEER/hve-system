@@ -43,6 +43,7 @@
       <div><dt>下端</dt><dd id="stBottom">—</dd></div>
       <div><dt>持ち主</dt><dd id="stOwner">—</dd></div>
       <div class="wrap"><dt>上部モジュール</dt><dd id="stModule">—</dd></div>
+      <div><dt>測定機構</dt><dd id="stArm">—</dd></div>
       <div><dt>止めた理由</dt><dd id="stReason">—</dd></div>
     </dl>
     <div class="stopbar" id="buttonNote"></div>
@@ -68,6 +69,15 @@
       <button class="hbtn primary" id="stSave">保存</button>
     </div>
     <div class="prov" id="stProv"></div>
+  </div>
+</div>
+<!-- 測定機構の確認ダイアログ（state.arm.confirm が番号のときだけ出る。spec Spec-ui §0.2） -->
+<div class="overlay" id="armConfirm">
+  <div class="sheet" role="alertdialog" aria-labelledby="acTitle">
+    <h1 id="acTitle">測定機構の確認</h1>
+    <p class="aclead" id="acLead">測定機構と通信できないため、昇降機を止めています。通信が戻れば、この表示は消えます。</p>
+    <p class="acq">測定機構を取り外した、または腕の安全を確かめましたか？</p>
+    <div class="row-actions"><button class="hbtn primary" id="acOk">確認した（昇降機を動かせるようにする）</button></div>
   </div>
 </div>
 <div class="toast" id="toast">保存しました</div>

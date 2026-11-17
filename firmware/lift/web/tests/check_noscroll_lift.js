@@ -5,7 +5,8 @@
 //
 // camera/web/tests/check_noscroll_web.js を昇降部の画面向けに作り直したもの。
 // 状態の作り方は POST /api/fake で偽物を操作する。
-// 17 の画面サイズ × 4 状態（通常・下端・設定画面・上部モジュール 3 つと腕）で、
+// 17 の画面サイズ × 7 状態（通常・下端・設定画面・上部モジュール 3 つと腕・測定機構の確認ダイアログ・
+// 設定画面の上の確認ダイアログ・原点の前の腕の警告）で、
 // ページ・要素のスクロールと中身のはみ出し、操作部品の画面外・カード外・小さすぎを検出する。
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 
@@ -18,19 +19,28 @@ const sizes = [
   [1366, 768], [1920, 1080], [2560, 1440],
 ];
 
+const ARM_STOPPED = {attached: true, link: false, confirm: 12, out: null};
 // 状態は偽物 API（POST /api/fake）で作る。実装の画面は URL 引数では状態を切り替えない
 const states = [
-  {name: '通常', fake: {height_mm: 1200, bottom: false, ceiling: {status: 'MEASURED', mm: 2200}}},
-  {name: '下端', fake: {height_mm: 0, bottom: true, ceiling: {status: 'MEASURED', mm: 2200}}},
-  {name: '設定画面', fake: {height_mm: 1200, bottom: false, ceiling: {status: 'MEASURED', mm: 2200}}, settings: true},
+  {name: '通常', fake: {height_mm: 1200, bottom: false, height_ok: true, ceiling: {status: 'MEASURED', mm: 2200}, arm: null}},
+  {name: '下端', fake: {height_mm: 0, bottom: true, height_ok: true, ceiling: {status: 'MEASURED', mm: 2200}, arm: null}},
+  {name: '設定画面', fake: {height_mm: 1200, bottom: false, height_ok: true, ceiling: {status: 'MEASURED', mm: 2200}, arm: null}, settings: true},
   // 上部モジュールを 3 つ繋ぎ（一覧が長くなる）、1 つが持ち主として長い busy_label を出し、腕が出ている
-  {name: '上部3つ・腕', fake: {height_mm: 1200, bottom: false, ceiling: {status: 'MEASURED', mm: 2200}, arm: {out: true}},
+  {name: '上部3つ・腕', fake: {height_mm: 1200, bottom: false, height_ok: true, ceiling: {status: 'MEASURED', mm: 2200}, arm: {out: true}},
     modules: [
       {hello: {t: 'hello', name: 'hve-cam', role: 'control', operator: 'human', ceiling_sensor: true}},
       {hello: {t: 'hello', name: 'viewer', role: 'observe', operator: 'auto', ceiling_sensor: false}},
       {hello: {t: 'hello', name: 'ss', role: 'control', operator: 'auto', ceiling_sensor: false,
         busy_label: '画像認識で操作中の長い表示'}, owner: true},
     ]},
+  // 測定機構の確認ダイアログ（#4e。state.arm.confirm が番号のとき出る。スクロールさせない: spec §0.1）
+  {name: '確認ダイアログ', fake: {height_mm: 1200, bottom: false, height_ok: true, ceiling: {status: 'MEASURED', mm: 2200}, arm: ARM_STOPPED},
+    dialog: true},
+  {name: '設定画面+確認ダイアログ', fake: {height_mm: 1200, bottom: false, height_ok: true, ceiling: {status: 'MEASURED', mm: 2200}, arm: ARM_STOPPED},
+    settings: true, dialog: true},
+  // 原点の前（高さが読めない）に腕が出ている警告
+  {name: '原点の前の腕の警告', fake: {height_mm: 0, height_ok: false, bottom: false, ceiling: {status: 'MEASURED', mm: 2200},
+    arm: {attached: true, link: true, confirm: null, out: true}}},
 ];
 
 // 上部モジュールとして繋ぐ（画面の持ち主・一覧の表示を出す）。owner は stop の hold を送り続けて持ち主になる
@@ -86,8 +96,9 @@ const MEASURE = () => {
     }
   }
   const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings')];
-  const overlay = document.querySelector('.overlay.show');
-  if (overlay) must.push(...overlay.querySelectorAll('input, button'));
+  for (const overlay of document.querySelectorAll('.overlay.show')) {
+    must.push(...overlay.querySelectorAll('input, button'));
+  }
   for (const el of must) {
     const rc = el.getBoundingClientRect();
     const name = el.id || el.dataset.dir || el.dataset.f || el.textContent.trim().slice(0, 8);
@@ -112,7 +123,8 @@ const MEASURE = () => {
   let n = 0;
   for (const [w, h] of sizes) {
     for (const state of states) {
-      await setFake(state.fake);
+      // 設定画面を開いてから確認ダイアログを出す（ダイアログが先に出ると設定のボタンが押せない）
+      await setFake(state.settings && state.dialog ? {...state.fake, arm: null} : state.fake);
       const sockets = await connectModules(state.modules || []);
       const page = await browser.newPage({viewport: {width: w, height: h}});
       await page.goto(base + '/');
@@ -122,6 +134,8 @@ const MEASURE = () => {
         await page.click('#openSettings');
         await page.waitForSelector('#settings.show');
       }
+      if (state.settings && state.dialog) await setFake({arm: state.fake.arm});
+      if (state.dialog) await page.waitForSelector('#armConfirm.show', {timeout: 5000});
       await page.waitForTimeout(120);
       const bad = await page.evaluate(MEASURE);
       n += 1;
