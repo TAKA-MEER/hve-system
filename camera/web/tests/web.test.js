@@ -3,6 +3,8 @@
    ブラウザでの経路の試験は同じ置き場の browser_paths.js（Playwright）。 */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const app = require('../app.js');
 const settings = require('../settings.js');
@@ -177,6 +179,11 @@ test('持ち主・昇降部の画面の数・昇降部へのリンク', () => {
   assert.equal(app.armText({out: null}), null);
   assert.equal(app.armText(null), null);
   assert.equal(app.armText(undefined), null);
+  // 持ち主がアームの制御器（#4e の確認ダイアログはここには出さない）
+  assert.equal(app.ownerText('arm', 'fk-arm', mods), '持ち主 アームの制御器');
+  assert.equal(app.ownerText('arm', 'fk-arm', [{name: 'fk-arm', busy_label: '腕の測定中'}]), '持ち主 腕の測定中');
+  assert.equal(app.ownerText('arm', 'fk-arm', [{name: 'fk-arm', busy_label: ''}]), '持ち主 アームの制御器');
+  assert.equal(app.ownerText('arm', null, undefined), '持ち主 アームの制御器');
   assert.equal(app.buttonNoteText('button'), '物理ボタンで操作中（遠隔からは動かせません）');
   assert.equal(app.buttonNoteText('ui'), null);
   assert.equal(app.buttonNoteText('module'), null);
@@ -429,4 +436,33 @@ test('静止画のずれは範囲に収める（両側・読めない値は 0）
   assert.deepEqual(app.clampPan(-201, 101, limit), {x: -200, y: 100});
   assert.deepEqual(app.clampPan(10, 10, {x: 0, y: 0}), {x: 0, y: 0});
   assert.deepEqual(app.clampPan('x', undefined, limit), {x: 0, y: 0});
+});
+
+test('測定機構の #4e（ARM_LINK）: 確認はここではできないと案内し、確認のボタンは出さない（WP-CAM-15）', () => {
+  const r = app.reasonText('ARM_LINK');
+  assert.equal(r.cls, 'ng');
+  assert.equal(r.text, '測定機構と通信できません。昇降部の画面で確認してください');
+  // 知らない理由の既定の文言に落ちていない
+  assert.ok(!r.text.includes('理由が分かりません'));
+  // 確認を送る部品を持たない（確認できるのは昇降部の画面だけ。spec Spec-ui §0.2）
+  assert.equal(app.armConfirmMessage, undefined);
+  assert.ok(!/arm_confirm/.test(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8')));
+  assert.ok(!/arm_confirm/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
+});
+
+test('原点の前に腕が出ている警告は、高さが読めず link: true・out: true のときだけ（WP-CAM-15）', () => {
+  const W = '腕が出ています。下げる前に腕を格納してください';
+  const unknown = {height_ok: false};
+  assert.equal(app.armHomeText(unknown, {link: true, out: true}), W);
+  // 変異 3 の芯: 通信が切れている（link: false）・分からない（null）では出さない
+  assert.equal(app.armHomeText(unknown, {link: false, out: true}), null);
+  assert.equal(app.armHomeText(unknown, {link: null, out: true}), null);
+  // 腕が出ていない・分からない
+  assert.equal(app.armHomeText(unknown, {link: true, out: false}), null);
+  assert.equal(app.armHomeText(unknown, {link: true, out: null}), null);
+  // 高さが読めているときは出さない（普通の「腕が出ています」だけ）
+  assert.equal(app.armHomeText({height_ok: true}, {link: true, out: true}), null);
+  assert.equal(app.armHomeText({}, {link: true, out: true}), null);
+  assert.equal(app.armHomeText(null, {link: true, out: true}), null);
+  assert.equal(app.armHomeText(unknown, null), null);
 });

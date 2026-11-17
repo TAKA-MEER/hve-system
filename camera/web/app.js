@@ -51,6 +51,8 @@ const REASON_TEXT = {
   AXIS_LIMIT: ['warn', '可動範囲の端です'],
   OWNER_GONE: ['warn', '操作していた画面が閉じたため停止しました'],
   IO_LOST: ['ng', 'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません'],
+  // 測定機構の #4e。**確認はこの画面ではできない**（ボタンを出さない。spec Spec-ui §0.2）
+  ARM_LINK: ['ng', '測定機構と通信できません。昇降部の画面で確認してください'],
 };
 
 /* 上端の閾値が未設定のあいだの表示（spec Spec-safety.md §2 #2a。昇降部の画面と同じ文言） */
@@ -221,6 +223,9 @@ function topDetectText(lift) {
   return value.top_detect === true ? null : TOP_DETECT_OFF_TEXT;
 }
 
+/** アームの制御器が持ち主で `busy_label` が無いときの表示 */
+const ARM_OWNER_LABEL = 'アームの制御器';
+
 /** 自分（カメラモジュール）の名前。`hello` の `name`・`params.toml` の `module_name` と同じ（names.md） */
 const OWN_MODULE_NAME = 'hve-cam';
 
@@ -239,6 +244,14 @@ function ownerText(owner, ownerName, modules) {
       ? found.busy_label : ownerName;
     return `持ち主 ${label}`;
   }
+  if (owner === 'arm') {
+    // アームの制御器（`owner_name` は `fk-arm`）。`busy_label` が無ければ決まった名前
+    const list = Array.isArray(modules) ? modules : [];
+    const found = list.find((m) => m && m.name === ownerName);
+    const label = found && typeof found.busy_label === 'string' && found.busy_label !== ''
+      ? found.busy_label : ARM_OWNER_LABEL;
+    return `持ち主 ${label}`;
+  }
   if (owner === 'ui') return '持ち主 昇降部の画面';
   if (owner === 'button') return '持ち主 物理ボタン（点検）';
   return '持ち主 なし';
@@ -248,6 +261,14 @@ function ownerText(owner, ownerName, modules) {
     （`false`・`null`＝分からないは出さない。Spec-ui §1.6） */
 function armText(arm) {
   return arm && arm.out === true ? '腕が出ています' : null;
+}
+
+/** 原点の前（高さが読めない）に、通信できていて腕が出ている（`link: true`・`out: true`）ときの警告。
+    出さないときは `null`。止めない（#4e と取り違えない。Spec-ui §1.6・protocol-arm §8） */
+function armHomeText(lift, arm) {
+  const heightUnknown = lift && lift.height_ok === false;
+  return heightUnknown && arm && arm.link === true && arm.out === true
+    ? '腕が出ています。下げる前に腕を格納してください' : null;
 }
 
 /** 物理ボタンが持ち主の間だけ出す注意（遠隔からは動かせない。Spec-ui §0.3）。出さないときは `null` */
@@ -643,7 +664,7 @@ function render() {
   $('osdBusy').textContent = busy || '';
 
   // 注意の帯は 1 本（物理ボタンの注意と腕の警告を並べる。ヘッダを伸ばさない）
-  const note = [buttonNoteText(lift.owner), armText(state.arm)].filter(Boolean).join(' ／ ') || null;
+  const note = [buttonNoteText(lift.owner), armHomeText(lift, state.arm) || armText(state.arm)].filter(Boolean).join(' ／ ') || null;
   $('buttonNote').className = note ? 'stopbar top show' : 'stopbar top';
   $('buttonNote').textContent = note || '';
 
@@ -774,7 +795,7 @@ if (typeof module === 'object' && module !== null) {
   module.exports = {
     holdMessage, releaseMessage, zoomMessage, touchMessage, powerText, yawZeroMessage, yawText, busyText, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, standaloneCeilingText, heightText, holdBlocked, stateStale,
-    topDetectText, ownerText, armText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
+    topDetectText, ownerText, armText, armHomeText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
     probeOutcome,
   };
 }
