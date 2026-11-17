@@ -1,7 +1,7 @@
 # 通信 — 昇降部とアームの制御器の取り決め（案。spec `H-M7`）
 
 [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 10。spec [Spec-module.md](../spec/Spec-module.md) §5（昇降部とアームの制御器のあいだの通信の取り決めは本システムが書き、fk-system が確かめる）・[Spec-safety.md](../spec/Spec-safety.md) §2 #4e・[Spec-ui.md](../spec/Spec-ui.md) §0.2（確認ダイアログ）・§1.6。
-**状態: 2026-11-17 に案を書いた。輸送路（§0 の 1 行目）はユーザーの判断待ち。そのあと fk-system に確かめてもらう（§9）。実装はまだ。**
+**状態: 2026-11-17 に案を書いた。輸送路は同日にユーザーが決めた（`th-rpi-ap` を通す。spec [Spec-module.md](../spec/Spec-module.md) §6 `H-M7`）。残りは fk-system に確かめてもらう（§9）。実装はまだ。**
 新しい名前は、確かめが済んだら [-names.md](DetailedDesign-names.md) へ移す（[-protocol-modules.md](DetailedDesign-protocol-modules.md) と同じ手順）。
 
 - 昇降部の口は [-protocol-modules.md](DetailedDesign-protocol-modules.md)（確かめ済み）を**そのまま使い、足すだけ**にする（安全の判定の入口を 1 つに保つ。spec §1「口の名前と形」）。
@@ -13,7 +13,7 @@
 
 | 項目 | 案 |
 | --- | --- |
-| **輸送路**（ユーザー判断待ち。§1） | **`th-rpi-ap` を通し、昇降部の `/ws/module` に繋ぐ**（制御器どうしを直接つながない） |
+| **輸送路**（2026-11-17 ユーザー決定。§1） | **`th-rpi-ap` を通し、昇降部の `/ws/module` に繋ぐ**（制御器どうしを直接つながない） |
 | 名乗り | `hello` で **`role: "arm"`** を名乗る。昇降部が受けるアームの接続は **1 本だけ**（§2） |
 | 動かす命令 | 上部モジュールと同じ `hold` / `goto` / `release`。持ち主は **`owner: "arm"`**。天井はカメラモジュールの値で判定する（§3） |
 | 腕の状態の知らせ | アームの制御器は **`arm` を 100 ms ごとに送る**（`out`: 格納位置にないか）。**`LIFT_ARM_LINK_TIMEOUT_MS`（仮 1000 ms）届かなければ「通信できない」**（§4） |
@@ -24,7 +24,7 @@
 
 ## 1. 輸送路
 
-### 1.1 比べたもの（ユーザー判断待ち）
+### 1.1 比べたもの（2026-11-17 に A をユーザーが採った）
 
 | | **A. `th-rpi-ap` を通す（案）** | B. 制御器どうしを直接つなぐ（ESP-NOW など） |
 | --- | --- | --- |
@@ -36,7 +36,7 @@
 
 **A を勧める。**B で得られるのは「AP が落ちたとき、腕が出ていても昇降機を動かせる」ことだが、そのとき fk-system は止まっていて、昇降機を動かすのは人である。人は #4e の確認ダイアログで腕を見ながら動かせる（spec §5）。入口を 2 つにする手間と、2 つの入口の判定を揃え続ける危うさに見合わない。
 
-決まったら、コードより先に spec を直す（[Spec-module.md](../spec/Spec-module.md) §6 `H-M7`・[Spec-open.md](../spec/Spec-open.md) の記録）。
+spec は直した（[Spec-module.md](../spec/Spec-module.md) §5・§6 `H-M7`・[Spec-open.md](../spec/Spec-open.md) の記録。2026-11-17）。
 
 ### 1.2 腕の画面を `th-rpi-ap` を通さずに開く形（spec §5「腕の画面」）
 
@@ -147,7 +147,7 @@
 
 ## 9. fk-system に確かめてほしいこと
 
-1. 輸送路（§1。ユーザーが決めたあと）と、名前 `fk-arm`・`role: arm`。
+1. 輸送路（§1。`th-rpi-ap` を通す。hve のユーザーが決めた）と、名前 `fk-arm`・`role: arm`。
 2. `arm` を 100 ms ごとに送ること・`out` の 3 つの値の意味（§4）・1000 ms で通信できないとみなすこと。
 3. **腕を出す前に `state.arm` が `link: true`・`out: true` になるのを待つこと**（§6）。腕の画面からの操作にも通すか。
 4. アームの制御器の命令は上部モジュールと同じ `hold`・`goto`・`release` で足りるか。取って代わられたことを `state.owner` で知ること。
