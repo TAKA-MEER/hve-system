@@ -136,7 +136,7 @@
 
 | フィールド | 値 |
 | --- | --- |
-| `owner` | 今の `ui` / `module` / `button` / `null` に **`arm`** を足す（名前だけ取っておく。アームの制御器とのつなぎ方は spec `H-M7` で、この案の範囲外） |
+| `owner` | 今の `ui` / `module` / `button` / `null` に **`arm`** を足す（名前だけ取っておく。アームの制御器とのつなぎ方は spec `H-M7` で、この案の範囲外。案は [-protocol-arm.md](DetailedDesign-protocol-arm.md) §3） |
 | **`owner_name`** | `owner` が `module` のとき、その接続の `name`。それ以外は `null` |
 | **`owner_operator`** | `human` / `auto` / `null`。`ui`・`button` は `human`、`module` はその接続の `operator`、`arm` は `auto` |
 | **`homed`** | 原点を取ったか（電源を入れてから一度下端に着いたか）。`height_ok: false` で `homed: true` なら、下端スイッチの誤りなど（spec [Spec-safety.md](../spec/Spec-safety.md) §1.2） |
@@ -144,7 +144,7 @@
 | **`ceiling.standalone`** | `USE` / `SETTING_OFF` / `NO_SOURCE`。単体の操作（昇降部の画面・物理ボタン）で天井を使うか・使わない理由（§2.5。2026-11-06）。**足すだけの変更**なので、fk・ss に確かめ直さなくてよい（読まなければ今のまま） |
 | **`modules`** | 繋がっている接続の一覧（`observe` を含む）。**今の `module`（1 つ）を置き換える** |
 | **`goto`** | 最後の `goto`。`by`（送った接続の `name`）・`press`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason`（止めた理由。§3.1）。次の `goto` まで残す。起動してから無ければ `null` |
-| **`arm`** | 測定機構（spec §3・§5）。`attached`（アームの制御器と通信できて、付いているとみなしているか）・`link`（いまアームの制御器と通信できているか）・`confirm`（spec #4e で止めていて、昇降部の画面の確認待ちか）・`out`（腕が格納位置にないか）。**名前だけ決め、中身はアームの制御器とのつなぎ方（spec `H-M7`）が決まってから。**分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**2026-11-14 に改めた**（spec [Spec-module.md](../spec/Spec-module.md) §5。ドラムが昇降部から外れ、コネクタが無くなった）: **`drum` は無くす**（コードから消すのは [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 10）。**`attached` はコネクタの検知ではなくなり、`false` は出さない**（昇降部は「付いていない」と判定できない。`true` か `null`）。`confirm` は `null` / `DETACHED` / `ATTACHED` をやめ、確認待ちかどうかだけにする。`out: false` は「格納位置にあると知らされた」ときだけ。fk-system は `null` を「腕の状態が読めない」として機体を動かさない。`attached: false` を「付いていない」と読んで機体を動かす決まりは、fk-system がやめた（2026-11-14 fk-system の決定。使われているときは付いているとみなし、アームの制御器と通信できなければ何も動かさない）。**電源を入れ直す前に覚えていた腕の状態（spec `H-X15`）で止めている間は、`link: false`・`confirm` が確認待ち・`out: null`**（覚えていた値を `out` に出さない。いま知らされた値ではないため） |
+| **`arm`** | 測定機構（spec §3・§5）。`attached`（アームの制御器と通信できて、付いているとみなしているか）・`link`（いまアームの制御器と通信できているか）・`confirm`（spec #4e で止めていて、昇降部の画面の確認待ちか）・`out`（腕が格納位置にないか）。**名前だけ決め、中身はアームの制御器とのつなぎ方（spec `H-M7`）が決まってから**（案は [-protocol-arm.md](DetailedDesign-protocol-arm.md) §7。2026-11-17）。分からないときは、どれも **`null`**（spec §3。2026-11-05 ユーザー決定。fk-system の頼み）。**2026-11-14 に改めた**（spec [Spec-module.md](../spec/Spec-module.md) §5。ドラムが昇降部から外れ、コネクタが無くなった）: **`drum` は無くす**（コードから消すのは [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 10）。**`attached` はコネクタの検知ではなくなり、`false` は出さない**（昇降部は「付いていない」と判定できない。`true` か `null`）。`confirm` は `null` / `DETACHED` / `ATTACHED` をやめ、確認待ちかどうかだけにする。`out: false` は「格納位置にあると知らされた」ときだけ。fk-system は `null` を「腕の状態が読めない」として機体を動かさない。`attached: false` を「付いていない」と読んで機体を動かす決まりは、fk-system がやめた（2026-11-14 fk-system の決定。使われているときは付いているとみなし、アームの制御器と通信できなければ何も動かさない）。**電源を入れ直す前に覚えていた腕の状態（spec `H-X15`）で止めている間は、`link: false`・`confirm` が確認待ち・`out: null`**（覚えていた値を `out` に出さない。いま知らされた値ではないため） |
 
 ### 3.1 足す止めた理由（[-names.md](DetailedDesign-names.md) §3 に移した）
 
@@ -207,7 +207,7 @@
 
 | もの | どこで |
 | --- | --- |
-| アームの制御器とのつなぎ方・`arm` の中身 | spec `H-M7` |
+| アームの制御器とのつなぎ方・`arm` の中身 | spec `H-M7`（案は [-protocol-arm.md](DetailedDesign-protocol-arm.md)） |
 | 着いたとみなす幅 `LIFT_GOTO_TOL_MM` | spec `H-M6`（実機） |
 | 距離計を持つ上部モジュールが 2 台以上のとき | spec `H-M5` |
 | 繋げる本数の上限 `LIFT_MODULE_MAX_CONN` | 実機（`WP-MEAS-03`） |

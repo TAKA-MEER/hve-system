@@ -28,6 +28,7 @@
 | [DetailedDesign-names.md](DetailedDesign-names.md) | **名前辞書・仮値の一覧。**この文書に無い名前を実装で作ってはいけない | 初版 |
 | [DetailedDesign-protocol.md](DetailedDesign-protocol.md) | 通信・周期・メッセージ・設定 API・UART | 初版 |
 | [DetailedDesign-protocol-modules.md](DetailedDesign-protocol-modules.md) | 上部モジュールの複数対応（fk-system・ss-system が繋ぐ口） | **確かめ済み**（2026-11-05。fk-system・ss-system。作業パケットは `WP-LIFT-13`・`-14`・`WP-LIFTUI-03`・`WP-CAM-10`） |
+| [DetailedDesign-protocol-arm.md](DetailedDesign-protocol-arm.md) | 昇降部とアームの制御器の取り決め（spec `H-M7`。#4e・確認ダイアログ・`H-X15`） | **案**（2026-11-17。輸送路はユーザーの判断待ち。そのあと fk-system が確かめる） |
 | [DetailedDesign-power.md](DetailedDesign-power.md) | 外し忘れの省電力・電源断（spec [Spec-power.md](../spec/Spec-power.md)） | 初版（2026-11-10） |
 | [DetailedDesign-hardware.md](DetailedDesign-hardware.md) | 機器・ピン（多くが仮）・電源・**UnitV2 で要確認のこと** | 初版 |
 | [DetailedDesign-packets.md](DetailedDesign-packets.md) | **作業パケットと受け入れ条件** | 初版 |
