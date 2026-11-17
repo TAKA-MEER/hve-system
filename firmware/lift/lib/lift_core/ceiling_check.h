@@ -22,6 +22,9 @@ enum class StopReason : uint8_t {
   ARRIVED,       // 目標の高さに着いた
   PREEMPTED,     // 取って代わられた（goto.reason だけ。state.reason には出ない）
   TARGET_RANGE,  // goto の目標が範囲の外
+  // 測定機構の #4e（protocol-arm §5・§8。WP-LIFT-18）。腕が格納位置にない（または分からない）と
+  // 最後に知った状態でアームの制御器と通信できない・NVS に覚えられない。判定の先頭で止める
+  ARM_LINK,
 };
 
 // 判定に使う定数（DetailedDesign-names.md §5.1）

@@ -34,6 +34,12 @@ bool height_is_fresh(uint32_t now_ms, uint32_t height_at_ms) {
 }
 
 LiftDecideResult lift_decide(const LiftDecideInput& in) {
+  // 表 0 測定機構の #4e（protocol-arm §8）。持ち主・向きに関わらず止める。
+  // 下降・高さが読めない間の下降・物理ボタンも止める唯一の判定なので、必ず先頭に置く
+  if (in.arm_link_stop) {
+    return stop_with(StopReason::ARM_LINK);
+  }
+
   // 表 1 持ち主がいない（命令を受けていない・離した・途絶えた・接続が閉じた）。
   // 止める理由（CMD_STOP / CMD_TIMEOUT / OWNER_GONE）は呼び出し側が持ち、
   // ここではそのまま出すだけ

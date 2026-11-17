@@ -82,6 +82,12 @@ LiftState worst_case_state() {
     std::strncpy(info.ip, "255.255.255.255", sizeof(info.ip) - 1);
     std::memset(info.fw, '9', 15);
   }
+  // 測定機構（WP-LIFT-18）。確認の番号を最大にし、true / false の欄を長い方（false）に
+  state.arm.attached = ArmTri::YES;
+  state.arm.link = ArmTri::NO;
+  state.arm.confirm = 2147483647;
+  state.arm.out = ArmTri::NO;
+  state.reason = StopReason::ARM_LINK;
   return state;
 }
 
@@ -448,7 +454,7 @@ void test_state_encode_writes_nulls_when_no_owner_or_module() {
 }
 
 void test_state_arm_is_all_null() {
-  // 測定機構の中身は決まるまで null（false を出すと fk が「付いていない」と読んで動かす）
+  // 何も知らないときは、どれも null（false を出すと fk が「付いていない」と読んで動かす）
   const LiftState state = moving_state();
   char json[2048];
   TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
@@ -490,7 +496,7 @@ void test_state_owner_auto_and_modules_round_trip() {
 
 void test_state_worst_case_fits_text_max() {
   // modules を上限まで並べ busy_label を最大にした state を実際に作って測る。
-  // LIFT_STATE_TEXT_MAX は、それに余裕を持たせた値（測った長さ 1770 バイトの約 1.3 倍）
+  // LIFT_STATE_TEXT_MAX は、それに余裕を持たせた値（測った長さ 1787 バイトの約 1.3 倍。WP-LIFT-18 で state.arm を最大にして測り直した。以前は 1770）
   const LiftState state = worst_case_state();
   static char json[8192];
   const size_t written = state_encode(state, json, sizeof(json));
@@ -505,6 +511,106 @@ void test_state_worst_case_fits_text_max() {
   LiftState back;
   TEST_ASSERT_TRUE(state_decode(exact, &back));
   TEST_ASSERT_EQUAL_INT(LIFT_MODULE_LIST_MAX, back.module_count);
+}
+
+
+// --- 測定機構（WP-LIFT-18。protocol-arm §2.1・§4・§7）---
+
+void test_decode_hello_role_arm_and_unknown_role_is_observe() {
+  HelloMsg hello;
+  TEST_ASSERT_TRUE(decode_hello(
+      "{\"t\":\"hello\",\"name\":\"fk-arm\",\"role\":\"arm\",\"operator\":\"auto\","
+      "\"ceiling_sensor\":false}",
+      &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::ARM), static_cast<int>(hello.role));
+  TEST_ASSERT_EQUAL_STRING("fk-arm", hello.name);
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"role\":\"armm\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::OBSERVE), static_cast<int>(hello.role));
+  TEST_ASSERT_TRUE(decode_hello("{\"t\":\"hello\",\"role\":\"control\"}", &hello));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::CONTROL), static_cast<int>(hello.role));
+}
+
+void test_decode_arm_reads_out_and_folds_bad_values_to_null() {
+  ArmMsg arm;
+  TEST_ASSERT_TRUE(decode_arm("{\"t\":\"arm\",\"out\":true}", &arm));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::YES), static_cast<int>(arm.out));
+  TEST_ASSERT_TRUE(decode_arm("{\"t\":\"arm\",\"out\":false}", &arm));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NO), static_cast<int>(arm.out));
+  TEST_ASSERT_TRUE(decode_arm("{\"t\":\"arm\",\"out\":null}", &arm));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NUL), static_cast<int>(arm.out));
+  // 欠けている・型違いも捨てずに null として受ける（捨てると最後の false のまま動ける）
+  TEST_ASSERT_TRUE(decode_arm("{\"t\":\"arm\"}", &arm));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NUL), static_cast<int>(arm.out));
+  TEST_ASSERT_TRUE(decode_arm("{\"t\":\"arm\",\"out\":\"false\"}", &arm));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NUL), static_cast<int>(arm.out));
+  TEST_ASSERT_TRUE(decode_arm("{\"t\":\"arm\",\"out\":0}", &arm));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NUL), static_cast<int>(arm.out));
+  // arm でないもの・読めないものは捨てる
+  TEST_ASSERT_FALSE(decode_arm("{\"t\":\"hold\",\"out\":false}", &arm));
+  TEST_ASSERT_FALSE(decode_arm("{", &arm));
+  TEST_ASSERT_FALSE(decode_arm("{\"out\":false}", &arm));
+}
+
+void test_decode_arm_confirm_needs_an_integer_stop() {
+  ArmConfirmMsg confirm;
+  TEST_ASSERT_TRUE(decode_arm_confirm("{\"t\":\"arm_confirm\",\"stop\":3}", &confirm));
+  TEST_ASSERT_EQUAL_INT(3, confirm.stop);
+  TEST_ASSERT_FALSE(decode_arm_confirm("{\"t\":\"arm_confirm\"}", &confirm));
+  TEST_ASSERT_FALSE(decode_arm_confirm("{\"t\":\"arm_confirm\",\"stop\":\"3\"}", &confirm));
+  TEST_ASSERT_FALSE(decode_arm_confirm("{\"t\":\"arm_confirm\",\"stop\":null}", &confirm));
+  TEST_ASSERT_FALSE(decode_arm_confirm("{\"t\":\"arm\",\"stop\":3}", &confirm));
+  TEST_ASSERT_FALSE(decode_arm_confirm("{", &confirm));
+}
+
+void test_state_arm_fields_and_arm_link_reason_round_trip() {
+  LiftState state = moving_state();
+  state.reason = StopReason::ARM_LINK;
+  state.arm.attached = ArmTri::YES;
+  state.arm.link = ArmTri::NO;
+  state.arm.confirm = 4;
+  state.arm.out = ArmTri::NUL;
+  char json[2048];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"reason\":\"ARM_LINK\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(
+      json, "\"arm\":{\"attached\":true,\"link\":false,\"confirm\":4,\"out\":null}"));
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(StopReason::ARM_LINK), static_cast<int>(back.reason));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::YES), static_cast<int>(back.arm.attached));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NO), static_cast<int>(back.arm.link));
+  TEST_ASSERT_EQUAL_INT(4, back.arm.confirm);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::NUL), static_cast<int>(back.arm.out));
+
+  state.arm.link = ArmTri::YES;
+  state.arm.confirm = 0;
+  state.arm.out = ArmTri::YES;
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(
+      json, "\"arm\":{\"attached\":true,\"link\":true,\"confirm\":null,\"out\":true}"));
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ArmTri::YES), static_cast<int>(back.arm.out));
+  TEST_ASSERT_EQUAL_INT(0, back.arm.confirm);
+}
+
+void test_state_owner_arm_and_module_role_arm_round_trip() {
+  LiftState state = moving_state();
+  state.owner_kind = 3;
+  std::strncpy(state.owner_name, "fk-arm", sizeof(state.owner_name) - 1);
+  state.owner_operator = ModuleOperator::AUTO;
+  state.modules[0].role = ModuleRole::ARM;
+  std::strncpy(state.modules[0].name, "fk-arm", sizeof(state.modules[0].name) - 1);
+  char json[2048];
+  TEST_ASSERT_GREATER_THAN(0, state_encode(state, json, sizeof(json)));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner\":\"arm\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_name\":\"fk-arm\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"owner_operator\":\"auto\""));
+  TEST_ASSERT_NOT_NULL(std::strstr(json, "\"role\":\"arm\""));
+  LiftState back;
+  TEST_ASSERT_TRUE(state_decode(json, &back));
+  TEST_ASSERT_EQUAL_INT(3, back.owner_kind);
+  TEST_ASSERT_EQUAL_STRING("fk-arm", back.owner_name);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ModuleRole::ARM), static_cast<int>(back.modules[0].role));
 }
 
 // --- goto（WP-LIFT-14。protocol-modules §2.2・§3）---
@@ -708,6 +814,11 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_state_ceiling_standalone_round_trips_with_and_without_value);
   RUN_TEST(test_state_decode_without_standalone_is_the_old_shape_and_unknown_is_rejected);
   RUN_TEST(test_state_arm_is_all_null);
+  RUN_TEST(test_decode_hello_role_arm_and_unknown_role_is_observe);
+  RUN_TEST(test_decode_arm_reads_out_and_folds_bad_values_to_null);
+  RUN_TEST(test_decode_arm_confirm_needs_an_integer_stop);
+  RUN_TEST(test_state_arm_fields_and_arm_link_reason_round_trip);
+  RUN_TEST(test_state_owner_arm_and_module_role_arm_round_trip);
   RUN_TEST(test_state_owner_auto_and_modules_round_trip);
   RUN_TEST(test_state_worst_case_fits_text_max);
   RUN_TEST(test_state_goto_is_null_until_first_goto_and_round_trips);

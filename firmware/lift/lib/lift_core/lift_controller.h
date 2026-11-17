@@ -40,8 +40,33 @@ class LiftController {
   // release を受ける。持ち主からのものだけ止める
   void on_release(const ConnId& conn, int press);
 
-  // 接続が閉じた。持ち主ならその場で止める（OWNER_GONE）
+  // 接続が閉じた。持ち主ならその場で止める（OWNER_GONE）。いまのアームの接続なら、その場で
+  // 「通信できない」にする（覚えている腕の状態には触れない。protocol-arm §4・§5）
   void on_close(int conn_id);
+
+  // --- 測定機構（protocol-arm。WP-LIFT-18）---
+
+  // arm（アームの制御器の腕の状態。100 ms ごと）。いまの role: arm の接続からのものだけ受ける
+  // （/ws/ui・role が arm でない接続・置き換えられた古い接続のものは捨てる）。
+  // now_ms は受け取った時刻（「通信できているか」はここから数える）
+  void on_arm(const ConnId& conn, const ArmMsg& arm, uint32_t now_ms);
+
+  // arm_confirm（確認ダイアログの答え）。/ws/ui の接続からで、確認待ちで、番号が直前の step が
+  // 出した arm.confirm と同じときだけ受ける。#4e を解き、覚えた腕の状態を下ろし、付いているとみなす
+  // のを「分からない」に戻す。受けたら true
+  bool on_arm_confirm(const ConnId& conn, const ArmConfirmMsg& confirm);
+
+  // 起動時に NVS から読んだ arm_out_latched（腕が格納位置にない、または分からないと最後に知った）を渡す。
+  // 最初の step より前に呼ぶ。NVS に書いてある値そのものなので、書き戻しは要らない
+  void restore_arm_out_latched(bool latched);
+
+  // NVS に書いてほしい値があれば true にして *value に入れる（loop() が step の前後で呼ぶ。
+  // NVS は ESP32 だけなので、書くのは main.cpp。書けたかを on_arm_latch_written で返す）。
+  // 書くのは値が変わったときだけ。書けなかった書き込みは、次の arm を受けたときに頼み直す
+  bool take_arm_latch_write(bool* value);
+
+  // take_arm_latch_write で頼んだ書き込みの結果。value は書こうとした値
+  void on_arm_latch_written(bool value, bool ok);
 
   // /ws/ui に繋いでいる画面の数（state に載せるだけ。LIFT_UI_CLIENTS_MAX 超は
   // 呼び出し側で閉じること）
@@ -132,9 +157,26 @@ class LiftController {
   // observe の接続からの命令か（捨てる）
   bool is_observer(int conn_id) const;
 
+  // 測定機構の #4e（protocol-arm §4・§5・§7・§8）。判定は毎周期ここから決める
+  bool arm_link_ok(uint32_t now_ms) const;
+  bool arm_stop_active(uint32_t now_ms) const;
+
   LiftHal* hal_;
   int top_mm_;
   LiftArbiter arbiter_;
+  // --- 測定機構 ---
+  int arm_conn_id_ = -1;                 // いまの role: arm の接続（無ければ -1）。1 本だけ
+  bool arm_attached_ = false;            // 一度でも arm を受けた（確認で答えると戻る）
+  ArmTri arm_last_out_ = ArmTri::NUL;    // 最後に受けた out
+  uint32_t arm_last_at_ms_ = 0;          // 最後に arm を受けた時刻（置き換えでは引き継ぐ）
+  bool arm_out_latched_ = false;         // 「格納位置にない、または分からないと最後に知った」。接続の閉・時間切れでは触らない
+  bool arm_nvs_value_ = false;           // NVS に書けたと知っている値（state.arm.out は、これが立ってから true を出す）
+  bool arm_write_wanted_ = false;        // NVS への書き込みを頼む（arm を受けたとき・確認のとき）
+  bool arm_write_inflight_ = false;      // 頼んで、結果をまだ受けていない
+  bool arm_write_failed_ = false;        // 立てようとして NVS に書けなかった（覚えられない = #4e と同じに止める）
+  bool arm_stop_prev_ = false;           // 直前の step で #4e が立っていたか
+  int arm_stop_ = 0;                     // #4e で止め始めるたびに 1 増やす確認の番号
+  int arm_confirm_shown_ = 0;            // 直前の step が出した arm.confirm（0 = 確認待ちでない）
   OwnerCmd owner_cmd_;
   bool has_owner_cmd_ = false;  // 持ち主の命令の中身を持っているか
   StopReason idle_reason_ = StopReason::CMD_TIMEOUT;  // 持ち主がいないときの停止理由

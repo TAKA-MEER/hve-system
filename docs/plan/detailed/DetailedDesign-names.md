@@ -204,6 +204,12 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`decode_arm`**・**`decode_arm_confirm`**・**`LiftController::on_arm`**・**`LiftController::on_arm_confirm`** | `cmd_codec.h`・`lift_controller.h` |
 | **`arm_out_latched`** / **`kArmLatchNvsKey`**（`"arm_latch"`） | 「格納位置にない、または分からないと最後に知った」（1 ビット）・それを置く NVS の鍵（`LIFT_NVS_NAMESPACE` の下。`main.cpp`） |
 | **`arm_stop`** | #4e で止め始めるたびに 1 増やす確認の番号（起動ごとに 1 から） |
+| **`ArmTri`**（`NUL`・`NO`・`YES`）・**`ArmInfo`**・**`LiftState::arm`** | `lift_decide.h`。`state.arm` の null / false / true の欄（`WP-LIFT-18`） |
+| **`ArmMsg`**・**`ArmConfirmMsg`** | `cmd_codec.h`。`decode_arm`・`decode_arm_confirm` の出力 |
+| **`LiftDecideInput::arm_link_stop`** | 判定の表 0（#4e）。呼び出し側が立てる |
+| **`LiftController::restore_arm_out_latched`**・**`take_arm_latch_write`**・**`on_arm_latch_written`** | NVS の受け渡し。起動時に読んだ値を渡す・書いてほしい値を取り出す・書けたかを返す。`main.cpp` が `loop()` の中で NVS に書く（`LiftController` は NVS を知らない） |
+| **`PendingType::ARM`**・**`ARM_CONFIRM`**・`load_arm_latch`・`store_arm_latch` | `main.cpp` |
+| `state.owner_kind` の値 **3** | アームの制御器（`owner: "arm"`）。0 = ui・1 = module・2 = button |
 
 **単体の操作でも天井で止める（2026-11-06。`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`）で足すもの**。中身は [-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5・[-protocol.md](DetailedDesign-protocol.md) §3:
 
@@ -256,7 +262,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`LIFT_MODULE_MAX_CONN`** | `config.h` | 6 | **仮**（2026-11-05。`/ws/module` の接続の上限。**超えた新しい接続をその場で閉じる**。ライブラリの `cleanupClients()` に古い接続を閉じさせない。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.3。`WP-LIFT-13`） |
 | **`LIFT_ARM_LINK_TIMEOUT_MS`** | `lift_decide.h` | 1000 | **仮**（2026-11-17。最後の `arm` からこれだけ届かなければアームの制御器と通信できないとみなす。アームの制御器は 100 ms ごとに送る。[-protocol-arm.md](DetailedDesign-protocol-arm.md) §4。`WP-LIFT-18`） |
 | **`LIFT_GOTO_TOL_MM`** | `lift_decide.h` | 10 | **仮**（spec `H-M6`。目標の高さに「着いた」とみなす幅。`WP-LIFT-14`） |
-| `LIFT_STATE_TEXT_MAX` | **`cmd_codec.h`**（`config.h` から移した。native の試験が最大の `state` を作って測れるように） | 2304 | `modules` を 6 本並べ `busy_label` を 48 バイト・名前・IP・`fw` を最大にした `state` が **1770 バイト**。その約 1.3 倍（`test_state_worst_case_fits_text_max`。`WP-LIFT-13`） |
+| `LIFT_STATE_TEXT_MAX` | **`cmd_codec.h`**（`config.h` から移した。native の試験が最大の `state` を作って測れるように） | 2304 | `modules` を 6 本並べ `busy_label` を 48 バイト・名前・IP・`fw` を最大に、`state.arm` も最大（`confirm` が 10 桁・`false` の欄）にした `state` が **1787 バイト**。その約 1.3 倍（`test_state_worst_case_fits_text_max`。`WP-LIFT-13`。`WP-LIFT-18` で 1770 から測り直し。値は変えていない） |
 | `LIFT_MDNS_NAME` / `LIFT_HTTP_PORT` | `config.h` | `hve-lift` / 80 | 旧版 |
 | ピン・PWM の定数 | `config.h` | 旧版のまま | 旧版 §5 |
 | **`ENC_A_PIN`** / **`ENC_B_PIN`** | `config.h` | 25 / 26 | **仮**（[-hardware.md](DetailedDesign-hardware.md) §1.1） |
