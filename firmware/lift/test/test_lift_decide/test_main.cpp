@@ -372,8 +372,36 @@ void test_height_freshness_across_millis_wrap() {
   TEST_ASSERT_EQUAL_INT32(-5, elapsed_ms(0x00001000u, 0x00001005u));
 }
 
+// --- 表 0 測定機構の #4e（WP-LIFT-18。補助。LiftController を通した縛りは test_arm_link）---
+
+void test_arm_link_stop_wins_over_every_owner_and_direction() {
+  for (int i = 0; i < 3; ++i) {
+    LiftDecideInput in = movable();
+    in.dir = i == 0 ? LiftDir::UP : i == 1 ? LiftDir::DOWN : LiftDir::STOP;
+    in.arm_link_stop = true;
+    assert_decision(in, LiftDir::STOP, 0, StopReason::ARM_LINK);
+  }
+  // 持ち主がいなくても、高さが読めなくても、下端スイッチが押されていても ARM_LINK
+  LiftDecideInput in = movable();
+  in.arm_link_stop = true;
+  in.has_cmd = false;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::ARM_LINK);
+  in = movable();
+  in.arm_link_stop = true;
+  in.dir = LiftDir::DOWN;
+  in.height_ok = false;
+  in.bottom_pressed = true;
+  assert_decision(in, LiftDir::STOP, 0, StopReason::ARM_LINK);
+  // 立っていなければ今までどおり
+  in = movable();
+  in.dir = LiftDir::DOWN;
+  assert_decision(in, LiftDir::DOWN, 40, StopReason::NONE);
+}
+
 int main(int /*argc*/, char** /*argv*/) {
   UNITY_BEGIN();
+
+  RUN_TEST(test_arm_link_stop_wins_over_every_owner_and_direction);
 
   RUN_TEST(test_no_owner_stops_with_empty_reason);
   RUN_TEST(test_no_owner_after_close_stops_with_owner_gone);

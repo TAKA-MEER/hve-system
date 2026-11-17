@@ -417,7 +417,7 @@ bool LiftController::arm_stop_active(uint32_t now_ms) const {
 
 void LiftController::on_arm(const ConnId& conn, const ArmMsg& arm, uint32_t now_ms) {
   // いまの role: arm の接続からのものだけ受ける（/ws/ui・role が arm でない接続・置き換えられた古い接続は捨てる）
-  if (conn.kind != ConnKind::MODULE || conn.id != arm_conn_id_) {
+  if (conn.kind != ConnKind::MODULE || arm_conn_id_ < 0 || conn.id != arm_conn_id_) {
     return;
   }
   const ConnInfo* info = find(conn.id);

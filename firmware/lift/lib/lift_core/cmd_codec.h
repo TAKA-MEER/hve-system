@@ -8,7 +8,7 @@
 #include "lift_decide.h"  // LiftDir・LiftState・StopReason・Ceiling*・ModuleRole
 
 // state を入れるバッファの大きさ。WP-LIFT-18 で、modules を上限まで並べ busy_label を
-// 最大にし、state.arm も最大にした state を実際に作って測った長さ（WORST_BYTES バイト）に、
+// 最大にし、state.arm も最大にした state を実際に作って測った長さ（1787 バイト）に、
 // 余裕（約 1.3 倍）を持たせた値
 // （test_cmd_codec の test_state_worst_case_fits_text_max。names.md §5.1）
 constexpr size_t LIFT_STATE_TEXT_MAX = 2304;
