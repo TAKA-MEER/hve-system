@@ -799,6 +799,58 @@ test('17 「機体の前を 0° に」で yaw_zero を送り、向きは原点�
   }
 });
 
+test('18 ARM_LINK は案内だけで確認のボタンも arm_confirm も無く、原点の前の腕の警告は link: true のときだけ出る', async (browser) => {
+  const {page, errors, cleanup} = await openScreen(browser);
+  const KNOWN_BUTTONS = new Set(['openSettings', 'snapBtn', 'toggleGuide', 'zIn', 'zLvl', 'zOut', 'bPower',
+    'snapClose', 'snapZIn', 'snapZLvl', 'snapZOut', 'yawZero', 'stCancel', 'stSave']);
+  try {
+    // 腕が出ていて通信が切れた（#4e）。高さは読めない（原点の前）
+    await postFake({arm: {attached: true, link: false, confirm: 4, out: null}, height_ok: false});
+    await page.waitForFunction(() => last_state && last_state.lift.reason === 'ARM_LINK', null, {timeout: 3000});
+    const bar = await page.evaluate(() => {
+      const el = document.getElementById('stopbar');
+      return {text: el.textContent, shown: el.classList.contains('show'), note: document.getElementById('buttonNote').textContent};
+    });
+    assert.equal(bar.shown, true);
+    assert.equal(bar.text, '測定機構と通信できません。昇降部の画面で確認してください');
+    // link: false のあいだは、原点の前の警告も腕の警告も出さない（通信できていないので腕の位置は分からない）
+    assert.ok(!bar.note.includes('下げる前に腕を格納'), `link: false なのに原点の前の警告: ${bar.note}`);
+    // 確認のボタンは無く、どのボタンを押しても arm_confirm を送らない
+    const result = await page.evaluate((known) => {
+      const sent = [];
+      const original = send;
+      send = (message) => { sent.push(message); original(message); };
+      const buttons = Array.from(document.querySelectorAll('button, [role=button], input[type=button], input[type=submit]'));
+      const unknown = buttons.filter((b) => b.id && !known.includes(b.id) && !b.dataset.axis).map((b) => b.id || b.textContent);
+      const unnamed = buttons.filter((b) => !b.id && !b.dataset.axis).map((b) => b.textContent);
+      const visibleConfirm = buttons.filter((b) => /確認|はい|OK/.test(b.textContent) && getComputedStyle(b).display !== 'none')
+        .map((b) => b.textContent);
+      buttons.forEach((b) => b.click());
+      send = original;
+      return {sent, unknown, unnamed, visibleConfirm};
+    }, Array.from(KNOWN_BUTTONS));
+    assert.deepEqual(result.unknown, [], `知らないボタンがある: ${result.unknown}`);
+    assert.deepEqual(result.unnamed, [], `名前の無いボタンがある: ${result.unnamed}`);
+    assert.deepEqual(result.visibleConfirm, [], '確認のボタンを出してはいけない（昇降部の画面だけ）');
+    assert.ok(!result.sent.some((m) => String(m.t).startsWith('arm')), `arm_confirm を送った: ${JSON.stringify(result.sent)}`);
+
+    // 通信できていて腕が出ている・原点の前: 警告を出す（止めない）
+    await postFake({arm: {attached: true, link: true, confirm: null, out: true}, height_ok: false});
+    await page.waitForFunction(() => last_state && last_state.arm && last_state.arm.link === true, null, {timeout: 3000});
+    const warn = await page.evaluate(() => document.getElementById('buttonNote').textContent);
+    assert.ok(warn.includes('腕が出ています。下げる前に腕を格納してください'), `警告が出ていない: ${warn}`);
+    // 高さが読めれば普通の「腕が出ています」だけ
+    await postFake({height_ok: true});
+    await page.waitForFunction(() => last_state.lift.height_ok === true, null, {timeout: 3000});
+    const plain = await page.evaluate(() => document.getElementById('buttonNote').textContent);
+    assert.equal(plain, '腕が出ています');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await postFake({arm: null, height_ok: true}).catch(() => {});
+    await cleanup();
+  }
+});
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
