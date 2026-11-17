@@ -834,6 +834,11 @@ test('18 ARM_LINK は案内だけで確認のボタンも arm_confirm も無く�
     assert.deepEqual(result.visibleConfirm, [], '確認のボタンを出してはいけない（昇降部の画面だけ）');
     assert.ok(!result.sent.some((m) => String(m.t).startsWith('arm')), `arm_confirm を送った: ${JSON.stringify(result.sent)}`);
 
+    // 通信が切れていて out が true と残っていても（link: false）、原点の前の警告は出さない
+    await postFake({arm: {attached: true, link: false, confirm: null, out: true}, height_ok: false});
+    await page.waitForFunction(() => last_state && last_state.arm && last_state.arm.link === false && last_state.arm.confirm === null, null, {timeout: 3000});
+    const stale = await page.evaluate(() => document.getElementById('buttonNote').textContent);
+    assert.ok(!stale.includes('下げる前に腕を格納'), `link: false なのに原点の前の警告: ${stale}`);
     // 通信できていて腕が出ている・原点の前: 警告を出す（止めない）
     await postFake({arm: {attached: true, link: true, confirm: null, out: true}, height_ok: false});
     await page.waitForFunction(() => last_state && last_state.arm && last_state.arm.link === true, null, {timeout: 3000});
