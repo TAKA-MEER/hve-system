@@ -137,7 +137,7 @@
 | フィールド | 値 |
 | --- | --- |
 | `owner` | 今の `ui` / `module` / `button` / `null` に **`arm`** を足す（名前だけ取っておく。アームの制御器とのつなぎ方は spec `H-M7` で、この案の範囲外。案は [-protocol-arm.md](DetailedDesign-protocol-arm.md) §3） |
-| **`owner_name`** | `owner` が `module` のとき、その接続の `name`。それ以外は `null` |
+| **`owner_name`** | `owner` が `module` または `arm` のとき、その接続の `name`（`arm` は 2026-11-17 に足した。[-protocol-arm.md](DetailedDesign-protocol-arm.md) §3）。それ以外は `null` |
 | **`owner_operator`** | `human` / `auto` / `null`。`ui`・`button` は `human`、`module` はその接続の `operator`、`arm` は `auto` |
 | **`homed`** | 原点を取ったか（電源を入れてから一度下端に着いたか）。`height_ok: false` で `homed: true` なら、下端スイッチの誤りなど（spec [Spec-safety.md](../spec/Spec-safety.md) §1.2） |
 | `ceiling.from` | 判定に使った天井の値を送ってきた上部モジュールの `name`（spec §3「どの上部モジュールから来たか」） |
@@ -172,7 +172,7 @@
 | `module` | `hve-cam` | 人（カメラモジュールの画面） | `human` |
 | `module` | `fk` | fk-system | `auto` |
 | `module` | `ss` | ss-system | `auto` |
-| `arm` | — | アームの制御器 | `auto` |
+| `arm` | `fk-arm` | アームの制御器 | `auto` |
 | `null` | — | 誰も動かしていない | `null` |
 
 **人の割り込みかは `owner_operator` で分かる**（名前の表に頼らなくてよい）。ss が動かしている間かは `owner_name` で分かる。

@@ -1,7 +1,7 @@
 # 通信 — 昇降部とアームの制御器の取り決め（案。spec `H-M7`）
 
 [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 10。spec [Spec-module.md](../spec/Spec-module.md) §5（昇降部とアームの制御器のあいだの通信の取り決めは本システムが書き、fk-system が確かめる）・[Spec-safety.md](../spec/Spec-safety.md) §2 #4e・[Spec-ui.md](../spec/Spec-ui.md) §0.2（確認ダイアログ）・§1.6。
-**状態: 2026-11-17 に案を書いた。輸送路は同日にユーザーが決めた（`th-rpi-ap` を通す。spec [Spec-module.md](../spec/Spec-module.md) §6 `H-M7`）。残りは fk-system に確かめてもらう（§9）。実装はまだ。**
+**状態: 2026-11-17 に案を書いた。輸送路は同日にユーザーが決めた（`th-rpi-ap` を通す。spec [Spec-module.md](../spec/Spec-module.md) §6 `H-M7`）。同日に fk-system が確かめた（fk `af4db1a`。指摘 2 点を直した。§9）。作業パケットは段階 11（[-packets.md](DetailedDesign-packets.md)）。実装はまだ。**
 新しい名前は、確かめが済んだら [-names.md](DetailedDesign-names.md) へ移す（[-protocol-modules.md](DetailedDesign-protocol-modules.md) と同じ手順）。
 
 - 昇降部の口は [-protocol-modules.md](DetailedDesign-protocol-modules.md)（確かめ済み）を**そのまま使い、足すだけ**にする（安全の判定の入口を 1 つに保つ。spec §1「口の名前と形」）。
@@ -87,7 +87,7 @@ spec は直した（[Spec-module.md](../spec/Spec-module.md) §5・§6 `H-M7`・
 | 項目 | 振る舞い |
 | --- | --- |
 | 送り方 | **`LIFT_ARM_PERIOD_MS`（仮 100 ms）ごと**。動かしているかどうかに関わらず送り続ける |
-| `out` | **`false`: 格納位置のスイッチが押されているときだけ。`true`: それ以外で、腕の状態が分かっている。`null`: アームの制御器自身が分からない**（起動直後・スイッチの読みが食い違うなど）。**昇降部は `null` を `true` と同じに扱う**（spec #4e「格納位置にない、または分からない」）。欠けている・型が違う `arm` は `null` として受ける（捨てない。捨てると最後の `false` のまま時間切れまで動ける） |
+| `out` | **`false`: 格納位置のスイッチが押されていて、そこから動かそうとしていないときだけ**（動かす前に `true` を送り始める。§6。2026-11-17 fk の指摘で直した）。**`true`: それ以外で、腕の状態が分かっている。`null`: アームの制御器自身が分からない**（起動直後・スイッチの読みが食い違うなど）。**昇降部は `null` を `true` と同じに扱う**（spec #4e「格納位置にない、または分からない」）。欠けている・型が違う `arm` は `null` として受ける（捨てない。捨てると最後の `false` のまま時間切れまで動ける） |
 | **通信できている** | **最後に `arm` を受けてから `LIFT_ARM_LINK_TIMEOUT_MS`（仮 1000 ms。送る周期の 10 回分）以内**。接続が開いているかでは判定しない（相手が黙って死ぬと TCP は閉じない。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §3.2 と同じ理由）。接続が閉じたら、その場で「通信できない」 |
 | **付いているとみなす** | 起動してから一度でも `arm` を受けたら（spec §5「通信できたら付いているとみなす」）。`hello` だけでは数えない。確認で人が答えたら、次に `arm` を受けるまで「分からない」に戻す |
 | `role: arm` 以外から来た `arm` | 捨てる |
@@ -107,10 +107,10 @@ spec は直した（[Spec-module.md](../spec/Spec-module.md) §5・§6 `H-M7`・
 **アームの制御器は、昇降部の `state.arm` が `link: true` かつ `out: true` になったのを読んでから、腕を格納位置から動かす。**
 
 - 流れ: アームの制御器は腕を動かす前に `out: true` を送り始め、`state`（`role: arm` の接続にも配信される）で `arm.out` が `true` になるのを待つ。来なければ腕を出さない（fk-system が決めた「腕を出す前に、アームの制御器が昇降機の制御器と通信できていることを確かめる」の中身。fk-system [Spec-arm.md](../../../../fk-system/docs/plan/spec/Spec-arm.md) §1）。
-- 理由: これが無いと、腕を出した直後に通信が切れたとき、昇降部が最後に知ったのは「格納位置にある」のままで、#4e が効かず止めない。**spec が受け入れた既知のリスクは「通信が切れている間に人が腕の画面から腕を起こす」ときだけ**（spec [Spec-safety.md](../spec/Spec-safety.md) §2 の #4e の「受け入れているリスク」）。
+- 理由: これが無いと、腕を出した直後に通信が切れたとき、昇降部が最後に知ったのは「格納位置にある」のままで、#4e が効かず止めない。（spec が受け入れていた「通信が切れている間に人が腕の画面から腕を起こす」は、下の箇条で fk-system が塞いだ。spec [Spec-safety.md](../spec/Spec-safety.md) §2 の #4e の「受け入れているリスク」）。
 - `state` に出るのは NVS に書いたあと（§5）なので、**`state` で見えたことが、昇降部が電源を入れ直しても覚えていることの確認を兼ねる。**
 - この案を入れる前の昇降部（`arm` がどれも `null`）では、アームの制御器は腕を出さない。
-- 腕の画面から人が腕を起こすときも、同じ確かめを通すことを fk-system に勧める（通信できているのに約束を飛ばす理由が無いため。通信できないときの人の操作は spec の既知のリスクのまま）。
+- **腕の画面から人が腕を起こすときも、同じ確かめを通す**（2026-11-17 fk-system の決定）。**格納する向きの操作は止めない**（通信できないときの回復に使うため）。
 
 ## 7. 確認ダイアログ（spec [Spec-ui.md](../spec/Spec-ui.md) §0.2）
 
@@ -131,7 +131,7 @@ spec は直した（[Spec-module.md](../spec/Spec-module.md) §5・§6 `H-M7`・
 | 場面 | `attached` | `link` | `confirm` | `out` | 止めるか |
 | --- | --- | --- | --- | --- | --- |
 | 起動してから一度も `arm` を受けていない・覚えていない | `null` | `null` | `null` | `null` | 止めない |
-| 通信できていて格納位置 | `true` | `true` | `null` | `false` | 止めない |
+| 通信できていて格納位置（動かそうとしていない） | `true` | `true` | `null` | `false` | 止めない |
 | 通信できていて腕が出ている・分からない | `true` | `true` | `null` | `true`（`null` も `true` に倒して出す） | 止めない（「腕が出ています」。spec [Spec-ui.md](../spec/Spec-ui.md) §1.6） |
 | 通信が切れた・最後に格納位置 | `true` | `false` | `null` | `null` | 止めない |
 | 通信が切れた・最後に出ている／分からない | `true` | `false` | 番号 | `null` | **#4e `ARM_LINK`** |
@@ -146,6 +146,8 @@ spec は直した（[Spec-module.md](../spec/Spec-module.md) §5・§6 `H-M7`・
 **「原点の前に腕が出ている」警告**（高さが読めず、通信できていて `out: true`）は**止めない**（spec [Spec-ui.md](../spec/Spec-ui.md) §1.6）。#4e と取り違えない。画面が `height_ok: false` と `arm.link: true`・`arm.out: true` から出す。
 
 ## 9. fk-system に確かめてほしいこと
+
+**2026-11-17 に fk-system が確かめた（fk `af4db1a`）: 5 点とも受け入れ。**直した点: (A) `out: false` を「格納位置にあって、動かそうとしていないときだけ」にした（§4 と §6 が食い違っていた）。(B) `owner: arm` のときの `owner_name` を接続の `name`（`fk-arm`）にそろえ、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §3・§4 も直した（fk は `owner == "arm"` で見分ける）。腕の画面からの操作にも §6 の確かめを通す（fk の決定）。アームが昇降機を使うのは大まかに下げるところだけ（押し当ては先端の上下）。腕の画面を `th-rpi-ap` を通さずに開く形は fk `FK-A2`。
 
 1. 輸送路（§1。`th-rpi-ap` を通す。hve のユーザーが決めた）と、名前 `fk-arm`・`role: arm`。
 2. `arm` を 100 ms ごとに送ること・`out` の 3 つの値の意味（§4）・1000 ms で通信できないとみなすこと。
