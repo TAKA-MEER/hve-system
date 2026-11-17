@@ -31,9 +31,20 @@
 - 型の違う `ceiling` は `hold`・`goto` を捨てず `MISSING` として受け取る
 - `goto` は目標の高さまで動かし、着いたら `state.goto.status` を `ARRIVED` にする。
   着いたあと同じ `press` では動き出さない。安全の判定は `hold` と同じ
+- **測定機構（アームの制御器。`role: arm`。DetailedDesign-protocol-arm.md）**: `role: arm` の接続は
+  1 本だけ（新しい方が古い方を閉じる。最後に受けた `out` と時刻は引き継ぐ）。`arm`（`out`: 真偽値か
+  `null`。欠け・型違いは `null`）を `LIFT_ARM_LINK_TIMEOUT_MS` 受けないか、接続が閉じたら通信できない。
+  **腕が出ている（または分からない）と最後に知った状態で通信できないと #4e（`ARM_LINK`）で、
+  持ち主・向きに関わらず（下降も）止める**。そのとき `state.arm.confirm` に番号（止め始めるたびに
+  1 増える）を出し、**`/ws/ui` の `arm_confirm`（番号が合うとき）だけ**で解ける（`/ws/module` の
+  `arm_confirm` は捨てる）。`arm` が戻れば答えなくても解ける。覚えておく 1 ビット
+  （`arm_out_latched`）は `POST /api/fake` の `{"restart": true}`（再起動したことにする。接続を全部閉じ、
+  持ち主・番号・通信の覚えを消す。1 ビットは残す）をまたいで残る。プロセスの中だけで、ファイルには残さない
 
 `POST /api/fake` は試験用の裏口（names §4）。`height_mm`・`bottom`・
 `height_ok`・`homed`・`stall`・`arm`（`state.arm` の各欄。null・真偽値・文字列）と、持ち主がいないときに表示する天井（`ceiling`）を変えられる。
+`arm` は `state.arm` の欄を上書きする（`null` で上書きを消す。測定機構の本物の経路は
+`/ws/module` の `role: arm`）。
 `stall` が真の間は動かそうとすると `ENCODER_STALL` で止まる。
 `height_ok` が偽の間は動いていれば `HEIGHT_UNKNOWN` を出すが止めない（表示だけ）。
 """
@@ -64,10 +75,11 @@ LIFT_STATE_PERIOD_MS = 100  # 仮
 LIFT_MOTOR_MAX_PCT_DEFAULT = 50  # モータへの出力の上限の既定値 [%]（Spec-ui §2.1）
 LIFT_MOTOR_MAX_PCT_MIN = 10  # 同・下限（上限は LIFT_DUTY_ABS_MAX_PCT）
 LIFT_GOTO_TOL_MM = 10  # 仮（目標に着いたとみなす幅。spec H-M6）
+LIFT_ARM_LINK_TIMEOUT_MS = 1000  # 仮（`arm` をこの時間受けないと通信できない。protocol-arm §4）
 LIFT_MODULE_MAX_CONN = 6  # 仮（/ws/module の上限。超えた新しい接続は閉じる）
 LIFT_WS_UI_PATH = "/ws/ui"
 LIFT_WS_MODULE_PATH = "/ws/module"
-FW = "fake-0.3.0"
+FW = "fake-0.4.0"
 PROVISIONAL = ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"]
 
 DEFAULT_SETTINGS = {
@@ -216,13 +228,16 @@ def decode_hello(body: dict):
     if raw_role is None:
         role = "control"
     else:
-        role = raw_role if raw_role in ("control", "observe") else "observe"
+        role = raw_role if raw_role in ("control", "observe", "arm") else "observe"
 
     operator = "auto" if body.get("operator") == "auto" else "human"
 
     sensor = body.get("ceiling_sensor")
     has_sensor = sensor if isinstance(sensor, bool) else True
     explicit_sensor = sensor is True
+    if role == "arm":
+        # アームの制御器は自動で、距離計を持たない（true を送っても false。protocol-arm §2.1）
+        operator, has_sensor, explicit_sensor = "auto", False, False
 
     raw_label = body.get("busy_label")
     busy_label = None
@@ -275,8 +290,15 @@ class FakeLift:
         self.homed = True
         self.bottom = False
         self.stall = False  # 真の間は動かそうとすると ENCODER_STALL で止まる（POST /api/fake）
-        self.arm: dict = {"attached": None, "link": None, "confirm": None,
-                          "out": None}  # 分からないときは null（POST /api/fake で変える）
+        # `state.arm` の欄の上書き（POST /api/fake の `arm`。空なら本物の経路の値を出す）
+        self.arm_override: dict = {}
+        self._arm_conn: int | None = None  # role: arm の接続（1 本だけ）
+        self._arm_seen = False  # 起動してから（確認で答えてから）一度でも `arm` を受けたか
+        self._arm_last_at = 0  # 最後に `arm` を受けた時刻
+        self._arm_out: bool | None = None  # 最後に受けた out（null は分からない）
+        self.arm_out_latched = False  # 「格納位置にない、または分からないと最後に知った」（NVS の 1 ビット）
+        self.arm_stop = 0  # #4e で止め始めるたびに 1 増やす確認の番号
+        self._arm_active = False  # いま #4e で止めているか
         self.pinned_ceiling: CeilingReport | None = None
         self.seq = 0
         # id → {kind, hello_seen, has_sensor, explicit_sensor, name, role, operator,
@@ -334,6 +356,8 @@ class FakeLift:
 
     def drop_conn(self, conn_id: int) -> None:
         self._conns.pop(conn_id, None)
+        if self._arm_conn == conn_id:
+            self._arm_conn = None  # 接続が閉じたら、その場で通信できない
         if self._owner and self._owner[0] == conn_id:
             self._lose_owner("OWNER_GONE")
 
@@ -364,6 +388,14 @@ class FakeLift:
         if not info["hello_seen"]:  # 2 度目以降の hello は無視する
             info["hello_seen"] = True
             info.update(hello)
+            if info["role"] == "arm":
+                # アームの制御器は 1 本だけ。古い方は名前が違っても閉じる。最後に受けた `out` と
+                # 時刻は引き継ぐ（置き換えは通信できないとみなさない。protocol-arm §2.2）
+                previous = self._arm_conn
+                self._arm_conn = conn_id
+                if previous is not None and previous != conn_id and previous in self._conns:
+                    self.replaced.append(previous)
+                    self.drop_conn(previous)
             if info["name"]:
                 # 同じ名前の別の接続があれば古い方を閉じる（§1.2）
                 for other_id, other in list(self._conns.items()):
@@ -376,6 +408,68 @@ class FakeLift:
     def _may_command(self, conn_id: int) -> bool:
         info = self._conns.get(conn_id)
         return info is None or info["role"] != "observe"  # observe からの命令は捨てる
+
+    # --- 測定機構（protocol-arm）---
+
+    def _arm_link(self, now: int) -> bool:
+        """アームの制御器と通信できているか（接続が開いていて、最後の `arm` が新しい）。"""
+        return (self._arm_conn is not None and self._arm_seen
+                and now - self._arm_last_at <= LIFT_ARM_LINK_TIMEOUT_MS)
+
+    def on_arm(self, conn_id: int, kind: str, body: dict, now: int) -> None:
+        """`arm`（`role: arm` の接続からだけ。ほかは捨てる）。"""
+        if kind != "module" or conn_id != self._arm_conn:
+            return
+        raw = body.get("out")
+        out = raw if isinstance(raw, bool) else None  # 欠け・型違いは分からない（捨てない）
+        self._arm_seen = True
+        self._arm_last_at = now
+        self._arm_out = out
+        self.arm_out_latched = out is not False  # true・null で立て、false で下ろす
+
+    def on_arm_confirm(self, conn_id: int, kind: str, body: dict) -> None:
+        """確認ダイアログの答え。`/ws/ui` から来て番号が合うときだけ #4e を解く。"""
+        stop = body.get("stop")
+        if kind != "ui" or not self._arm_active:
+            return
+        if not isinstance(stop, int) or isinstance(stop, bool) or stop != self.arm_stop:
+            return
+        self.arm_out_latched = False
+        self._arm_seen = False  # 付いているとみなすのを「分からない」に戻す
+        self._arm_out = None
+
+    def restart(self) -> None:
+        """再起動したことにする。接続・持ち主・番号・通信の覚えを消し、1 ビットだけ残す。"""
+        self._arm_conn = None
+        self._arm_seen = False
+        self._arm_out = None
+        self._arm_last_at = 0
+        self.arm_stop = 0
+        self._arm_active = False
+        self._seen.clear()
+        self._lose_owner("CMD_TIMEOUT")
+        self._owner_at = 0
+
+    def _arm_state(self, now: int) -> dict:
+        """`state.arm`（protocol-arm §7 の表）。#4e の立ち上がりで番号を 1 増やす。"""
+        link = self._arm_link(now)
+        active = (not link) and self.arm_out_latched
+        if active and not self._arm_active:
+            self.arm_stop += 1
+        self._arm_active = active
+        if active:
+            arm = {"attached": True if self._arm_seen else None, "link": False,
+                   "confirm": self.arm_stop, "out": None}
+        elif not self._arm_seen:
+            arm = {"attached": None, "link": None, "confirm": None, "out": None}
+        elif link:
+            # null（分からない）は true に倒して出す
+            arm = {"attached": True, "link": True, "confirm": None,
+                   "out": self._arm_out is not False}
+        else:
+            arm = {"attached": True, "link": False, "confirm": None, "out": None}
+        arm.update(self.arm_override)
+        return arm
 
     # --- 持ち主（LiftArbiter と同じ規則）---
 
@@ -563,6 +657,7 @@ class FakeLift:
             self._run_travel_um = 0
         self._run_dir = cmd_dir
 
+        arm_state = self._arm_state(now)
         sel_ok, sel_reason, sel_rep, sel_from = self._owner_ceiling(now)
         if arrived and self._owner is not None:
             # 着いたら止めて持ち主を離す。同じ press の goto では動き出さない（§2.2）
@@ -574,7 +669,12 @@ class FakeLift:
             self._idle_reason = "ARRIVED"
             cmd = None
             cmd_dir = "stop"
-        if not self._owner or not cmd:
+        if self._arm_active:
+            # #4e: 判定の先頭。持ち主・向きに関わらず（下降も）止める
+            out_dir, out_duty, reason = "stop", 0, "ARM_LINK"
+            ok, ceiling_reason = True, "NONE"
+            cmd_speed = 0
+        elif not self._owner or not cmd:
             out_dir, out_duty, reason = "stop", 0, self._idle_reason
             ok, ceiling_reason = True, "NONE"
             cmd_speed = 0
@@ -627,7 +727,9 @@ class FakeLift:
         owner_conn = self._owner[0] if self._owner else None
         owner_kind = self._owner[1] if self._owner else None
         owner_info = self._conns.get(owner_conn) if owner_conn is not None else None
-        if owner_kind == "module":
+        if owner_kind == "module" and owner_info and owner_info["role"] == "arm":
+            owner_kind = "arm"  # アームの制御器（持ち主の名前は接続の name）
+        if owner_kind in ("module", "arm"):
             owner_name = self.name_of(owner_conn)
             owner_operator = owner_info["operator"] if owner_info else "human"
         else:
@@ -680,7 +782,7 @@ class FakeLift:
             "ui_clients": ui_clients,
             "modules": modules,
             "goto": dict(self._goto) if self._goto else None,
-            "arm": dict(self.arm),
+            "arm": arm_state,
             "provisional": list(PROVISIONAL), "cmd_age_ms": 0, "fw": FW,
         }
         if self._owner_cmd:
@@ -756,12 +858,19 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
             lift.pinned_ceiling = None
         if "homed" in body:
             lift.homed = bool(body["homed"])
+        if "arm" in body and body["arm"] is None:
+            lift.arm_override.clear()  # 上書きを消して、本物の経路の値に戻す
         arm = body.get("arm")
         if isinstance(arm, dict):
-            # 腕の状態の試験用の値。null・真偽値・文字列だけ受ける
-            for key in lift.arm:
-                if key in arm and (arm[key] is None or isinstance(arm[key], (bool, str))):
-                    lift.arm[key] = arm[key]
+            # 腕の状態の試験用の値。null・真偽値・文字列・整数（confirm）だけ受ける
+            for key in ("attached", "link", "confirm", "out"):
+                if key in arm and (arm[key] is None or isinstance(arm[key], (bool, str, int))):
+                    lift.arm_override[key] = arm[key]
+        if body.get("restart") is True:
+            # 再起動したことにする: 接続を全部閉じ、覚えているもの（1 ビット）以外を消す
+            lift.restart()
+            for ws in list(request.app["sockets"]):
+                await ws.close()
         return web.json_response({"ok": True})
 
     async def websocket(request: web.Request) -> web.WebSocketResponse:
@@ -805,6 +914,10 @@ def make_app(web_dir: pathlib.Path, lift: FakeLift) -> web.Application:
                         lift.on_goto(conn_id, kind, goto, now_ms())
                 elif t == "ceiling" and kind == "module":
                     lift.on_ceiling(conn_id, body, now_ms())
+                elif t == "arm":
+                    lift.on_arm(conn_id, kind, body, now_ms())
+                elif t == "arm_confirm":
+                    lift.on_arm_confirm(conn_id, kind, body)
                 elif t == "release":
                     press = body.get("press")
                     if isinstance(press, int) and not isinstance(press, bool):
