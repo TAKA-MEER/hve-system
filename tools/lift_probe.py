@@ -12,6 +12,10 @@
 **距離計を持つ名乗り（既定）のときは、止まっている間も `ceiling` を同じ周期で送る**
 （protocol-modules §2.3。ほかの上部モジュールの上昇に値を貸す）。距離計を持たない名乗りは
 `ceiling` を一切載せない。
+**`--role arm` はアームの制御器の名乗り**（`operator: auto`・`ceiling_sensor: false` に決まる。
+DetailedDesign-protocol-arm.md §2.1）。**`--arm-out true|false|null` を付けると、`arm`
+（`{"t":"arm","out":…}`）を `lift_probe_period_ms` ごとに送る**（§4。`x` で送信を止めれば
+`arm` も止まり、昇降部は `LIFT_ARM_LINK_TIMEOUT_MS` で通信できないとみなす）。
 
 - 立ち上がりは安全側（`stop`・天井 `TOO_NEAR` で上昇しない）。上昇を試すときは
   `c` で天井を遠い値（`MEASURED` 2000 mm）に替える。
@@ -55,6 +59,8 @@ lift_probe_goto_mm = 1000
 lift_probe_goto_step_mm = 100
 # `busy_label` の長さの上限（UTF-8 のバイト数。protocol-modules §1.1）
 lift_probe_busy_label_max_bytes = 48
+#: `--arm-out` の値 → `arm` の `out`（null は「分からない」）
+ARM_OUT_VALUES = {"true": True, "false": False, "null": None}
 #: `name` の形（英小文字・数字・`-` の 1〜16 文字）
 NAME_RE = re.compile(r"^[a-z0-9-]{1,16}$")
 
@@ -136,11 +142,19 @@ def build_hello(name: str = lift_probe_name, role: str = lift_probe_role,
 
     `busy_label` は無いとき載せない（昇降部が名前を出す）。
     """
+    if role == "arm":
+        # アームの制御器は自動で、距離計を持たない（protocol-arm §2.1）
+        operator, ceiling_sensor = "auto", False
     hello: dict = {"t": "hello", "name": name, "role": role, "operator": operator,
                    "ceiling_sensor": bool(ceiling_sensor), "fw": lift_probe_fw}
     if busy_label is not None:
         hello["busy_label"] = busy_label
     return hello
+
+
+def build_arm(arm_out: str) -> dict:
+    """アームの制御器として周期ごとに送る `arm`（protocol-arm §4）。`arm_out` は `true|false|null`。"""
+    return {"t": "arm", "out": ARM_OUT_VALUES[arm_out]}
 
 
 def ceiling_of(state: dict) -> dict:
@@ -203,6 +217,7 @@ def format_state(state: dict) -> str:
         f"owner={state.get('owner')}/{state.get('owner_name')}/{state.get('owner_operator')} "
         f"modules={','.join(str((m or {}).get('name')) for m in state.get('modules') or [])} "
         f"goto={(state.get('goto') or {}).get('status')} arm_out={(state.get('arm') or {}).get('out')} "
+        f"arm_link={(state.get('arm') or {}).get('link')} arm_confirm={(state.get('arm') or {}).get('confirm')} "
         f"ui_clients={state.get('ui_clients')} "
         f"cmd_age_ms={state.get('cmd_age_ms')} fw={state.get('fw')}"
     )
@@ -239,8 +254,9 @@ class Probe:
     """キー入力と WS の待ち受けを 1 か所で扱う。"""
 
     def __init__(self, url: str, state: dict, sending: bool, period_ms: int,
-                 hello: dict | None = None) -> None:
+                 hello: dict | None = None, arm_out: str | None = None) -> None:
         self.url = url
+        self.arm_out = arm_out  # `true|false|null`。None なら `arm` を送らない
         self.hello = hello if hello is not None else build_hello()
         self.ceiling_sensor = bool(self.hello.get("ceiling_sensor"))
         self.state = state
@@ -286,6 +302,8 @@ class Probe:
                     self._sent_press = message["press"]
                 elif self.ceiling_sensor:
                     await ws.send_str(json.dumps(build_ceiling(self.state)))
+                if self.arm_out is not None:
+                    await ws.send_str(json.dumps(build_arm(self.arm_out)))
             await asyncio.sleep(self.period_ms / 1000)
 
     async def receive_loop(self, ws: aiohttp.ClientWebSocketResponse) -> None:
@@ -329,7 +347,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  g 目標の高さへ（goto。] / [ で目標を ±100 mm）\n"
             "  c 天井を 近すぎ/遠い（2000 mm）に切り替える（既定は近すぎ = 上昇しない）\n"
             "  + （ = も同じ）速さ +5 mm/s / - 速さ -5 mm/s\n"
-            "  x 送信を止める・再開する / q 終了\n"
+            "  x 送信を止める・再開する（--arm-out の arm も止まる）/ q 終了\n"
             f"\nhold は {lift_probe_period_ms} ms ごと。x で送信を止めると、"
             "昇降部側のウォッチドッグ（LIFT_CMD_TIMEOUT_MS=600 ms）で止まる。"
         ),
@@ -352,8 +370,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--name", default=lift_probe_name,
         help=f"hello の name（英小文字・数字・- の 1〜16 文字。既定 {lift_probe_name}）")
     parser.add_argument(
-        "--role", choices=("control", "observe"), default=lift_probe_role,
-        help=f"hello の role（observe は状態を読むだけ。既定 {lift_probe_role}）")
+        "--role", choices=("control", "observe", "arm"), default=lift_probe_role,
+        help=f"hello の role（observe は状態を読むだけ。arm はアームの制御器の名乗り。既定 {lift_probe_role}）")
     parser.add_argument(
         "--operator", choices=("human", "auto"), default=lift_probe_operator,
         help=f"hello の operator（既定 {lift_probe_operator}。fk・ss は auto）")
@@ -367,6 +385,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--goto-mm", type=int, default=lift_probe_goto_mm,
         help=f"g（goto）の目標の高さ mm（既定 {lift_probe_goto_mm}。] / [ で ±{lift_probe_goto_step_mm}）")
     parser.add_argument(
+        "--arm-out", choices=tuple(ARM_OUT_VALUES), default=None,
+        help="`arm` の out を 100 ms ごとに送る（--role arm のとき。true=腕が出ている・false=格納位置・"
+             "null=分からない。付けなければ arm を送らない）")
+    parser.add_argument(
         "--stop-sending",
         action="store_true",
         help="起動直後から送信を止める（ウォッチドッグの確認用。x で再開できる）",
@@ -377,6 +399,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.busy_label is not None and not (
             1 <= len(args.busy_label.encode("utf-8")) <= lift_probe_busy_label_max_bytes):
         parser.error(f"--busy-label は UTF-8 で 1〜{lift_probe_busy_label_max_bytes} バイトにしてください")
+    if args.arm_out is not None and args.role != "arm":
+        parser.error("--arm-out は --role arm のときだけ付けられます")
     return args
 
 
@@ -390,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     state = initial_state(args.speed, args.goto_mm)
     probe = Probe(args.url, state, sending=not args.stop_sending, period_ms=args.period_ms,
-                  hello=hello_from_args(args))
+                  hello=hello_from_args(args), arm_out=args.arm_out)
     print(
         f"* dir={state['dir']} speed={state['speed_mm_s']} mm/s "
         f"天井={'近すぎ' if state['ceiling_near'] else '遠い'} "

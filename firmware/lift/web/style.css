@@ -62,12 +62,13 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 /* 状態の表 */
 .stat{flex:1;min-height:0;margin:0;display:flex;flex-direction:column;gap:4px;overflow:hidden}
 .stat div{display:flex;gap:8px;font-size:13px;white-space:nowrap}
+@media (max-height:400px){ .stat{gap:1px} }
 .stat dt{flex:none;color:var(--mut);min-width:5.5em}
 .stat dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* 上部モジュールの一覧は長くなるので折り返す（1 台ごとに行を替える） */
 .stat .wrap{white-space:normal;align-items:flex-start}
-.stat .wrap dd{overflow-wrap:anywhere}
-.stopbar{flex:none;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.4);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px;border-radius:0 0 6px 6px}
+.stat .wrap dd{overflow-wrap:anywhere;padding-right:4px}
+.stopbar{flex:none;padding:4px 10px;font-weight:700;background:rgba(0,0,0,.4);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px;border-radius:0 0 6px 6px}
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
 .stopbar.show{display:block}
 
@@ -111,5 +112,11 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
 }
 /* さらに低い画面（高さ 400px 以下）では、設定の行が増えたぶん仮値の帯も省く（Spec-ui §2.3 の表） */
 @media (max-height:400px){ .prov{display:none !important} }
+/* 測定機構の確認ダイアログ（設定画面の上に出す。背の低い画面では説明を省く） */
+#armConfirm{z-index:15}
+.aclead{color:var(--mut);font-size:12px;margin:0}
+.acq{margin:0;font-weight:700;font-size:14px}
+#acOk{white-space:normal}
+@media (max-height:400px){ #acLead{display:none} }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
 .toast.show{display:block}

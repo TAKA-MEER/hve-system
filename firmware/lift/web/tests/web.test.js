@@ -206,6 +206,50 @@ test('腕が出ていますは arm.out が true のときだけ出す（§1.6）
   assert.equal(app.armNoticeText(null), null);
 });
 
+test('原点の前に腕が出ている警告は高さが読めず・通信できて・out が true のときだけ（§1.6）', () => {
+  const text = app.armHomeWarnText({link: true, out: true}, false);
+  assert.match(text, /腕が出ています/);
+  // 1 つでも欠けたら出さない（null は「分からない」。link false・null は通信できない・不明）
+  assert.equal(app.armHomeWarnText({link: true, out: null}, false), null);
+  assert.equal(app.armHomeWarnText({link: true, out: false}, false), null);
+  assert.equal(app.armHomeWarnText({link: false, out: true}, false), null);
+  assert.equal(app.armHomeWarnText({link: null, out: true}, false), null);
+  assert.equal(app.armHomeWarnText({link: true, out: true}, true), null);
+  assert.equal(app.armHomeWarnText({link: true, out: true}, undefined), null);
+  assert.equal(app.armHomeWarnText(null, false), null);
+});
+
+test('確認ダイアログは arm.confirm が整数のときだけ出し、その番号を返す（protocol-arm §7）', () => {
+  assert.deepEqual(app.armConfirmView({confirm: 3}), {show: true, stop: 3});
+  assert.deepEqual(app.armConfirmView({confirm: 1}), {show: true, stop: 1});
+  for (const arm of [{confirm: null}, {}, null, undefined, {confirm: '3'}, {confirm: true}, {confirm: 1.5}]) {
+    assert.deepEqual(app.armConfirmView(arm), {show: false, stop: null}, JSON.stringify(arm));
+  }
+});
+
+test('答えるボタンが送る arm_confirm はいま出している番号を載せる', () => {
+  assert.deepEqual(app.armConfirmMessage(3), {t: 'arm_confirm', stop: 3});
+  assert.deepEqual(app.armConfirmMessage(4), {t: 'arm_confirm', stop: 4});
+  const view = app.armConfirmView({confirm: 7});
+  assert.deepEqual(app.armConfirmMessage(view.stop), {t: 'arm_confirm', stop: 7});
+});
+
+test('測定機構の表示は付いているか・通信・確認待ちを出す（spec §0.2）', () => {
+  assert.equal(app.armStatusText(null), '—');
+  assert.match(app.armStatusText({attached: null, link: null, confirm: null, out: null}), /未確認/);
+  assert.match(app.armStatusText({attached: true, link: true, confirm: null, out: false}), /通信中・格納位置/);
+  assert.match(app.armStatusText({attached: true, link: true, confirm: null, out: true}), /通信中・腕が出ている/);
+  assert.match(app.armStatusText({attached: true, link: false, confirm: null, out: null}), /通信できない/);
+  assert.match(app.armStatusText({attached: true, link: false, confirm: 2, out: null}), /確認待ち/);
+  assert.match(app.armStatusText({attached: null, link: false, confirm: 1, out: null}), /確認待ち/);
+});
+
+test('止めた理由 ARM_LINK の文言（names §3）', () => {
+  const shown = app.reasonText('ARM_LINK');
+  assert.equal(shown.cls, 'ng');
+  assert.match(shown.text, /測定機構と通信できない/);
+});
+
 test('state が ui_state_timeout_ms 届かないとき「接続切れ」', () => {
   assert.equal(app.stateStale(null, 5000, 1000), true);
   assert.equal(app.stateStale(0, 1000, 1000), false);

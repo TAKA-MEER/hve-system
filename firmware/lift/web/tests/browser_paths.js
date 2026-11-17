@@ -16,6 +16,9 @@
 //    反映されている
 // 7. 画面の上昇が、距離計を持つ上部モジュールの新しい近い値で CEILING_NEAR で止まり、
 //    その上部モジュールが切れる（出どころ無し）と天井を使わずに上がる
+// 9. 測定機構: 通信が切れる（arm が来なくなる）とダイアログが出て、通信が戻ると答えなくても消え、
+//    2 回目の止めでは**いまの番号**を載せた arm_confirm が送られて解ける。原点の前の警告は
+//    高さが読めず・通信できて・out が true の 3 つが揃ったときだけ出る（render の呼び出し側）
 // 8. 設定画面の天井の閾値（ceiling_margin_mm）。149 は PUT を出さず、2500 を保存すると PUT に
 //    ceiling_margin_mm: 2500 が載り、開き直すと反映され、2000 mm の天井で上昇が CEILING_NEAR で止まる
 const assert = require('node:assert/strict');
@@ -265,7 +268,9 @@ test('4 下限 > 上限は保存されない（PUT を出さない・サーバ�
 
 /* --- 5. 名乗り・一覧・腕の表示 ------------------------------------------------ */
 test('5 持ち主に busy_label・一覧に繋いだ全部・腕は true のときだけ', async (browser) => {
-  await postFake({height_mm: 1200, bottom: false, arm: {out: null}});
+  // 前の検査（スクロール検査など）の上書きを消してから、arm.out が null の状態にする
+  await postFake({height_mm: 1200, bottom: false, height_ok: true, arm: null});
+  await postFake({arm: {out: null}});
   const open = (hello, hold) => new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://${new URL(BASE).host}/ws/module`);
     ws.addEventListener('error', reject);
@@ -455,6 +460,94 @@ test('8 天井の閾値は範囲の外で PUT を出さず、保存すると PUT
     watcher.close();
     await putMargin(500);
     await cleanup();
+  }
+});
+
+/** アームの制御器（role: arm）として繋ぎ、`arm` を 100 ms ごとに送る（stop() で止める） */
+async function openArm(out) {
+  const ws = await new Promise((resolve, reject) => {
+    const socket = new WebSocket(`ws://${new URL(BASE).host}/ws/module`);
+    socket.addEventListener('error', reject);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({t: 'hello', name: 'fk-arm', role: 'arm', operator: 'auto', ceiling_sensor: false}));
+      resolve(socket);
+    });
+  });
+  const send = () => ws.send(JSON.stringify({t: 'arm', out}));
+  send();
+  ws.timer = setInterval(send, 100);
+  ws.stop = () => { clearInterval(ws.timer); ws.timer = null; };
+  ws.resume = () => { if (!ws.timer) { send(); ws.timer = setInterval(send, 100); } };
+  return ws;
+}
+
+test('9 測定機構の確認ダイアログ・原点の前の腕の警告（render の呼び出し側）', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, height_ok: true, ceiling: null, arm: null});
+  const arm = await openArm(true);
+  const tap = await tapUiMessages(browser);
+  const {page} = tap;
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const dialogShown = () => page.locator('#armConfirm.show').count();
+  const waitDialog = (shown, label) => page.waitForFunction(
+    (want) => document.getElementById('armConfirm').classList.contains('show') === want,
+    shown, {timeout: 4000}).catch(() => { throw new Error(`${label}: ダイアログが ${shown ? '出ない' : '消えない'}`); });
+  const confirms = async () => (await tap.sent()).filter((m) => m && m.t === 'arm_confirm');
+  const watcher = observeModule();
+  await watcher.opened;
+  try {
+    // 通信できているあいだは出ない。測定機構の表示は通信中・腕が出ている
+    await page.waitForFunction(() => document.getElementById('stArm').textContent.includes('腕が出ている'),
+      null, {timeout: 3000});
+    assert.equal(await dialogShown(), 0, '通信できているのにダイアログが出ている');
+
+    // 通信が切れる（arm が来なくなる）。ダイアログが出て、止めた理由の帯も出る
+    arm.stop();
+    await waitDialog(true, '1 回目の #4e');
+    const first = (await watcher.waitFor((s) => s.reason === 'ARM_LINK', 3000, '#4e')).arm.confirm;
+    assert.ok(Number.isInteger(first));
+    assert.match(await page.evaluate(() => document.getElementById('stopbar').textContent), /測定機構と通信できない/);
+
+    // 通信が戻ると、答えなくてもダイアログが消える（confirm が null のとき残さない）
+    arm.resume();
+    await waitDialog(false, '通信が戻ったあと');
+
+    // 2 回目の止め: 番号が増え、答えは**いまの番号**を載せる（前の番号では昇降部が捨てる）
+    arm.stop();
+    await waitDialog(true, '2 回目の #4e');
+    const second = (await watcher.waitFor((s) => s.reason === 'ARM_LINK' && s.arm.confirm !== first,
+      3000, '2 回目の番号')).arm.confirm;
+    assert.ok(second > first, `番号が増えていない（${first} → ${second}）`);
+    await page.click('#acOk');
+    await waitDialog(false, '答えたあと');
+    const sent = await confirms();
+    assert.deepEqual(sent, [{t: 'arm_confirm', stop: second}], '答えが載せた番号');
+    await watcher.waitFor((s) => s.reason !== 'ARM_LINK' && s.arm.confirm === null, 3000, '答えたあとの昇降部');
+
+    // 原点の前の警告: 高さが読めず・通信できて・腕が出ている、の 3 つが揃ったときだけ
+    arm.resume();
+    await watcher.waitFor((s) => s.arm.link === true && s.arm.out === true, 3000, 'arm が戻る');
+    const note = () => page.evaluate(() => document.getElementById('armNote').textContent);
+    await postFake({height_ok: true});
+    await page.waitForFunction(() => document.getElementById('armNote').textContent === '腕が出ています', null, {timeout: 3000});
+    await postFake({height_ok: false});
+    await page.waitForFunction(() => document.getElementById('armNote').textContent.includes('下げる前'), null, {timeout: 3000});
+    // 通信できない（link false）・腕が分からない（out null）では原点の前の警告にしない
+    await postFake({arm: {link: false}});
+    await page.waitForFunction(() => !document.getElementById('armNote').textContent.includes('下げる前'), null, {timeout: 3000});
+    await postFake({arm: {link: true, out: null}});
+    await page.waitForFunction(() => document.getElementById('armNote').textContent === '', null, {timeout: 3000});
+    assert.equal(await note(), '', 'out が null で警告が出ている');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    // 後の検査に #4e を残さない: 格納位置と知らせて覚えを下ろしてから閉じる
+    arm.stop();
+    if (arm.readyState === WebSocket.OPEN) arm.send(JSON.stringify({t: 'arm', out: false}));
+    await new Promise((resolve) => setTimeout(resolve, 3 * STATE_MS));
+    arm.close();
+    watcher.close();
+    await postFake({height_ok: true, arm: null});
+    await tap.cleanup();
   }
 });
 
