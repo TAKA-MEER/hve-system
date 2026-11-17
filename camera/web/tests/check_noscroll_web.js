@@ -33,6 +33,9 @@ const states = [
   {name: 'ヨーの向きと ss の表示', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: null, other_owner: null}, yaw: true},
   // 別の上部モジュールが持ち主（長い busy_label）＋腕が出ている（WP-CAM-10）
   {name: '別の上部モジュール操作中', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, arm_out: true, other_owner: {name: 'ss', busy_label: '画像認識で操作中（長い表示の確認）'}}},
+  // 測定機構の #4e（ARM_LINK の長い案内）と、原点の前に腕が出ている警告＋物理ボタンの注意が並ぶ帯（WP-CAM-15）
+  {name: '測定機構と通信できない（ARM_LINK）', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, height_ok: false, other_owner: null, arm: {attached: true, link: false, confirm: 2, out: null}}},
+  {name: '原点の前に腕が出ている警告', fake: {ceiling: {status: 'MEASURED', mm: 2200}, height_mm: 1200, height_ok: false, other_owner: {name: 'fk-arm', busy_label: 'アームの制御器の長い表示の確認'}, arm: {attached: true, link: true, confirm: null, out: true}}},
 ];
 
 async function setFake(fake) {

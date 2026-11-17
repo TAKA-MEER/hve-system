@@ -32,7 +32,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 import aiohttp
 from aiohttp import web
@@ -783,12 +783,22 @@ class CameraApp:
 
     def _apply_fake_modules(self, data: Mapping[str, Any]) -> list[str]:
         """`arm_out`（腕が出ている）・`other_owner`（`{name, busy_label}`。別の上部モジュールが持ち主）。"""
-        if "arm_out" not in data and "other_owner" not in data and "screen_owner" not in data:
+        keys = ("arm_out", "arm", "height_ok", "other_owner", "screen_owner")
+        if not any(key in data for key in keys):
             return []
         lift = self._fake_lift()
         if lift is None or not hasattr(lift, "set_arm_out"):
-            return ["arm_out・other_owner・screen_owner: 昇降部が偽物でない"]
+            return ["arm_out・arm・height_ok・other_owner・screen_owner: 昇降部が偽物でない"]
         errors: list[str] = []
+        if "arm" in data:
+            error = self._apply_fake_arm(lift, data["arm"])
+            if error:
+                errors.append(error)
+        if "height_ok" in data:
+            if isinstance(data["height_ok"], bool):
+                lift.set_height_ok(data["height_ok"])
+            else:
+                errors.append("height_ok: 真偽値でない")
         if "screen_owner" in data:
             value = data["screen_owner"]
             if value is None:
@@ -819,6 +829,25 @@ class CameraApp:
             else:
                 errors.append("other_owner: null か {name, busy_label} でない")
         return errors
+
+    @staticmethod
+    def _apply_fake_arm(lift: Any, value: Any) -> Optional[str]:
+        """`arm`: `null`（何も知らない）か `{attached, link, confirm, out}`（`state.arm` を決める。
+        `attached`・`link`・`out` は真偽値か null、`confirm` は整数か null）。"""
+        if value is None:
+            lift.set_arm(None)
+            return None
+        message = "arm: null か {attached, link, confirm, out} でない"
+        if not isinstance(value, dict) or set(value) - {"attached", "link", "confirm", "out"}:
+            return message
+        for key in ("attached", "link", "out"):
+            if value.get(key) is not None and not isinstance(value[key], bool):
+                return f"arm.{key}: 真偽値か null でない"
+        confirm = value.get("confirm")
+        if confirm is not None and (isinstance(confirm, bool) or not isinstance(confirm, int)):
+            return "arm.confirm: 整数か null でない"
+        lift.set_arm(value)
+        return None
 
     def _fake_lift(self) -> Any:
         """偽の昇降部ならそれを返す。**偽物でなければ `None`。**"""

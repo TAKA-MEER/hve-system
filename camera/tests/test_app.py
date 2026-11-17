@@ -965,3 +965,45 @@ async def test_fake_mode_screen_owner_and_standalone_follow(fake_rig: Rig) -> No
     assert (await rig.client.put("/api/settings", json=good)).status == 200
     lift._step(lift._clock())  # noqa: SLF001
     assert lift.latest_state()["ceiling"]["standalone"] == "SETTING_OFF"
+
+
+async def test_fake_api_arm_link_reaches_the_screen_state_and_cannot_be_confirmed_there(fake_rig: Rig) -> None:
+    """#4e（`ARM_LINK`）を偽物 API で作れて、`state.arm` と止めた理由がそのまま画面に届く（WP-CAM-15）。
+
+    **確認はカメラモジュールの画面ではできない**: 画面（`/ws`）から `arm_confirm` を送っても、
+    止めたままで、`confirm` も消えない（確認できるのは昇降部の画面だけ。spec Spec-ui §0.2）。
+    """
+    rig = fake_rig
+    assert rig.client is not None
+    arm = {"attached": True, "link": False, "confirm": 3, "out": None}
+    response = await rig.client.post("/api/fake", json={"arm": arm, "height_ok": False})
+    assert response.status == 200
+    await rig.pump()
+    rig.lift._step(rig.clock())  # noqa: SLF001
+    state = await rig.camera.broadcast_state()
+    assert state["arm"] == arm, "昇降部の arm をそのまま運ぶ"
+    assert state["lift"]["reason"] == "ARM_LINK"
+    assert state["lift"]["height_ok"] is False
+
+    ws = await rig.browser()
+    await ws.send_json({"t": "hold", "axis": "lift_down", "speed": 30})
+    await ws.send_json({"t": "arm_confirm", "stop": 3})
+    await rig.pump()
+    rig.lift._step(rig.clock())  # noqa: SLF001
+    state = await rig.camera.broadcast_state()
+    assert state["lift"]["reason"] == "ARM_LINK", "下降も止める"
+    assert state["lift"]["dir"] == "stop"
+    assert state["arm"]["confirm"] == 3, "画面からの arm_confirm では解けない"
+
+    # 通信が戻った（昇降部が解いた）らそのまま映る
+    ok_arm = {"attached": True, "link": True, "confirm": None, "out": True}
+    await rig.client.post("/api/fake", json={"arm": ok_arm})
+    rig.lift._step(rig.clock())  # noqa: SLF001
+    state = await rig.camera.broadcast_state()
+    assert state["arm"] == ok_arm
+    assert state["lift"]["reason"] != "ARM_LINK"
+
+    bad_bodies = ({"arm": "yes"}, {"arm": {"link": "x"}}, {"arm": {"confirm": True}}, {"arm": {"foo": 1}}, {"height_ok": 1})
+    for bad in bad_bodies:
+        assert (await rig.client.post("/api/fake", json=bad)).status == 400, bad
+    assert (await rig.client.post("/api/fake", json={"arm": None})).status == 200

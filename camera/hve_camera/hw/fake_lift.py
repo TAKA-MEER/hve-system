@@ -90,6 +90,11 @@ class FakeLift(LiftPort):
         self._ceiling_margin_mm = CEILING_MARGIN_MM
         #: `arm.out` に出す値（`True`＝腕が出ている・`None`＝分からない）
         self._arm_out: Optional[bool] = None
+        #: `state.arm` の `attached`・`link`・`confirm`（`out` は `_arm_out`）。`confirm` が番号で
+        #: `link` が `False` なら #4e として止める（`ARM_LINK`。protocol-arm §7・§8）
+        self._arm_rest: Dict[str, Any] = {"attached": None, "link": None, "confirm": None}
+        #: `False` なら高さが読めない（原点の前）のふりをする
+        self._height_ok = True
 
     # --- 外から偽の値を変える ---------------------------------------------------------------------
 
@@ -119,6 +124,16 @@ class FakeLift(LiftPort):
 
     def set_arm_out(self, out: Optional[bool]) -> None:
         self._arm_out = out
+
+    def set_arm(self, arm: Optional[Dict[str, Any]]) -> None:
+        """`state.arm` を丸ごと決める（`attached`・`link`・`confirm`・`out`。足りない欄は `None`）。
+        `None` で何も知らない状態（全部 `None`）に戻す。"""
+        arm = arm or {}
+        self._arm_rest = {k: arm.get(k) for k in ("attached", "link", "confirm")}
+        self._arm_out = arm.get("out")
+
+    def set_height_ok(self, ok: bool) -> None:
+        self._height_ok = bool(ok)
 
     @property
     def height_mm(self) -> float:
@@ -240,6 +255,9 @@ class FakeLift(LiftPort):
 
     def _decide(self, now: float) -> tuple:
         """持ち主の命令・天井・下端・経過時間から `(dir, speed, 理由)` を返す（§3.2・§4.1）。"""
+        # 測定機構の #4e は判定の先頭（持ち主・向きに関わらず止める。protocol-arm §8）
+        if self._arm_rest["link"] is False and self._arm_rest["confirm"] is not None:
+            return "stop", 0, "ARM_LINK"
         direction = self._cmd.get("dir")
         try:
             speed = int(self._cmd.get("speed"))
@@ -332,7 +350,7 @@ class FakeLift(LiftPort):
             "reason": reason,
             "bottom": self._bottom,
             "height_mm": int(self._height_mm),
-            "height_ok": True,
+            "height_ok": self._height_ok,
             "top_detect": False,
             "ceiling": {
                 "used": owner and other is None,
@@ -357,12 +375,7 @@ class FakeLift(LiftPort):
             "homed": True,
             "modules": modules,
             "goto": None,
-            "arm": {
-                "attached": None,
-                "link": None,
-                "confirm": None,
-                "out": self._arm_out,
-            },
+            "arm": dict(self._arm_rest, out=self._arm_out),
             "ui_clients": 0,
             "provisional": ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],
             "fw": "fake-0.2.0",
