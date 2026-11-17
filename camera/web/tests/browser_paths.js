@@ -804,6 +804,9 @@ test('18 ARM_LINK は案内だけで確認のボタンも arm_confirm も無く�
   const KNOWN_BUTTONS = new Set(['openSettings', 'snapBtn', 'toggleGuide', 'zIn', 'zLvl', 'zOut', 'bPower',
     'snapClose', 'snapZIn', 'snapZLvl', 'snapZOut', 'yawZero', 'stCancel', 'stSave']);
   try {
+    // 前の試験（7 の io_lost）のあと、偽の UNO は天井の値を入れ直すまで行を返さず IO_LOST が残る。
+    // IO_LOST は ARM_LINK より上に出るので、先に値を入れ直して行を戻す（順番に依らないように）
+    await postFake({ceiling: {status: 'MEASURED', mm: 2600}});
     // 腕が出ていて通信が切れた（#4e）。高さは読めない（原点の前）
     await postFake({arm: {attached: true, link: false, confirm: 4, out: null}, height_ok: false});
     await page.waitForFunction(() => last_state && last_state.lift.reason === 'ARM_LINK', null, {timeout: 3000});
