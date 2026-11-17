@@ -208,8 +208,23 @@ bool LiftController::on_hello(const ConnId& conn, const HelloMsg& hello, int* re
     } else {
       std::snprintf(info->name, sizeof(info->name), "anon-%d", conn.id);
     }
+    if (info->role == ModuleRole::ARM) {
+      // アームの制御器（protocol-arm §2.1）。operator は自動に、ceiling_sensor は false に固定する
+      // （アームの制御器の値を天井の出どころにしない。先端の距離計は天面を測るもので天井ではない）
+      info->op = ModuleOperator::AUTO;
+      info->has_sensor = false;
+      info->sensor_explicit = false;
+      // role: arm の接続は 1 本だけ（§2.2）。新しい接続が来たら、名前が違っても古い方を閉じさせる。
+      // 置き換えは「通信できない」とみなさない: 最後の out と受けた時刻は引き継ぐ（接続の番号だけ替える）
+      if (arm_conn_id_ >= 0 && arm_conn_id_ != conn.id && find(arm_conn_id_) != nullptr &&
+          replaced_conn_id != nullptr) {
+        *replaced_conn_id = arm_conn_id_;
+      }
+      arm_conn_id_ = conn.id;
+    }
     // 同じ名前の別の接続は古い接続。呼び出し側が閉じる（名前の無い接続は置き換えない）
-    if (info->named && conn.kind == ConnKind::MODULE && replaced_conn_id != nullptr) {
+    if (info->named && conn.kind == ConnKind::MODULE && replaced_conn_id != nullptr &&
+        *replaced_conn_id < 0) {
       for (int i = 0; i < kMaxConns; ++i) {
         const ConnInfo& other = conns_[i];
         if (other.used && other.id != conn.id && other.kind == ConnKind::MODULE &&
@@ -376,9 +391,114 @@ void LiftController::on_close(int conn_id) {
     had_owner_ = false;
     end_goto(StopReason::OWNER_GONE);
   }
+  // いまのアームの接続が閉じたら、その場で「通信できない」。覚えている腕の状態（arm_out_latched_）には
+  // 触れない（接続が閉じても腕は出たまま。protocol-arm §5）。置き換えられた古い接続は番号が違うので何も起きない
+  if (conn_id == arm_conn_id_) {
+    arm_conn_id_ = -1;
+  }
   ConnInfo* info = find(conn_id);
   if (info != nullptr) {
     info->used = false;
+  }
+}
+
+bool LiftController::arm_link_ok(uint32_t now_ms) const {
+  // 「通信できている」= いまのアームの接続から、最後の arm を LIFT_ARM_LINK_TIMEOUT_MS 以内に受けた。
+  // 接続が開いているかだけでは判定しない（相手が黙って死ぬと TCP は閉じない。protocol-arm §4）
+  return arm_conn_id_ >= 0 && arm_attached_ &&
+         elapsed_ms(now_ms, arm_last_at_ms_) <= static_cast<int32_t>(LIFT_ARM_LINK_TIMEOUT_MS);
+}
+
+bool LiftController::arm_stop_active(uint32_t now_ms) const {
+  // #4e: 腕が格納位置にない・分からないと最後に知っていて通信できない（起動したとき覚えていた場合を含む）。
+  // 覚えられなかったとき（NVS に書けなかった）も同じに止める（覚えられないまま腕を出させない）
+  return (arm_out_latched_ && !arm_link_ok(now_ms)) || arm_write_failed_;
+}
+
+void LiftController::on_arm(const ConnId& conn, const ArmMsg& arm, uint32_t now_ms) {
+  // いまの role: arm の接続からのものだけ受ける（/ws/ui・role が arm でない接続・置き換えられた古い接続は捨てる）
+  if (conn.kind != ConnKind::MODULE || conn.id != arm_conn_id_) {
+    return;
+  }
+  const ConnInfo* info = find(conn.id);
+  if (info == nullptr || !info->hello_seen || info->role != ModuleRole::ARM) {
+    return;
+  }
+  arm_attached_ = true;
+  arm_last_out_ = arm.out;
+  arm_last_at_ms_ = now_ms;
+  if (arm.out == ArmTri::NO) {
+    // 格納位置にあると知らされた。覚えたものを下ろす（もう覚えるものが無いので、書けなかった印も消す）
+    arm_out_latched_ = false;
+    arm_write_failed_ = false;
+  } else {
+    // true と null（アームの制御器自身が分からない）は同じに扱う（spec #4e「格納位置にない、または分からない」）
+    arm_out_latched_ = true;
+  }
+  // 通信が戻った。確認待ちだったなら、答えなくても解ける（番号も無効にする。遅れて届いた古い確認で
+  // 腕が出たままの覚えを消さない）。書けなかった印があるときは、書き直せるまで解けない
+  if (!arm_write_failed_) {
+    arm_confirm_shown_ = 0;
+  }
+  if (arm_out_latched_ != arm_nvs_value_) {
+    arm_write_wanted_ = true;  // 値が変わった（書けなかったときの頼み直しもここ）
+  }
+}
+
+bool LiftController::on_arm_confirm(const ConnId& conn, const ArmConfirmMsg& confirm) {
+  // 確認できるのは昇降部の画面（/ws/ui）だけ。確認待ちで、番号が直前の step が出したものと同じときだけ
+  // 受ける（古いダイアログの遅れた押下で、新しい止めを解かない。press と同じ考え）
+  if (conn.kind != ConnKind::UI) {
+    return false;
+  }
+  if (arm_confirm_shown_ == 0 || confirm.stop != arm_confirm_shown_) {
+    return false;
+  }
+  // 覚えたものを消し、付いているとみなすのを「分からない」に戻す（次の arm を受けるまで）
+  arm_out_latched_ = false;
+  arm_attached_ = false;
+  arm_last_out_ = ArmTri::NUL;
+  arm_write_failed_ = false;
+  arm_confirm_shown_ = 0;
+  if (arm_nvs_value_) {
+    arm_write_wanted_ = true;  // NVS の覚えも下ろす
+  }
+  return true;
+}
+
+void LiftController::restore_arm_out_latched(bool latched) {
+  arm_out_latched_ = latched;
+  arm_nvs_value_ = latched;
+}
+
+bool LiftController::take_arm_latch_write(bool* value) {
+  if (arm_write_inflight_ || !arm_write_wanted_) {
+    return false;
+  }
+  arm_write_wanted_ = false;
+  if (arm_out_latched_ == arm_nvs_value_) {
+    return false;  // 書くのは値が変わったときだけ
+  }
+  *value = arm_out_latched_;
+  arm_write_inflight_ = true;
+  return true;
+}
+
+void LiftController::on_arm_latch_written(bool value, bool ok) {
+  arm_write_inflight_ = false;
+  if (ok) {
+    arm_nvs_value_ = value;
+    if (value == arm_out_latched_) {
+      arm_write_failed_ = false;
+    } else {
+      arm_write_wanted_ = true;  // 書いている間に覚えの値が変わった
+    }
+    return;
+  }
+  // 書けなかった。覚えようとしていた値（true）のときだけ、止める印を立てる。
+  // いまの覚えがもう違う値なら、古い書き込みの結果なので何もしない
+  if (value && arm_out_latched_) {
+    arm_write_failed_ = true;
   }
 }
 
@@ -507,7 +627,16 @@ LiftState LiftController::step(uint32_t now_ms) {
     stall_valid_ = true;
   }
 
+  // 測定機構の #4e（protocol-arm §5・§8）。止め始めるたびに確認の番号を 1 増やす
+  const bool arm_stop = arm_stop_active(now_ms);
+  if (arm_stop && !arm_stop_prev_) {
+    ++arm_stop_;
+  }
+  arm_stop_prev_ = arm_stop;
+  arm_confirm_shown_ = arm_stop ? arm_stop_ : 0;
+
   LiftDecideInput in;
+  in.arm_link_stop = arm_stop;
   in.has_cmd = has_owner;
   in.owner_empty_reason = idle_reason_;
   in.dir = cmd_dir;
@@ -564,7 +693,7 @@ LiftState LiftController::step(uint32_t now_ms) {
 
   // 判定の結果をモータへ出す。指令をそのまま流さないこと（§4.1）
   LiftDecideResult decided = lift_decide(in);
-  if (goto_force != StopReason::NONE) {
+  if (goto_force != StopReason::NONE && !arm_stop) {  // #4e は goto の理由で上書きしない
     decided = LiftDecideResult();  // 止める。理由は goto の受け付けなかった理由・高さが読めない
     decided.reason = goto_force;
   }
@@ -676,6 +805,13 @@ LiftState LiftController::step(uint32_t now_ms) {
   }
   state_.has_owner = has_owner;
   state_.owner_kind = !has_owner ? 0 : owner.kind == ConnKind::MODULE ? 1 : owner.kind == ConnKind::BUTTON ? 2 : 0;
+  // アームの制御器（role: arm の接続）が持ち主なら arm（protocol-arm §3）
+  if (has_owner && owner.kind == ConnKind::MODULE) {
+    const ConnInfo* arm_owner = find(owner.id);
+    if (arm_owner != nullptr && arm_owner->role == ModuleRole::ARM) {
+      state_.owner_kind = 3;
+    }
+  }
   state_.ui_clients = ui_clients_;
   // 持ち主の名前・人か自動か（module のときはその接続の hello の値）
   state_.owner_name[0] = '\0';
@@ -685,6 +821,23 @@ LiftState LiftController::step(uint32_t now_ms) {
     if (owner_info != nullptr) {
       copy_name(state_.owner_name, sizeof(state_.owner_name), owner_info->name);
       state_.owner_operator = owner_info->op;
+    }
+  }
+  // state.arm（protocol-arm §7 の表）。out は NVS に書けたと知らされてから true を出す
+  {
+    const bool link = arm_link_ok(now_ms);
+    const bool known = arm_attached_ || arm_out_latched_;  // 覚えているものがあれば、通信できないことも出す
+    ArmInfo& arm = state_.arm;
+    arm.attached = arm_attached_ ? ArmTri::YES : ArmTri::NUL;
+    arm.link = !known ? ArmTri::NUL : link ? ArmTri::YES : ArmTri::NO;
+    arm.confirm = arm_confirm_shown_;
+    arm.out = ArmTri::NUL;
+    if (arm_attached_ && link) {
+      if (arm_last_out_ == ArmTri::NO) {
+        arm.out = ArmTri::NO;
+      } else if (arm_out_latched_ && arm_nvs_value_ && !arm_write_failed_) {
+        arm.out = ArmTri::YES;  // true と null は true に倒して出す。NVS に書けたあとだけ
+      }
     }
   }
   state_.homed = hal_->homed();

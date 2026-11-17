@@ -43,6 +43,9 @@ constexpr size_t kFrameMax = 1024;
 constexpr size_t kSettingsBodyMax = 2048;
 // NVS（LIFT_NVS_NAMESPACE の下）の設定の鍵。保存する形は lift_settings の JSON。
 constexpr char kSettingsNvsKey[] = "settings";
+// NVS（LIFT_NVS_NAMESPACE の下）の arm_out_latched の鍵。「腕が格納位置にない、または分からないと
+// 最後に知った」の 1 ビット（真偽値。protocol-arm §5。spec H-X15）。
+constexpr char kArmLatchNvsKey[] = "arm_latch";
 
 AsyncWebServer server(LIFT_HTTP_PORT);
 // 口はコードの定数。設定で変えられるようにしない（DetailedDesign.md §3.1）。
@@ -140,6 +143,8 @@ enum class PendingType : uint8_t {
   HELLO,
   CEILING,
   CLOSE,
+  ARM,          // role: arm の接続からの arm（腕の状態。protocol-arm §4）
+  ARM_CONFIRM,  // /ws/ui からの arm_confirm（確認ダイアログの答え。protocol-arm §7）
 };
 
 struct PendingEvent {
@@ -149,6 +154,8 @@ struct PendingEvent {
   GotoMsg go;
   HelloMsg hello;
   CeilingReport ceiling;
+  ArmMsg arm;
+  ArmConfirmMsg arm_confirm;
   int press = 0;
   uint32_t at_ms = 0;
 };
@@ -285,6 +292,32 @@ void handle_frame(AsyncWebSocket* ws, AsyncWebSocketClient* client, const uint8_
     post_event(event);
     return;
   }
+  ArmMsg arm;
+  if (decode_arm(text, &arm)) {
+    // 腕の状態。/ws/ui からのものは捨てる（LiftController も role: arm の接続のものだけ受ける）
+    if (!is_ui) {
+      PendingEvent event;
+      event.type = PendingType::ARM;
+      event.conn = conn;
+      event.arm = arm;
+      event.at_ms = millis();  // 「通信できているか」はここから数える
+      post_event(event);
+    }
+    return;
+  }
+  ArmConfirmMsg arm_confirm;
+  if (decode_arm_confirm(text, &arm_confirm)) {
+    // 確認できるのは昇降部の画面（/ws/ui）だけ。/ws/module から来たものは捨てる
+    // （fk-system・ss-system・カメラモジュールからは解けない。spec Spec-module §5）
+    if (is_ui) {
+      PendingEvent event;
+      event.type = PendingType::ARM_CONFIRM;
+      event.conn = conn;
+      event.arm_confirm = arm_confirm;
+      post_event(event);
+    }
+    return;
+  }
   CeilingReport ceiling;
   if (decode_ceiling(text, &ceiling, millis())) {
     // 距離計を持つ上部モジュールが止まっている間も送る値（protocol-modules §2.3）。
@@ -416,6 +449,33 @@ void load_settings() {
   g_settings = lift_settings_from_saved(saved.c_str(), &g_using_defaults);
   // 起動時に設定を LiftController へ効かせる（motor_max_pct・ceiling_standalone・ceiling_margin_mm）
   controller.apply_settings(g_settings);
+}
+
+// 起動時に arm_out_latched を NVS から読む。無ければ false（一度も腕が出ていない昇降部。
+// prefs.begin(…, true) は名前空間が無いと失敗するので、失敗も「無い」として扱う）。
+// 最初の step より前に呼ぶ（起動直後から #4e で止めるため）
+void load_arm_latch() {
+  bool latched = false;
+  Preferences prefs;
+  if (prefs.begin(LIFT_NVS_NAMESPACE, true)) {
+    latched = prefs.getBool(kArmLatchNvsKey, false);
+    prefs.end();
+  }
+  controller.restore_arm_out_latched(latched);
+  if (latched) {
+    Serial.println("[arm] 腕が出ていると覚えている。アームの制御器と通信できるまで止める（#4e）");
+  }
+}
+
+// arm_out_latched を NVS に書く。書けたら true。WS のタスクからは呼ばない（loop() の中だけ）
+bool store_arm_latch(bool latched) {
+  Preferences prefs;
+  if (!prefs.begin(LIFT_NVS_NAMESPACE, false)) {
+    return false;
+  }
+  const bool ok = prefs.putBool(kArmLatchNvsKey, latched) > 0;
+  prefs.end();
+  return ok;
 }
 
 bool store_settings(const LiftSettings& settings) {
@@ -597,7 +657,9 @@ void setup() {
   pinMode(LIFT_SW_DOWN_PIN, INPUT_PULLUP);
 
   hal.begin();  // モータは停止から始める
-  // 指令を一度も受けていないので、この 1 回は CMD_TIMEOUT で止まる
+  // 腕が出ていたと覚えていれば、最初の step から #4e で止める（原点の前の下降も止まる）
+  load_arm_latch();
+  // 指令を一度も受けていないので、この 1 回は CMD_TIMEOUT で止まる（覚えていれば ARM_LINK）
   controller.step(millis());
 
   load_settings();  // NVS から昇降の速度の設定を読む（無ければ既定値）
@@ -666,11 +728,29 @@ void loop() {
       case PendingType::CLOSE:
         controller.on_close(event.conn.id);
         break;
+      case PendingType::ARM:
+        controller.on_arm(event.conn, event.arm, event.at_ms);
+        break;
+      case PendingType::ARM_CONFIRM:
+        controller.on_arm_confirm(event.conn, event.arm_confirm);
+        break;
       case PendingType::NONE:
         break;
     }
   }
   controller.set_ui_clients(static_cast<int>(ws_ui.count()));
+
+  // 1a) arm_out_latched を NVS に書いてほしいとき、ここ（loop() の中）で書いて結果を返す。
+  // 書けたと知らされてから state.arm.out に true が出る（腕を出す前の約束。protocol-arm §6）。
+  // 書くのは値が変わったときだけ（腕を出す・格納するたびに 1 回ずつ）なので loop() を止めるのは短い
+  bool latch_value = false;
+  if (controller.take_arm_latch_write(&latch_value)) {
+    const bool ok = store_arm_latch(latch_value);
+    if (!ok) {
+      Serial.println("[arm] arm_out_latched を NVS に書けなかった。#4e と同じに止める");
+    }
+    controller.on_arm_latch_written(latch_value, ok);
+  }
 
   // 1b) 点検用の物理ボタン。ピンを読んで渡すだけ（判断は button_step の中）
   button_step(g_button, controller, digitalRead(LIFT_SW_UP_PIN), digitalRead(LIFT_SW_DOWN_PIN),

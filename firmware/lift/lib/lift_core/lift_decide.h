@@ -25,6 +25,7 @@ constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上�
 constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上限の既定値 [%]（定格 12 V ÷ 電源 24 V。Spec-ui §2.1）
 constexpr int LIFT_MOTOR_MAX_PCT_MIN = 10;      // モータへの出力の上限の下限 [%]（同上。上限は LIFT_DUTY_ABS_MAX_PCT）
 constexpr int LIFT_SPEED_ABS_MAX_MM_S = 100;    // 速さの絶対上限 [mm/s]（仮。H-V3）
+constexpr uint32_t LIFT_ARM_LINK_TIMEOUT_MS = 1000;  // 最後の arm からこれだけ届かなければアームの制御器と通信できない（仮。#4e）
 constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進まなければ止めるまでの時間（仮）
 // 止めずに済む進行方向への最小の進みは hal_core.h の LIFT_STALL_MIN_UM /
 // LIFT_STALL_MIN_COUNTS（µm で決めて LIFT_UM_PER_COUNT で割る。#8a）
@@ -54,6 +55,7 @@ struct GotoInfo {
 enum class ModuleRole : uint8_t {
   CONTROL = 0,   // 昇降を命じる
   OBSERVE = 1,   // 状態を読むだけ（命令は捨てる）
+  ARM = 2,       // アームの制御器（測定機構。昇降を命じ、arm を送る。1 本だけ。protocol-arm §2）
 };
 
 enum class ModuleOperator : uint8_t {
@@ -88,6 +90,21 @@ struct ModuleInfo {
   char fw[16] = {};
 };
 
+// null / false / true の 3 値（state.arm の欄・arm の out。protocol-arm §4・§7）
+enum class ArmTri : uint8_t {
+  NUL = 0,  // 分からない（JSON の null）
+  NO,       // false
+  YES,      // true
+};
+
+// state.arm（protocol-arm §7 の表。測定機構。どれも null なら ArmTri::NUL・confirm は 0）
+struct ArmInfo {
+  ArmTri attached = ArmTri::NUL;  // アームの制御器と通信できて、付いているとみなしているか
+  ArmTri link = ArmTri::NUL;      // いま通信できているか
+  int confirm = 0;                // #4e の確認待ちの番号（1 から。0 は確認待ちでない = null）
+  ArmTri out = ArmTri::NUL;       // 腕が格納位置にないか（NVS に書いたあとの値だけ）
+};
+
 // 昇降部からカメラ部へ返す状態（DetailedDesign-protocol.md §2.2）
 struct LiftState {
   int seq = 0;                  // 送出ごとの連番
@@ -114,8 +131,8 @@ struct LiftState {
   StandaloneCeiling ceiling_standalone = StandaloneCeiling::NO_SOURCE;
   // 持ち主（いなければ has_owner が偽。種類は lift_arbiter.h の ConnKind）
   bool has_owner = false;
-  uint8_t owner_kind = 0;  // 0 = UI（画面）・1 = MODULE（上部モジュール）・2 = BUTTON（物理ボタン）
-  char owner_name[32] = {};  // owner が module のときの接続の名前（それ以外は空）
+  uint8_t owner_kind = 0;  // 0 = UI（画面）・1 = MODULE（上部モジュール）・2 = BUTTON（物理ボタン）・3 = ARM（アームの制御器）
+  char owner_name[32] = {};  // owner が module・arm のときの接続の名前（それ以外は空）
   ModuleOperator owner_operator = ModuleOperator::HUMAN;  // has_owner のときだけ意味を持つ
   bool homed = false;        // 原点を取ったか（電源を入れてから一度下端に着いたか）
   int ui_clients = 0;        // /ws/ui に繋いでいる画面の数
@@ -124,10 +141,13 @@ struct LiftState {
   int module_count = 0;
   uint32_t cmd_age_ms = 0;
   GotoInfo goto_info;  // state.goto（C++ の予約語を避けた名前）
+  ArmInfo arm;         // state.arm（測定機構。WP-LIFT-18）
 };
 
 // 判定の入力。全部「外界から受け取った値」だけで、状態を持たない。
 struct LiftDecideInput {
+  // 測定機構の #4e が立っているか（呼び出し側が持つ。立っていれば持ち主・向きに関わらず止める。表 0）
+  bool arm_link_stop = false;
   bool has_cmd = false;  // 持ち主がいるか（いないときは owner_empty_reason で止める）
   StopReason owner_empty_reason = StopReason::CMD_TIMEOUT;  // 持ち主がいないときの停止理由
   LiftDir dir = LiftDir::STOP;  // 持ち主の命令の方向

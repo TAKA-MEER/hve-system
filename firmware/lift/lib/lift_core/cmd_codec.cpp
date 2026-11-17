@@ -74,6 +74,8 @@ const char* reason_name(StopReason reason) {
       return "PREEMPTED";
     case StopReason::TARGET_RANGE:
       return "TARGET_RANGE";
+    case StopReason::ARM_LINK:
+      return "ARM_LINK";
     case StopReason::NONE:
       break;
   }
@@ -103,6 +105,7 @@ bool reason_from_name(const char* name, StopReason* out) {
       {"ARRIVED", StopReason::ARRIVED},
       {"PREEMPTED", StopReason::PREEMPTED},
       {"TARGET_RANGE", StopReason::TARGET_RANGE},
+      {"ARM_LINK", StopReason::ARM_LINK},
   };
   for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
     if (std::strcmp(name, table[i].name) == 0) {
@@ -269,7 +272,34 @@ void copy_busy_label(char* out, size_t out_size, JsonVariantConst value) {
 }
 
 const char* module_role_name(ModuleRole role) {
-  return role == ModuleRole::OBSERVE ? "observe" : "control";
+  switch (role) {
+    case ModuleRole::OBSERVE:
+      return "observe";
+    case ModuleRole::ARM:
+      return "arm";
+    case ModuleRole::CONTROL:
+      break;
+  }
+  return "control";
+}
+
+// state.arm の欄（null / false / true）
+void set_tri(JsonObject obj, const char* key, ArmTri value) {
+  if (value == ArmTri::NUL) {
+    obj[key] = nullptr;
+  } else {
+    obj[key] = (value == ArmTri::YES);
+  }
+}
+
+// state.arm の欄を読む。欠けている・null は NUL、真偽値以外は読めない（false を返す）
+bool read_tri(JsonObject obj, const char* key, ArmTri* out) {
+  if (obj[key].is<bool>()) {
+    *out = obj[key].as<bool>() ? ArmTri::YES : ArmTri::NO;
+    return true;
+  }
+  *out = ArmTri::NUL;
+  return obj[key].isNull();
 }
 
 const char* module_operator_name(ModuleOperator op) {
@@ -319,11 +349,17 @@ bool decode_hello(const char* text, HelloMsg* out) {
   // ほかの接続に貸す値の出どころにできるのは、true を明示した接続だけ（§2.3）
   out->has_sensor = !obj["ceiling_sensor"].is<bool>() || obj["ceiling_sensor"].as<bool>();
   out->sensor_explicit = obj["ceiling_sensor"].is<bool>();
-  // role は欠けていれば control、知らない値は observe（命じられない側に倒す）
+  // role は欠けていれば control、知らない値は observe（命じられない側に倒す）。
+  // arm はアームの制御器（protocol-arm §2.1）
   if (obj["role"].is<const char*>()) {
-    out->role = std::strcmp(obj["role"].as<const char*>(), "control") == 0
-                    ? ModuleRole::CONTROL
-                    : ModuleRole::OBSERVE;
+    const char* role = obj["role"].as<const char*>();
+    if (std::strcmp(role, "control") == 0) {
+      out->role = ModuleRole::CONTROL;
+    } else if (std::strcmp(role, "arm") == 0) {
+      out->role = ModuleRole::ARM;
+    } else {
+      out->role = ModuleRole::OBSERVE;
+    }
   } else {
     out->role = ModuleRole::CONTROL;
   }
@@ -406,6 +442,34 @@ bool decode_ceiling(const char* text, CeilingReport* out, uint32_t received_at_m
   return read_ceiling(obj, out, received_at_ms);
 }
 
+bool decode_arm(const char* text, ArmMsg* out) {
+  *out = ArmMsg();
+  JsonDocument doc;
+  JsonObject obj;
+  if (!read_object(text, &doc, &obj) || !has_type(obj, "arm")) {
+    return false;
+  }
+  // 欠けている・null・型違いは NUL のまま（受け取る。「分からない」は止める側に倒す）
+  if (obj["out"].is<bool>()) {
+    out->out = obj["out"].as<bool>() ? ArmTri::YES : ArmTri::NO;
+  }
+  return true;
+}
+
+bool decode_arm_confirm(const char* text, ArmConfirmMsg* out) {
+  *out = ArmConfirmMsg();
+  JsonDocument doc;
+  JsonObject obj;
+  if (!read_object(text, &doc, &obj) || !has_type(obj, "arm_confirm")) {
+    return false;
+  }
+  if (!obj["stop"].is<int>()) {
+    return false;
+  }
+  out->stop = obj["stop"].as<int>();
+  return true;
+}
+
 bool decode_release(const char* text, ReleaseMsg* out) {
   *out = ReleaseMsg();
   JsonDocument doc;
@@ -463,12 +527,16 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
     ceiling["standalone"] = standalone_ceiling_name(state.ceiling_standalone);
   }
   if (state.has_owner) {
-    obj["owner"] = state.owner_kind == 1 ? "module" : state.owner_kind == 2 ? "button" : "ui";
+    obj["owner"] = state.owner_kind == 1   ? "module"
+                   : state.owner_kind == 2 ? "button"
+                   : state.owner_kind == 3 ? "arm"
+                                           : "ui";
   } else {
     obj["owner"] = nullptr;
   }
-  // 持ち主の名前（module のときだけ）と、人か自動か（持ち主がいるときだけ）
-  if (state.has_owner && state.owner_kind == 1 && state.owner_name[0] != '\0') {
+  // 持ち主の名前（module・arm のときだけ）と、人か自動か（持ち主がいるときだけ）
+  if (state.has_owner && (state.owner_kind == 1 || state.owner_kind == 3) &&
+      state.owner_name[0] != '\0') {
     obj["owner_name"] = state.owner_name;
   } else {
     obj["owner_name"] = nullptr;
@@ -513,13 +581,17 @@ size_t state_encode(const LiftState& state, char* out, size_t out_size) {
   } else {
     obj["goto"] = nullptr;
   }
-  // 測定機構（spec §3）。中身はアームの制御器とのつなぎ方（spec H-M7）が決まるまで、
-  // すべて null（「付いていない」と読まれないように。false を出さない）
+  // 測定機構（spec §3。protocol-arm §7 の表）。分からないときはどれも null
+  // （「付いていない」と読まれないように。attached に false は出さない）
   JsonObject arm = obj["arm"].to<JsonObject>();
-  arm["attached"] = nullptr;
-  arm["link"] = nullptr;
-  arm["confirm"] = nullptr;
-  arm["out"] = nullptr;
+  set_tri(arm, "attached", state.arm.attached);
+  set_tri(arm, "link", state.arm.link);
+  if (state.arm.confirm > 0) {
+    arm["confirm"] = state.arm.confirm;
+  } else {
+    arm["confirm"] = nullptr;
+  }
+  set_tri(arm, "out", state.arm.out);
   JsonArray provisional = obj["provisional"].to<JsonArray>();
   for (size_t i = 0; i < sizeof(kProvisional) / sizeof(kProvisional[0]); ++i) {
     provisional.add(kProvisional[i]);
@@ -636,6 +708,9 @@ bool state_decode(const char* text, LiftState* out) {
     } else if (std::strcmp(owner, "button") == 0) {
       out->has_owner = true;
       out->owner_kind = 2;
+    } else if (std::strcmp(owner, "arm") == 0) {
+      out->has_owner = true;
+      out->owner_kind = 3;
     } else {
       return false;
     }
@@ -690,6 +765,22 @@ bool state_decode(const char* text, LiftState* out) {
     return false;
   }
 
+  // arm は足した欄。欠けている・null はどれも null（今までの形）
+  if (obj["arm"].is<JsonObject>()) {
+    JsonObject arm = obj["arm"].as<JsonObject>();
+    if (!read_tri(arm, "attached", &out->arm.attached) || !read_tri(arm, "link", &out->arm.link) ||
+        !read_tri(arm, "out", &out->arm.out)) {
+      return false;
+    }
+    if (arm["confirm"].is<int>() && arm["confirm"].as<int>() > 0) {
+      out->arm.confirm = arm["confirm"].as<int>();
+    } else if (!arm["confirm"].isNull()) {
+      return false;
+    }
+  } else if (!obj["arm"].isNull()) {
+    return false;
+  }
+
   JsonArray modules = obj["modules"].as<JsonArray>();
   if (modules.size() > static_cast<size_t>(LIFT_MODULE_LIST_MAX)) {
     return false;
@@ -707,6 +798,8 @@ bool state_decode(const char* text, LiftState* out) {
       info.role = ModuleRole::CONTROL;
     } else if (std::strcmp(role, "observe") == 0) {
       info.role = ModuleRole::OBSERVE;
+    } else if (std::strcmp(role, "arm") == 0) {
+      info.role = ModuleRole::ARM;
     } else {
       return false;
     }

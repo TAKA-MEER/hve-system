@@ -1,4 +1,4 @@
-// JSON ⇔ hello・hold・release・ceiling・state（docs/plan/detailed/DetailedDesign-protocol-modules.md §1〜§3）。
+// JSON ⇔ hello・hold・release・ceiling・arm・arm_confirm・state（docs/plan/detailed/DetailedDesign-protocol-modules.md §1〜§3）。
 // ArduinoJson は cpp 側だけで使う。
 #pragma once
 
@@ -7,8 +7,9 @@
 
 #include "lift_decide.h"  // LiftDir・LiftState・StopReason・Ceiling*・ModuleRole
 
-// state を入れるバッファの大きさ。WP-LIFT-13 で、modules を上限まで並べ busy_label を
-// 最大にした state を実際に作って測った長さ（1770 バイト）に、余裕（約 1.3 倍）を持たせた値
+// state を入れるバッファの大きさ。WP-LIFT-18 で、modules を上限まで並べ busy_label を
+// 最大にし、state.arm も最大にした state を実際に作って測った長さ（WORST_BYTES バイト）に、
+// 余裕（約 1.3 倍）を持たせた値
 // （test_cmd_codec の test_state_worst_case_fits_text_max。names.md §5.1）
 constexpr size_t LIFT_STATE_TEXT_MAX = 2304;
 
@@ -62,6 +63,22 @@ struct ReleaseMsg {
 };
 
 bool decode_release(const char* text, ReleaseMsg* out);
+
+// arm（アームの制御器 → 昇降部。100 ms ごと。protocol-arm §4）。t == "arm" なら true。
+// out は真偽値ならそれ、欠けている・null・型違いは ArmTri::NUL（捨てない。捨てると最後の false のまま
+// 時間切れまで動ける）
+struct ArmMsg {
+  ArmTri out = ArmTri::NUL;
+};
+
+bool decode_arm(const char* text, ArmMsg* out);
+
+// arm_confirm（昇降部の画面 → 昇降部。protocol-arm §7）。t == "arm_confirm" で stop が整数なら true
+struct ArmConfirmMsg {
+  int stop = 0;
+};
+
+bool decode_arm_confirm(const char* text, ArmConfirmMsg* out);
 
 // ceiling（距離計を持つ上部モジュールが、止まっている間も送る。protocol-modules §2.3）。
 // hold に載る ceiling と同じ中身。読めなければ false（前の値を使い続ける）
