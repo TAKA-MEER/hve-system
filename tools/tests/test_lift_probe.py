@@ -310,3 +310,59 @@ async def test_probe_identity_reaches_the_lift_and_sensor_probe_lends_its_ceilin
     assert state["owner_operator"] == "auto" and state["ceiling"]["from"] == "hve-cam"
     await ws_cam.close()
     await ws_fk.close()
+
+
+# --- 測定機構（--role arm・--arm-out。protocol-arm §2.1・§4）---
+
+
+def test_arm_role_hello_is_automatic_without_a_ceiling_sensor():
+    hello = build_hello("fk-arm", "arm", "human", True)
+    assert (hello["role"], hello["operator"], hello["ceiling_sensor"]) == ("arm", "auto", False)
+
+
+@pytest.mark.parametrize("text,out", [("true", True), ("false", False), ("null", None)])
+def test_build_arm_carries_the_out_value(text, out):
+    message = lift_probe.build_arm(text)
+    assert message == {"t": "arm", "out": out}
+    assert message["out"] is out
+
+
+def test_arm_out_option_needs_the_arm_role_and_a_known_value():
+    args = parse_args(["ws://x/ws/module", "--role", "arm", "--arm-out", "false"])
+    assert (args.role, args.arm_out) == ("arm", "false")
+    assert parse_args(["ws://x/ws/module"]).arm_out is None
+    for bad in (["--arm-out", "true"], ["--role", "arm", "--arm-out", "maybe"]):
+        with pytest.raises(SystemExit):
+            parse_args(["ws://x/ws/module", *bad])
+
+
+@pytest.mark.parametrize("text,out", [("true", True), ("false", False), ("null", None)])
+async def test_probe_sends_arm_periodically_and_the_value_reaches_state_arm(
+        aiohttp_client, tmp_path, text, out):
+    import asyncio
+
+    import sys as _sys
+    _sys.path.insert(0, str(_PROBE_PATH.parent))
+    import fake_lift_server as fake
+
+    client = await aiohttp_client(fake.make_app(tmp_path, fake.FakeLift()))
+    args = parse_args(["ws://x/ws/module", "--name", "fk-arm", "--role", "arm", "--arm-out", text])
+    probe = lift_probe.Probe("x", initial_state(), True, 20, lift_probe.hello_from_args(args),
+                             arm_out=args.arm_out)
+    ws = await client.ws_connect("/ws/module")
+    task = asyncio.create_task(probe.send_loop(ws))
+    try:
+        state = await _states(ws, lambda s: s["arm"]["link"] is True)
+        # 周期ごとに送り続けている（1 回きりなら時間切れで通信できなくなる）。
+        # 時間切れより長いあいだ受け続け、ずっと通信できていることを見る
+        end = asyncio.get_running_loop().time() + fake.LIFT_ARM_LINK_TIMEOUT_MS / 1000 + 0.3
+        while asyncio.get_running_loop().time() < end:
+            state = await _states(ws, lambda s: True)
+            assert state["arm"]["link"] is True and state["reason"] != "ARM_LINK"
+    finally:
+        probe.quitting = True
+        task.cancel()
+    # null（分からない）は true に倒して出す
+    assert state["arm"]["out"] is (True if out is None else out)
+    assert state["modules"][0]["role"] == "arm"
+    await ws.close()
