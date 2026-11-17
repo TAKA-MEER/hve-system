@@ -166,7 +166,7 @@
 | **`ARRIVED`** | 昇降部（`goto`） | 目標の高さに着いた（`WP-LIFT-14`。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2） |
 | **`PREEMPTED`** | 昇降部（`goto.reason` だけ） | 取って代わられた（別の操作元が新しく押し始めた）。`state.reason` には出ない（`WP-LIFT-14`） |
 | **`TARGET_RANGE`** | 昇降部（`goto`） | `goto` の目標が 0 未満、または上端の閾値より上（`WP-LIFT-14`） |
-| **`ARM_LINK`** | 昇降部 | 測定機構の #4e（spec [Spec-safety.md](../spec/Spec-safety.md) §2。腕が出ていると最後に知った状態でアームの制御器と通信できなくなった）。**名前だけ取っておく。実装はアームの制御器とのつなぎ方（spec `H-M7`）が決まってから。**`ARM_CONFIRM`・`DRUM_LAG`（#4f・#4g）は 2026-11-14 に無くした |
+| **`ARM_LINK`** | 昇降部 | 測定機構の #4e（spec [Spec-safety.md](../spec/Spec-safety.md) §2。腕が出ていると最後に知った状態でアームの制御器と通信できなくなった。起動したとき覚えていた場合も）。**判定の先頭に置き、下降・物理ボタンも止める**（[-protocol-arm.md](DetailedDesign-protocol-arm.md) §8。`WP-LIFT-18`）。`ARM_CONFIRM`・`DRUM_LAG`（#4f・#4g）は 2026-11-14 に無くした |
 | `HOLD_TIMEOUT` | カメラモジュール | 画面からの操作が途絶えた |
 | `LINK_LOST` | カメラモジュール | 昇降部と繋がっていない |
 | **`IO_LOST`** | カメラモジュール | Arduino から行が来ない（ヨー・ピッチが動かない・天井が読めない） |
@@ -192,6 +192,18 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`ModuleRole`**（`CONTROL`・`OBSERVE`）・**`ModuleOperator`**（`HUMAN`・`AUTO`）・**`ModuleInfo`** | `lift_decide.h` | `hello` の `role`・`operator` と、`state.modules` の 1 要素（`LiftState::modules`・`module_count`・`owner_name`・`owner_operator`・`homed`・`ceiling_from`） |
 | **`HelloMsg`** の `role`・`op`・`busy_label`・`sensor_explicit`・`ip` | `cmd_codec.h` | `sensor_explicit` は `ceiling_sensor` を明示したか（天井の値の出どころにできるのは明示した接続だけ）。`ip` は JSON には載らず `main.cpp` が入れる |
 | **`LIFT_MODULE_LIST_MAX`**・**`LIFT_CONN_SLOTS`** | `lift_decide.h` | `state.modules` の長さ（`LIFT_MODULE_MAX_CONN` と同じ 6。`main.cpp` の `static_assert`）・`LiftController`／`LiftArbiter` が覚える接続の数（画面 4＋上部モジュール 6＋物理ボタン 1） |
+
+**測定機構（2026-11-17。fk-system が確かめ済み。`WP-LIFT-18`・`WP-LIFTUI-06`・`WP-CAM-15`）で足すもの**。フィールドは [-protocol-arm.md](DetailedDesign-protocol-arm.md) が正:
+
+| 名前 | 中身 |
+| --- | --- |
+| `hello` の `role` | **`arm`**（`ModuleRole::ARM`）を足す。1 本だけ受ける |
+| アームの制御器の名前 | **`fk-arm`** |
+| 昇降部の WS の `t` | **`arm`**（アームの制御器 → 昇降部。`out`: `true` / `false` / `null`）・**`arm_confirm`**（昇降部の画面 → 昇降部。`stop`: 確認の番号。`/ws/ui` からだけ） |
+| `state.arm` | `attached`・`link`・`confirm`（確認待ちなら番号、でなければ `null`）・`out`（[-protocol-arm.md](DetailedDesign-protocol-arm.md) §7 の表） |
+| **`decode_arm`**・**`decode_arm_confirm`**・**`LiftController::on_arm`**・**`LiftController::on_arm_confirm`** | `cmd_codec.h`・`lift_controller.h` |
+| **`arm_out_latched`** / **`kArmLatchNvsKey`**（`"arm_latch"`） | 「格納位置にない、または分からないと最後に知った」（1 ビット）・それを置く NVS の鍵（`LIFT_NVS_NAMESPACE` の下。`main.cpp`） |
+| **`arm_stop`** | #4e で止め始めるたびに 1 増やす確認の番号（起動ごとに 1 から） |
 
 **単体の操作でも天井で止める（2026-11-06。`WP-LIFT-15`・`WP-LIFTUI-04`・`WP-CAM-11`）で足すもの**。中身は [-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.5・[-protocol.md](DetailedDesign-protocol.md) §3:
 
@@ -242,6 +254,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`LIFT_NVS_NAMESPACE`** | `config.h` | `hve_lift_mm`（`WP-LIFT-06` で `hve_lift` から替える。% で保存した値を mm/s と読まないため） | [-protocol.md](DetailedDesign-protocol.md) §3 |
 | **`LIFT_UI_CLIENTS_MAX`** | `config.h` | 4 | **仮**（ESP32 のメモリ。超えた接続は閉じる） |
 | **`LIFT_MODULE_MAX_CONN`** | `config.h` | 6 | **仮**（2026-11-05。`/ws/module` の接続の上限。**超えた新しい接続をその場で閉じる**。ライブラリの `cleanupClients()` に古い接続を閉じさせない。[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.3。`WP-LIFT-13`） |
+| **`LIFT_ARM_LINK_TIMEOUT_MS`** | `lift_decide.h` | 1000 | **仮**（2026-11-17。最後の `arm` からこれだけ届かなければアームの制御器と通信できないとみなす。アームの制御器は 100 ms ごとに送る。[-protocol-arm.md](DetailedDesign-protocol-arm.md) §4。`WP-LIFT-18`） |
 | **`LIFT_GOTO_TOL_MM`** | `lift_decide.h` | 10 | **仮**（spec `H-M6`。目標の高さに「着いた」とみなす幅。`WP-LIFT-14`） |
 | `LIFT_STATE_TEXT_MAX` | **`cmd_codec.h`**（`config.h` から移した。native の試験が最大の `state` を作って測れるように） | 2304 | `modules` を 6 本並べ `busy_label` を 48 バイト・名前・IP・`fw` を最大にした `state` が **1770 バイト**。その約 1.3 倍（`test_state_worst_case_fits_text_max`。`WP-LIFT-13`） |
 | `LIFT_MDNS_NAME` / `LIFT_HTTP_PORT` | `config.h` | `hve-lift` / 80 | 旧版 |

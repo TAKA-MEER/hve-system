@@ -94,6 +94,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **段階 10（2026-11-16。カメラモジュールが ss-system に開く口。[-protocol-ss.md](DetailedDesign-protocol-ss.md)。2026-11-16 に ss-system が確かめた）**: `WP-IO-04` と `WP-VIDEO-05` は並べてよい。**互換は崩れない**（古い UnitV2 は `Y` 行を捨てる・古い `hve_camera` は `X-Frame-Age-Ms` を読まない）。`WP-CAM-14` は 2 つの取り決めがあれば並べて始められるが、マージは 2 つのあと。`WP-UI-06` は `WP-CAM-14` のあと。**実機に入ったら ss-system に知らせる。**
 
+**段階 11（2026-11-17。測定機構の #4e・確認ダイアログ・`H-X15`。[-protocol-arm.md](DetailedDesign-protocol-arm.md)。同日に fk-system が確かめた〈fk `af4db1a`〉）**: `WP-LIFT-18` が先。`WP-LIFTUI-06` と `WP-CAM-15` は取り決めが書いてあるので並べて始めてよいが、**マージは `WP-LIFT-18` のあと**。**互換**: 古い昇降部は `role: arm` を `observe` に倒し `arm` を捨てる（`state.arm` はどれも `null` のまま。fk のアームの制御器は腕を出さない）。古い画面は `confirm` を読まないので、**`WP-LIFT-18` と `WP-LIFTUI-06` は揃えて ESP32 に書く**（揃わないと #4e で止まったとき確認ダイアログが出ず、解けない）。**実機に入ったら fk-system に知らせる。**
+
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
 **2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
@@ -585,3 +587,62 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 - 読む節: [-protocol-ss.md](DetailedDesign-protocol-ss.md) §5、spec [Spec-ui.md](../spec/Spec-ui.md) §1.4・§1.6
 - 作るもの: `camera/web/app.js`（ボタンで `yaw_zero` を送る・ss が持ち主の間は `busy_label` を出す・ヨーの向き〈原点の前は「—」〉）・`index.html`・`style.css`・spec のモックアップ・**`docs/使い方.md`**（「カメラを機体の前に向けてから押す」）
 - 受け入れ: `node --test camera/web/tests/web.test.js`・スクロール検査・`browser_paths.js` が通る。**変異**: ボタンで `yaw_zero` を送らない／ss が動かしている間に `busy_label` を出さない／原点の前に 0° と出す → 赤
+
+### `WP-LIFT-18` 測定機構の #4e・確認・覚えておくこと（昇降部のファーム）
+
+- 読む節: spec [Spec-module.md](../spec/Spec-module.md) §3（測定機構の行）・§5、[Spec-safety.md](../spec/Spec-safety.md) §1.2・§2 #4e、[-protocol-arm.md](DetailedDesign-protocol-arm.md) 全部、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §1.1・§1.2・§3・§4、[DetailedDesign.md](DetailedDesign.md) §4.1 の判定の表、[-names.md](DetailedDesign-names.md) §4 の「測定機構」の表と §5.1 の `LIFT_ARM_LINK_TIMEOUT_MS`
+- 作るもの:
+  - `cmd_codec`: `hello` の `role: "arm"`（`ModuleRole::ARM`）。`decode_arm`（`t: "arm"`。`out` の欠け・型違いは `null`）・`decode_arm_confirm`（`t: "arm_confirm"`・`stop`）。`state.arm` の 4 つの欄を中身つきで出す（-protocol-arm §7 の表）
+  - `lift_controller`: `role: arm` の接続は 1 本だけ（新しい `arm` の `hello` が来たら古い方の接続番号を返して閉じさせる。最後の `out` と受けた時刻を引き継ぐ。-protocol-arm §2.2）。`operator` は `auto`・`ceiling_sensor` は `false` に固定。持ち主になったら `owner: arm`・`owner_name` は接続の名前。`arm` を受けた時刻と `out` を持ち、`LIFT_ARM_LINK_TIMEOUT_MS` で通信できないとみなす。**#4e を判定の先頭に置く**（持ち主・向きに関わらず止める。`ARM_LINK`。原点の前の下降・物理ボタンも止める）。`arm_out_latched` を持ち、立てる・下ろすを -protocol-arm §5 のとおりにする。**NVS に書く要求を `main.cpp` に返し、書けたと知らされてから `state.arm.out` に出す**。書けなければ #4e と同じに止める。確認の番号 `arm_stop` と `on_arm_confirm`（`/ws/ui` の接続からだけ・番号が合うときだけ）
+  - `src/main.cpp`: 起動時に NVS（`LIFT_NVS_NAMESPACE` の鍵 `kArmLatchNvsKey`）から `arm_out_latched` を読み、`LiftController` に渡す。書く要求が来たら書いて結果を返す（`loop()` の中で。WS のタスクから書かない）。`/ws/module` の `arm_confirm` は捨てる
+  - `lift_core_version` を上げる。-names.md の `LIFT_STATE_TEXT_MAX` を測り直す
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`-e esp32dev_manual` が成功。**次の変異がそれぞれ赤になる**（※ は `LiftController` と偽 HAL を通した試験で縛る。純関数の試験だけで済ませない）
+  1. ※ #4e で下降を止めない（上昇だけ止める）
+  2. ※ #4e が原点の前の下降より後に効く（高さが読めない間の下降が #4e で止まらない）
+  3. ※ #4e で物理ボタンの操作を止めない
+  4. ※ 最後に `out: false` と知っていて通信が切れたのに止める
+  5. ※ `out: null` を `false` と同じに扱う（`null` を受けたあと通信が切れても止めない）
+  6. ※ 通信できているかを接続が開いているかだけで見る（`arm` が来なくなっても、接続が開いていれば止めない）
+  7. ※ 起動したとき `arm_out_latched` が立っているのに、`arm` を受ける前に動かせる
+  8. ※ NVS に書けたと知らされる前に `state.arm.out` を `true` にする
+  9. ※ NVS に書けなかったのに止めない
+  10. ※ 接続が閉じた・時間切れで `arm_out_latched` を下ろす
+  11. ※ `/ws/module` から来た `arm_confirm` で解く
+  12. ※ 番号の合わない `arm_confirm` で解く（止め直したあと、前の番号の確認が遅れて届く）
+  13. ※ 確認で答えたあと `arm_out_latched` を下ろさない・`attached` を `null` に戻さない
+  14. ※ `arm` を受けても #4e が解けない（通信が戻ったら確認なしで動かせる）
+  15. ※ アームの接続を置き換えた瞬間を通信断とみなす（新しい接続がすぐ `arm` を送っても止まる）
+  16. ※ `role: arm` 以外の接続から来た `arm` を受ける
+  17. ※ アームの制御器の上昇に天井の判定が効かない（カメラモジュールの値で止まらない）
+  18. ※ アームの制御器が持ち主のとき `owner` が `arm`・`owner_name` が `fk-arm` にならない
+  19. `main.cpp` が起動時に NVS の値を `LiftController` に渡さない（**native で縛れないので、管理担当が実機で確かめる**: 腕を出した状態で電源を入れ直すと動かない）
+- **実機で管理担当が確かめる**（`WP-LIFTUI-06` と揃えて）: `lift_probe`（`--role arm`）で `out: true` を送ってから止める → 1 秒ほどで上げ下げとも止まり、昇降部の画面に確認ダイアログ／答えると動く／もう一度 `out: true` を送ったまま昇降部の電源を入れ直す → 原点の前の下降も物理ボタンも止まる／`out: false` を送ると解けて、次の再起動では止まらない
+
+### `WP-LIFTUI-06` 昇降部の画面・偽の昇降部・`lift_probe` に測定機構の確認
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§0.2（確認ダイアログの行）・§1.6（測定操作中・原点の前に腕が出ている）、[-protocol-arm.md](DetailedDesign-protocol-arm.md) §4・§6・§7・§8
+- 作るもの:
+  - 昇降部の画面 `firmware/lift/web/app.js`・`index.html`・`style.css`: **`state.arm.confirm` が番号のとき確認ダイアログを出す**（「測定機構を取り外した、または腕の安全を確かめた」に答えるボタンが `{"t":"arm_confirm","stop":<番号>}` を送る）。`confirm` が `null` になったら消す（通信が戻ったとき・別の端末が答えたとき）。測定機構の表示（付いているとみなしているか・通信・確認待ち）。止めた理由 `ARM_LINK` の文言。**原点の前に腕が出ている警告**（`height_ok: false` かつ `arm.link: true`・`arm.out: true`。止めない）。純関数の試験・スクロール検査（ダイアログを出した状態も）
+  - 偽の昇降部 `tools/fake_lift_server.py`: `role: arm`・`arm`・`arm_confirm`・時間切れ・#4e・覚えておくこと（ファイルに残さずプロセスの中でよい。`POST /api/fake` で「再起動したことにする」を足す）を `WP-LIFT-18` と同じ判定で
+  - `tools/lift_probe.py`: `--role arm` と `--arm-out true|false|null`（`arm` を 100 ms ごとに送る）
+  - **`docs/使い方.md`** の昇降部の画面の節（確認ダイアログが出たときにどうするか。腕を見て安全を確かめてから答える）
+- 受け入れ: `.venv/bin/python -m pytest tools/tests`・`node firmware/lift/web/tests/web.test.js`・スクロール検査が成功。**次の変異がそれぞれ赤になる**
+  1. ダイアログのボタンが `stop` を載せない・前の番号を載せる
+  2. `confirm` が `null` になってもダイアログが残る
+  3. 原点の前の警告を `arm.out` の `null` で出す・`arm.link` が `false` のときに出す
+  4. 偽の昇降部が #4e で下降を止めない
+  5. 偽の昇降部が `/ws/module` の `arm_confirm` で解く
+  6. `lift_probe --arm-out` の値が `arm` に載らない
+
+### `WP-CAM-15` カメラモジュールの画面に測定機構の #4e
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.2（確認ダイアログの行の「カメラモジュールの画面には…」）・§1.6、[-protocol-arm.md](DetailedDesign-protocol-arm.md) §7・§8
+- 作るもの:
+  - 画面 `camera/web/app.js`: 止めた理由 `ARM_LINK` のとき「測定機構と通信できません。昇降部の画面で確認してください」（確認はここではできない。ボタンを出さない）。持ち主が `arm` のとき `busy_label`（無ければ「アームの制御器」）。**原点の前に腕が出ている警告**（昇降部の画面と同じ条件）。純関数の試験
+  - `camera/hve_camera/control.py`: `state.lift` に `arm` をそのまま載せているか確かめ、足りなければ足す
+  - 偽の昇降部 `camera/hve_camera/hw/fake_lift.py`: `ARM_LINK` の `reason` と `arm` の欄を `POST /api/fake` で出せる
+  - **`docs/使い方.md`** のカメラモジュールの画面の節（`ARM_LINK` が出たら昇降部の画面を開く）
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests`・`node --test camera/web/tests/web.test.js`・スクロール検査が成功。**次の変異がそれぞれ赤になる**
+  1. `ARM_LINK` で「昇降部の画面で確認してください」を出さない
+  2. カメラモジュールの画面に確認のボタンを出す（`arm_confirm` を送る）
+  3. 原点の前の警告を `arm.link` が `false` のときに出す

@@ -2,7 +2,7 @@
 
 [ImplementationPlan.md](../ImplementationPlan.md) §6 の行 10。spec [Spec-module.md](../spec/Spec-module.md) §5（昇降部とアームの制御器のあいだの通信の取り決めは本システムが書き、fk-system が確かめる）・[Spec-safety.md](../spec/Spec-safety.md) §2 #4e・[Spec-ui.md](../spec/Spec-ui.md) §0.2（確認ダイアログ）・§1.6。
 **状態: 2026-11-17 に案を書いた。輸送路は同日にユーザーが決めた（`th-rpi-ap` を通す。spec [Spec-module.md](../spec/Spec-module.md) §6 `H-M7`）。同日に fk-system が確かめた（fk `af4db1a`。指摘 2 点を直した。§9）。作業パケットは段階 11（[-packets.md](DetailedDesign-packets.md)）。実装はまだ。**
-新しい名前は、確かめが済んだら [-names.md](DetailedDesign-names.md) へ移す（[-protocol-modules.md](DetailedDesign-protocol-modules.md) と同じ手順）。
+新しい名前は [-names.md](DetailedDesign-names.md) へ移した（2026-11-17）。
 
 - 昇降部の口は [-protocol-modules.md](DetailedDesign-protocol-modules.md)（確かめ済み）を**そのまま使い、足すだけ**にする（安全の判定の入口を 1 つに保つ。spec §1「口の名前と形」）。
 - アームの制御器のファーム（ドラム・腕の画面を含む）は fk-system が書く（spec §5）。この案は、昇降部から見えるところだけを決める。
@@ -162,4 +162,4 @@ spec は直した（[Spec-module.md](../spec/Spec-module.md) §5・§6 `H-M7`・
 | 腕の画面を `th-rpi-ap` を通さずに開く形 | fk-system |
 | 引っかかりが外れて昇降機が落ちるとき、腕が出ていたら | spec `H-X13` |
 | 周期・時間切れの実際の値 | 実機（仮値。`WP-MEAS-03` と一緒に） |
-| 作業パケット | 確かめが済んだら [-packets.md](DetailedDesign-packets.md) に切る（昇降部のファーム・昇降部の画面〈確認ダイアログ・腕の表示〉・カメラモジュールの画面〈腕の表示〉・偽の昇降部） |
+| 作業パケット | [-packets.md](DetailedDesign-packets.md) 段階 11（`WP-LIFT-18`・`WP-LIFTUI-06`・`WP-CAM-15`） |
