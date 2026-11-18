@@ -96,7 +96,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **段階 11（2026-11-17。測定機構の #4e・確認ダイアログ・`H-X15`。[-protocol-arm.md](DetailedDesign-protocol-arm.md)。同日に fk-system が確かめた〈fk `af4db1a`〉）**: `WP-LIFT-18` が先。`WP-LIFTUI-06` と `WP-CAM-15` は取り決めが書いてあるので並べて始めてよいが、**マージは `WP-LIFT-18` のあと**。**互換**: 古い昇降部は `role: arm` を `observe` に倒し `arm` を捨てる（`state.arm` はどれも `null` のまま。fk のアームの制御器は腕を出さない）。古い画面は `confirm` を読まないので、**`WP-LIFT-18` と `WP-LIFTUI-06` は揃えて ESP32 に書く**（揃わないと #4e で止まったとき確認ダイアログが出ず、解けない）。**実機に入ったら fk-system に知らせる。**
 
-**段階 12（2026-11-18。ピッチの遊びの片寄せ。[DetailedDesign.md](DetailedDesign.md) §4.3.1）**: `WP-CAM-16` だけ。**`aim` の `ARRIVED` の意味を変えるので、ss-system が確かめてから始める。**UNO のファームは変えない。実機に入ったら ss-system に知らせる。
+**段階 12（2026-11-18。ピッチの遊びの片寄せ。[DetailedDesign.md](DetailedDesign.md) §4.3.1）**: `WP-CAM-16` だけ。`aim` の `ARRIVED` の意味を変える（2026-11-18 に ss-system が確かめた。ss は `ARRIVED` のあと 0.5 s 待って撮る・`X-Still-Ms` が `X-Frame-Age-Ms` より短い静止画は捨てる）。UNO のファームは変えない。実機に入ったら ss-system に知らせる。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
