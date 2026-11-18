@@ -475,6 +475,9 @@ async def test_aim_goes_through_backlash_and_reports_the_target() -> None:
         await rig.step()
     assert rig.hw.pitch_history == [13.0, 10.0], rig.hw.pitch_history
     assert rig.loop.motion_at_ms == rig.clock.now_ms  # 戻りでも数え直す
+    assert not rig.loop.pitch_arrived(rig.clock.now_ms)  # 戻りの待ちがまだ
+    for _ in range(4):
+        await rig.step()
     assert rig.loop.pitch_arrived(rig.clock.now_ms)
 
 
