@@ -96,6 +96,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **段階 11（2026-11-17。測定機構の #4e・確認ダイアログ・`H-X15`。[-protocol-arm.md](DetailedDesign-protocol-arm.md)。同日に fk-system が確かめた〈fk `af4db1a`〉）**: `WP-LIFT-18` が先。`WP-LIFTUI-06` と `WP-CAM-15` は取り決めが書いてあるので並べて始めてよいが、**マージは `WP-LIFT-18` のあと**。**互換**: 古い昇降部は `role: arm` を `observe` に倒し `arm` を捨てる（`state.arm` はどれも `null` のまま。fk のアームの制御器は腕を出さない）。古い画面は `confirm` を読まないので、**`WP-LIFT-18` と `WP-LIFTUI-06` は揃えて ESP32 に書く**（揃わないと #4e で止まったとき確認ダイアログが出ず、解けない）。**実機に入ったら fk-system に知らせる。**
 
+**段階 12（2026-11-18。ピッチの遊びの片寄せ。[DetailedDesign.md](DetailedDesign.md) §4.3.1）**: `WP-CAM-16` だけ。**`aim` の `ARRIVED` の意味を変えるので、ss-system が確かめてから始める。**UNO のファームは変えない。実機に入ったら ss-system に知らせる。
+
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
 **2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
@@ -646,3 +648,17 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   1. `ARM_LINK` で「昇降部の画面で確認してください」を出さない
   2. カメラモジュールの画面に確認のボタンを出す（`arm_confirm` を送る）
   3. 原点の前の警告を `arm.link` が `false` のときに出す
+
+### `WP-CAM-16` ピッチの遊びの片寄せ
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.3.1、[-protocol-ss.md](DetailedDesign-protocol-ss.md) §2.1（着いた）・§3（`X-Still-Ms`）、[-power.md](DetailedDesign-power.md)（省電力から戻る）、spec [Spec-ui.md](../spec/Spec-ui.md) §1.3
+- 作るもの: `camera/hve_camera/` に片寄せの状態機械（純関数か小さなクラス）・`control.py`（画面のボタンと `set_pitch_target` の両方をそこへ通す。報告する目標角と指令を分ける。指令が変わるたびに `mark_motion`）・`module_port.py`（ピッチの着いた判定を待ち時間のあとに）・起動・UNO の再起動（`yaw_epoch`）・省電力から戻ったときの片寄せ・`params.toml`（4 つの名前を足し `provisional` へ）・[-names.md](DetailedDesign-names.md) §5・偽物のモード
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests` が通る。**偽の UNO（`fake_hw`）に送られたピッチの指令の列を記録し、通しの試験で縛る。**次の変異がそれぞれ赤（呼び出し側で縛る）:
+  1. `aim` が片寄せを通らない（目標角をそのまま出す）
+  2. 画面のボタンを離しても片寄せしない
+  3. 押している間に片寄せする（毎周期行き過ぎる）
+  4. 戻りの待ち時間の前に `ARRIVED` にする
+  5. 行き過ぎ点・戻りで `mark_motion` しない
+  6. 起動・UNO の再起動・省電力から戻ったときに片寄せしない（3 つ別々）
+  7. 行き過ぎ点を範囲に丸めない
+  8. `state.pitch_deg` に行き過ぎ点を出す

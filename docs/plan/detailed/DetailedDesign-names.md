@@ -322,6 +322,10 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`snapshot_wake_wait_ms`** | 3000 | **仮**（取り込みを止めている間の静止画の要求で、新しい 1 枚を待つ上限） |
 | **`aim_cmd_timeout_ms`** | 600 | **仮**（ss の `aim` が途切れてから止めるまで。`WP-CAM-14`） |
 | **`aim_yaw_tol_deg`** | 1 | **仮**（ss の `aim` でヨーが着いたとみなす幅） |
+| **`pitch_approach_sign`** | -1 | **仮**（`H-V17`。ピッチが目標角へ近づく向き。-1 は値が減る向き。DetailedDesign §4.3.1） |
+| **`pitch_backlash_deg`** | 3 | **仮**（`H-V17`。逆の向きから来たときに行き過ぎる量） |
+| **`pitch_backlash_settle_ms`** | 300 | **仮**（行き過ぎ点・戻りに着くまでの待ちの固定分） |
+| **`pitch_servo_dps`** | 200 | **仮**（待ち時間の見積もりに使うサーボの速さ） |
 | **`module_ws_max_conn`** | 4 | **仮**（カメラモジュールの `/ws/module` の上限。超えた新しい接続は閉じる） |
 | `snapshot_min_interval_ms` | 200 | spec [Spec-ui.md](../spec/Spec-ui.md) §1.5.1（ss の静止画は 1 秒 5 枚まで。早すぎれば `429`） |
 
