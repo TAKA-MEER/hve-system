@@ -13,7 +13,8 @@
 - **画面のボタンは押している間は片寄せしない**（目標をそのまま追う）。離したとき、最後に動いた向きが逆なら
   **1 回だけ**行き過ぎて戻る。
 - **向きが分からないときは逆から来たとみなして片寄せする**（起動・UNO の再起動・省電力から戻ったとき。
-  `force_unknown()` を呼ぶ側が決める）。
+  `force_unknown()` を呼ぶ側が決める）。**このときサーボの実際の位置は分からないので、行き過ぎ点への待ちは
+  可動範囲の全幅（`pitch_max_deg − pitch_min_deg`）を動くとして見積もる**（普通の逆向きの片寄せは今の指令からの差）。
 
 **時刻は引数で受ける純関数のクラス。**ハードウェアにも時計にも触らない（ホストで試験する）。
 
@@ -135,11 +136,13 @@ class PitchBacklash:
         """向きが分からない状態に戻し、今の目標へ逆から来たとみなして片寄せする。
 
         起動・UNO の再起動（`yaw_epoch` の変化）・省電力から戻ったとき（力を抜いて垂れている）に呼ぶ。
+        **サーボの実際の位置は分からない**（UNO の再起動では 0° へ跳び、省電力では垂れている）ので、
+        行き過ぎ点への待ちは**可動範囲の全幅**を動くとして見積もる。
         """
         self._unknown = True
         if self._holding:
             return  # 押している間は片寄せしない（離したときの規則で扱う）
-        self._plan(float(now_ms), assume_reverse=True)
+        self._plan(float(now_ms), assume_reverse=True, full_span=True)
 
     # --- 周期 ----------------------------------------------------------------------------------------
 
@@ -161,8 +164,11 @@ class PitchBacklash:
 
     # --- 中身 ----------------------------------------------------------------------------------------
 
-    def _plan(self, now_ms: float, assume_reverse: bool) -> None:
-        """今の指令から目標へ向かう計画を立てる。指令はすぐ置く（送るのは `step()` の呼び出し側）。"""
+    def _plan(self, now_ms: float, assume_reverse: bool, full_span: bool = False) -> None:
+        """今の指令から目標へ向かう計画を立てる。指令はすぐ置く（送るのは `step()` の呼び出し側）。
+
+        `full_span` は行き過ぎ点への待ちを可動範囲の全幅を動くとして見積もる（向きが分からないとき）。
+        """
         target = self._target
         if not assume_reverse and self._command != target:
             direction = 1 if target > self._command else -1
@@ -173,7 +179,10 @@ class PitchBacklash:
         if assume_reverse:
             overshoot = self._clamp(target - self._sign * self._backlash_deg)
             if overshoot != target:
-                wait = self._wait_ms(overshoot, self._command)
+                if full_span:
+                    wait = self._settle_ms + (self._max_deg - self._min_deg) / self._dps * 1000.0
+                else:
+                    wait = self._wait_ms(overshoot, self._command)
                 self._set_command(overshoot)
                 self._phase = _OVERSHOOT
                 self._leg_done_at_ms = now_ms + wait

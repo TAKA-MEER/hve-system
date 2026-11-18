@@ -499,7 +499,10 @@ async def test_startup_backlashes_on_the_first_step_without_any_operation() -> N
     await rig.step()
     assert rig.hw.pitch_history == [3.0], rig.hw.pitch_history  # 行き過ぎ点（0 − (-1) × 3）
     assert rig.loop.pitch_deg == 0.0  # 報告は目標角
-    for _ in range(10):
+    for _ in range(6):  # 全幅（90°）の待ち: 300 + 90/200×1000 = 750 ms。まだ戻らない
+        await rig.step()
+    assert rig.hw.pitch_history == [3.0], rig.hw.pitch_history
+    for _ in range(4):
         await rig.step()
     assert rig.hw.pitch_history == [3.0, 0.0], rig.hw.pitch_history
 

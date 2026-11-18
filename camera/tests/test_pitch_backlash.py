@@ -116,6 +116,18 @@ def test_ui_hold_follows_directly_and_release_backlashes_once() -> None:
     assert pitch2.arrived(100)
 
 
+def test_force_unknown_uses_the_full_span_for_the_overshoot_wait() -> None:
+    """向きが分からないときは可動範囲の全幅（90°）を動くとして見積もる（指令からの差 3° でない）。"""
+    pitch = make()
+    pitch.force_unknown(0)
+    assert pitch.command == 3
+    # 行き過ぎ点への待ち: 300 + 90/200×1000 = 750
+    assert pitch.step(749) == 3
+    assert pitch.step(750) == 0  # 戻りの指令
+    assert not pitch.arrived(750)
+    assert pitch.arrived(750 + 300 + 3 / 200 * 1000)  # 戻りの待ちは今の式
+
+
 def test_target_change_mid_backlash_redoes_from_the_current_command() -> None:
     pitch = make()
     pitch.set_target(10, 0)
