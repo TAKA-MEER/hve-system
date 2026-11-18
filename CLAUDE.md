@@ -9,7 +9,7 @@ th-system（`../th-system`）の仕様書が「範囲外（別担当）」とし
 **カメラ昇降のピッチ・ヨー・高さ**を担当する（th-system `Spec.md` §1・`Spec-onsite.md` §7.1）。
 
 **2026-09-29 時点で、PC だけでできる実装（昇降部の判定と ESP32 の配線・カメラ部の制御・映像・画面・ラズパイの実物の層）は済み。実機での確認はまだ**（[ImplementationPlan.md](docs/plan/ImplementationPlan.md) §1・[docs/試験項目.md](docs/試験項目.md)）。開発体制は th-system と同じにしてある
-（文書の役割分担・herdr／orca ＋ opencode による実装・受け入れ検査・git 運用）。
+（文書の役割分担・実装エージェントへの委任・受け入れ検査・git 運用）。
 **構成**: 昇降部（ESP32 ＋ MD10C ＋ 高さの HC-SR04）と無線カメラ部（ラズパイ 4 ＋ 沼津高専 MIRS 由来のシールド基板・Web カメラ・ヨー＝28BYJ-48/ULN2003・ピッチ＝SG90・天井の SRF02（I2C）・モバイルバッテリ）。無線は `th-rpi-ap` 経由（[Spec.md](docs/plan/archive/v1/spec/Spec.md) §5・[DetailedDesign-hardware.md](docs/plan/archive/v1/detailed/DetailedDesign-hardware.md)）。
 
 **2026-10-06 から、使用できる機器が増えたため設計から見直している（ブランチ `redesign/v2` で進め、2026-10-20 に `main` へマージしてブランチは消した。以降は `main` から切る。GitHub Pages は `main` の `docs/` を公開する）。**
@@ -66,11 +66,13 @@ th-system（`../th-system`）の仕様書が「範囲外（別担当）」とし
 **正本は [docs/plan/ImplementationPlan.md](docs/plan/ImplementationPlan.md) §2。着手前に読む。**
 ここには要点だけ書く。
 
-- **「実装して」と言われたら自分でコードを書かない。**ブリーフを **opencode** に渡して投げる
+- **「実装して」と言われたら自分でコードを書かない。**ブリーフを実装エージェントに渡して投げる
   （手順・落とし穴は ImplementationPlan §2.1）。体数は固定しない。
-  **窓口は herdr と orca の 2 つ**（2026-10-01 から th-system で乗り換えを検討中。orca は th-system で試用済み）。
-  **いま開いている方を環境変数で見分けて使う**:
-  `TERM_PROGRAM=Orca`／`ORCA_TERMINAL_HANDLE` があれば orca（`orca worktree create --setup skip --agent opencode`）、
+  **実装エージェントの優先順は codex → DeepAI → opencode → Sonnet のサブエージェント**（2026-11-18 ユーザー決定）。
+  上が使えない（枠が尽きた・起動しない）ときだけ次へ移る。
+  codex・opencode は orca／herdr の端末で動かす（`orca worktree create --setup skip --agent codex`）。DeepAI は `deepai-code-dispatch` スキル（MCP `deepai-code`）で投げる。
+  **orca と herdr は、いま開いている方を環境変数で見分けて使う**:
+  `TERM_PROGRAM=Orca`／`ORCA_TERMINAL_HANDLE` があれば orca、
   `HERDR_PANE_ID`／`HERDR_ENV` があれば herdr（`ImplementAgent` タブ・`herdr pane split`）。
 - **何をやるかは ImplementationPlan §6。**先頭から取る（2026-10-06 に v2 のパケットで書き直した）。
   **取る前に `git log --merges` と突き合わせ、マージ・実機確認・台帳の変更のたびに計画書を更新する**（§2.3「計画書を都度更新する」）。
