@@ -107,6 +107,8 @@ class ControlLoop:
 
         #: ピッチの遊びの片寄せの状態機械。報告する目標角（`pitch_deg`）とサーボへの指令を分ける
         self._pitch = PitchBacklash(params)
+        # 起動したときは向きが分からない（`aim` やボタンを待たず、最初の周期で片寄せする）
+        self._pitch.force_unknown(clock())
         #: 最後にサーボへ出した指令（変わったときだけ `set_pitch` を呼ぶため）
         self._last_pitch_cmd = 0.0
         #: 前の `step()` で画面のピッチのボタンを押していたか（離したときの片寄せに使う）

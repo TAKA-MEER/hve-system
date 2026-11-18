@@ -492,6 +492,18 @@ async def test_aim_overshoot_is_clamped_to_the_range() -> None:
     assert rig.hw.pitch_history == [45.0, 44.0], rig.hw.pitch_history
 
 
+async def test_startup_backlashes_on_the_first_step_without_any_operation() -> None:
+    """起動したときは `aim` やボタンを待たず、最初の `step()` で片寄せする。"""
+    rig = Loop()
+    assert rig.hw.pitch_history == [], "まだ何も出していない"
+    await rig.step()
+    assert rig.hw.pitch_history == [3.0], rig.hw.pitch_history  # 行き過ぎ点（0 − (-1) × 3）
+    assert rig.loop.pitch_deg == 0.0  # 報告は目標角
+    for _ in range(10):
+        await rig.step()
+    assert rig.hw.pitch_history == [3.0, 0.0], rig.hw.pitch_history
+
+
 async def test_startup_epoch_and_power_return_all_backlash() -> None:
     rig = Loop()
     # 起動: 目標が今の指令と同じでも行き過ぎて戻る
