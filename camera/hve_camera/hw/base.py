@@ -81,5 +81,9 @@ class HardwareBase(ABC):
         """UNO の再起動（`B` 行）を受けた回数。**変わったら累計の数え始めが変わった**（ヨーの原点を捨てる）。"""
         return 0
 
+    def get_power_mode(self) -> str:
+        """いまの省電力の段階（`POWER_ACTIVE`・`POWER_SETTLING`・`POWER_SAVING`）。片寄せの「向きが分からない」検知に使う。"""
+        return POWER_ACTIVE
+
     async def close(self) -> None:
         """ハードウェアを片付ける。当面は何もしない（実物は `WP-CAM-03`）。"""

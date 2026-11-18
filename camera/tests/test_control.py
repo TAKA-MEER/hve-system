@@ -446,6 +446,70 @@ async def test_unknown_axis_and_speed_are_ignored() -> None:
     assert rig.loop.hold("lift_up", "fast") is False
 
 
+async def test_pitch_button_no_backlash_while_holding_release_backlashes_once() -> None:
+    """画面のボタンは押している間片寄せしない。離したとき最後の向きが逆なら 1 回だけ。"""
+    rig = Loop()
+    rig.loop.hold("pitch_up", 10)
+    for _ in range(3):
+        await rig.step()
+    assert rig.hw.pitch_history == [1.0, 2.0, 3.0], rig.hw.pitch_history
+    rig.loop.release()
+    await rig.step()  # 離した。最後の向き（増える向き）が逆なので 1 回だけ行き過ぎて戻る
+    assert rig.hw.pitch_history[-1] == 6.0  # 行き過ぎ点（3 + 3）
+    assert rig.loop.pitch_deg == 3.0  # 報告する目標角は行き過ぎ点でない
+    for _ in range(5):
+        await rig.step()
+    assert rig.hw.pitch_history[-1] == 3.0  # 戻り
+
+
+async def test_aim_goes_through_backlash_and_reports_the_target() -> None:
+    """`set_pitch_target`（`aim`）は片寄せを通る。行き過ぎ中も報告は目標角。"""
+    rig = Loop()
+    await rig.loop.set_pitch_target(10)
+    assert rig.hw.pitch_history == [], "置いただけではサーボへ出さない（`step()` が出す）"
+    await rig.step()
+    assert rig.hw.pitch_history == [13.0]  # 行き過ぎ点（起動時は向きが分からないので逆とみなす）
+    assert rig.loop.build_state(1)["pitch_deg"] == 10.0, "報告は行き過ぎ点でなく目標角"
+    assert rig.loop.motion_at_ms == rig.clock.now_ms  # 行き過ぎ点で静止の時刻を数え直す
+    for _ in range(3):  # 行き過ぎ点への待ち（365 ms）が過ぎた周期で戻りの指令を出す
+        await rig.step()
+    assert rig.hw.pitch_history == [13.0, 10.0], rig.hw.pitch_history
+    assert rig.loop.motion_at_ms == rig.clock.now_ms  # 戻りでも数え直す
+    assert rig.loop.pitch_arrived(rig.clock.now_ms)
+
+
+async def test_startup_epoch_and_power_return_all_backlash() -> None:
+    """向きが分からないとき（起動・UNO の再起動・省電力から戻ったとき）逆とみなして片寄せする。"""
+    rig = Loop()
+    # 起動: 目標が今の指令と同じでも行き過ぎて戻る
+    await rig.loop.set_pitch_target(0)
+    await rig.step()
+    assert rig.hw.pitch_history == [3.0], rig.hw.pitch_history
+    for _ in range(10):
+        await rig.step()
+    assert rig.hw.pitch_history == [3.0, 0.0]
+
+    # UNO の再起動（`yaw_epoch` の変化）
+    rig.hw.pitch_history.clear()
+    rig.hw.reboot_uno()
+    await rig.step()
+    assert rig.hw.pitch_history == [3.0], rig.hw.pitch_history
+    for _ in range(10):
+        await rig.step()
+    assert rig.hw.pitch_history == [3.0, 0.0]
+
+    # 省電力から戻ったとき（力を抜いて垂れている）
+    rig.hw.pitch_history.clear()
+    await rig.hw.set_power_mode("saving", 0.0)
+    await rig.step()
+    await rig.hw.set_power_mode("active", 0.0)
+    await rig.step()
+    assert rig.hw.pitch_history == [3.0], rig.hw.pitch_history
+    for _ in range(10):
+        await rig.step()
+    assert rig.hw.pitch_history == [3.0, 0.0]
+
+
 async def test_clamp_zoom() -> None:
     assert clamp_zoom(2, PARAMS) == 2.0
     assert clamp_zoom(99, PARAMS) == 4.0

@@ -28,8 +28,9 @@ from typing import Any, Callable, Mapping, Optional
 
 from hve_camera.axes import clamp_speed, pitch_step, yaw_step_rate
 from hve_camera.ceiling import CeilingReading, CeilingStatus
-from hve_camera.hw.base import HardwareBase
+from hve_camera.hw.base import POWER_ACTIVE, HardwareBase
 from hve_camera.lift_link import LiftPort
+from hve_camera.pitch_backlash import PitchBacklash
 
 log = logging.getLogger(__name__)
 
@@ -104,8 +105,15 @@ class ControlLoop:
         #: その `hold` を送った画面（`None` は試験などの直接操作）
         self._owner: Any = None
 
-        #: ピッチの現在の角度
-        self._pitch_deg = 0.0
+        #: ピッチの遊びの片寄せの状態機械。報告する目標角（`pitch_deg`）とサーボへの指令を分ける
+        self._pitch = PitchBacklash(params)
+        #: 最後にサーボへ出した指令（変わったときだけ `set_pitch` を呼ぶため）
+        self._last_pitch_cmd = 0.0
+        #: 前の `step()` で画面のピッチのボタンを押していたか（離したときの片寄せに使う）
+        self._pitch_axis_holding = False
+        #: 最後に見た UNO の再起動の回数と省電力の段階（変わったら向きが分からない。`force_unknown`）
+        self._last_yaw_epoch = hw.yaw_epoch()
+        self._last_power_mode = hw.get_power_mode()
         #: ピッチ的可動範囲の端にいる理由（`AXIS_LIMIT` か `NONE`）
         self._pitch_reason = "NONE"
 
@@ -166,20 +174,25 @@ class ControlLoop:
 
     @property
     def pitch_deg(self) -> float:
-        """ピッチの目標角（実際の角度ではない）。"""
-        return self._pitch_deg
+        """ピッチの**目標角**（実際の角度ではない。行き過ぎ中の値は出さない）。"""
+        return self._pitch.target
+
+    def pitch_arrived(self, now_ms: float) -> bool:
+        """ピッチが目標角に着いたとみなしてよいか（戻りの待ちが過ぎたら真。`aim` の `ARRIVED` に使う）。"""
+        return self._pitch.arrived(now_ms)
 
     def mark_motion(self) -> None:
         """ヨー・ピッチが動いた（目標が変わった）時刻を、いまにする（`X-Still-Ms`）。"""
         self.motion_at_ms = self._clock()
 
     async def set_pitch_target(self, angle_deg: float) -> None:
-        """ピッチの目標角を直接置いてサーボへ出す（`aim`。範囲は呼び出し側が先に確かめる）。"""
-        if float(angle_deg) != self._pitch_deg:
-            self.mark_motion()
-        self._pitch_deg = float(angle_deg)
+        """`aim` のピッチ目標角を置く（範囲は呼び出し側が先に確かめる）。
+
+        **置いただけではサーボへ出さない。**片寄せの状態機械が行き過ぎ点・戻りを決め、
+        `step()` が指令を出す（`mark_motion()` は指令が変わるたびに `step()` で数え直す）。
+        """
+        self._pitch.set_target(float(angle_deg), self._clock())
         self._pitch_reason = "NONE"
-        await self._hw.set_pitch(self._pitch_deg)
 
     async def drive_aim_yaw(self, signed_dps: float) -> None:
         """`aim` のヨーを回す（正が左）。0 なら止める。**画面の操作が無い間だけ効く**（`_step_axes`）。"""
@@ -235,7 +248,7 @@ class ControlLoop:
         await self._step_lift(axis, holding, speed, now)
 
         # 2: ピッチとヨー
-        await self._step_axes(axis, speed, dt_ms)
+        await self._step_axes(axis, speed, dt_ms, now)
 
         # 3: 天井を読む。**指令を送ったあと**に読む。
         reading = await self._hw.read_ceiling()
@@ -302,19 +315,43 @@ class ControlLoop:
             return "MEASURED", reading.distance_mm, age_ms
         return reading.status.value, None, age_ms
 
-    async def _step_axes(self, axis: Optional[str], speed: float, dt_ms: float) -> None:
-        """ピッチを積分してサーボへ、ヨーは押している間だけ回す。"""
+    async def _step_axes(
+        self, axis: Optional[str], speed: float, dt_ms: float, now: float
+    ) -> None:
+        """ピッチを積分して片寄せの状態機械へ、ヨーは押している間だけ回す。"""
+        # 向きが分からない状態になったら（UNO の再起動・省電力から戻ったとき）、逆から来たとみなして片寄せする
+        epoch = self._hw.yaw_epoch()
+        if epoch != self._last_yaw_epoch:
+            self._last_yaw_epoch = epoch
+            self._pitch.force_unknown(now)
+        mode = self._hw.get_power_mode()
+        if mode != self._last_power_mode:
+            was_saving = self._last_power_mode != POWER_ACTIVE
+            self._last_power_mode = mode
+            if was_saving and mode == POWER_ACTIVE:
+                # 力を抜いて垂れているので、向きは分からない
+                self._pitch.force_unknown(now)
+
         if axis in _PITCH_AXES:
             signed = speed if axis == "pitch_up" else -speed
-            before = self._pitch_deg
-            self._pitch_deg, self._pitch_reason = pitch_step(
-                self._pitch_deg, signed, dt_ms, self._params
+            new_target, self._pitch_reason = pitch_step(
+                self._pitch.target, signed, dt_ms, self._params
             )
-            if self._pitch_deg != before:
-                self.mark_motion()
-            await self._hw.set_pitch(self._pitch_deg)
+            # 押している間は片寄せしない（目標をそのまま追う）
+            self._pitch.ui_follow(new_target, now)
         else:
             self._pitch_reason = "NONE"
+            if self._pitch_axis_holding:
+                # 離したとき、最後の向きが逆なら 1 回だけ行き過ぎて戻る
+                self._pitch.ui_release(now)
+        self._pitch_axis_holding = axis in _PITCH_AXES
+
+        # 片寄せの状態機械を回し、指令が変わったときだけサーボへ出す（そのたびに静止の時刻を数え直す）
+        cmd = self._pitch.step(now)
+        if cmd != self._last_pitch_cmd:
+            self.mark_motion()
+            await self._hw.set_pitch(cmd)
+            self._last_pitch_cmd = cmd
 
         if axis in _YAW_AXES:
             steps_per_s, direction = yaw_step_rate(speed, axis, self._params)
@@ -390,7 +427,7 @@ class ControlLoop:
                 "ok": ceiling_ok,
                 "reason": ceiling_reason,
             },
-            "pitch_deg": round(self._pitch_deg, 3),
+            "pitch_deg": round(self._pitch.target, 3),
             "zoom": self._zoom,
             # 画面は映像（hve_video）の URL を組み立てるのにこのポートが要る（protocol §2.4）
             "video_port": int(self._params["video_port"]),
