@@ -481,8 +481,18 @@ async def test_aim_goes_through_backlash_and_reports_the_target() -> None:
     assert rig.loop.pitch_arrived(rig.clock.now_ms)
 
 
+async def test_aim_overshoot_is_clamped_to_the_range() -> None:
+    """行き過ぎ点は `pitch_min_deg`〜`pitch_max_deg` に丸める（44 の行き過ぎは 47 → 45）。"""
+    rig = Loop()
+    await rig.loop.set_pitch_target(44)
+    await rig.step()
+    assert rig.hw.pitch_history == [45.0], rig.hw.pitch_history
+    for _ in range(10):
+        await rig.step()
+    assert rig.hw.pitch_history == [45.0, 44.0], rig.hw.pitch_history
+
+
 async def test_startup_epoch_and_power_return_all_backlash() -> None:
-    """向きが分からないとき（起動・UNO の再起動・省電力から戻ったとき）逆とみなして片寄せする。"""
     rig = Loop()
     # 起動: 目標が今の指令と同じでも行き過ぎて戻る
     await rig.loop.set_pitch_target(0)
