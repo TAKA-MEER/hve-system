@@ -10,7 +10,8 @@
    画面が押せば取って代わり、`aim` は `PREEMPTED`（`preempt_by_ui()`）。
 2. **着いたら `ARRIVED` にして持ち主を離す。**そのあと同じ `press` では動かない（`press` が同じなら捨てる）。
 3. **ピッチは範囲の外を `TARGET_RANGE` で受け付けない**（丸めない。ss は目標角を実際の角度として使う）。
-   範囲の中なら、目標角を渡した周期で着いたとみなす。
+   範囲の中なら、片寄せの**戻りの指令を出してから見積もった待ち時間が過ぎたら**着いたとみなす
+   （正しい向きから来たときも見積もりだけ待つ。DetailedDesign §4.3.1）。
 4. **ヨーは原点を合わせる前は `YAW_UNKNOWN` で受け付けない。**近い回り方で `yaw_dps` の速さで回し、
    `aim_yaw_tol_deg` 以内で止める。目標に近づくと 1 周期で目標を越えない速さに絞る。
 5. **途切れ（`aim_cmd_timeout_ms`）は `CMD_TIMEOUT`・`release` は `CMD_STOP`・接続が閉じたら `OWNER_GONE`・
@@ -176,7 +177,9 @@ class ModulePort:
         if not self._live:
             self._live = True
         self.record = self._make_record(conn, aim["press"], "MOVING", "NONE")
-        if pitch is not None and pitch != self._control.pitch_deg:
+        if pitch is not None:
+            # 同じ目標を繰り返し送っても片寄せはやり直さない（向きが分かったあと）。
+            # 起動したときなど向きが分からない間は、同じ角度の `aim` でも片寄せする
             await self._control.set_pitch_target(pitch)
         await self._progress()
 
@@ -242,10 +245,16 @@ class ModulePort:
         await self._progress()
 
     async def _progress(self) -> None:
-        """ヨーを目標へ向ける。両軸が着いたら `ARRIVED` にして持ち主を離す。"""
+        """ヨーを目標へ向ける。両軸が着いたら `ARRIVED` にして持ち主を離す。
+
+        ピッチは戻りの指令を出してから見積もった待ち時間が過ぎたら着いたとみなす
+        （正しい向きから来たときも見積もりだけ待つ）。
+        """
         if not self._live:
             return
         done = True
+        if self._t_pitch is not None and not self._control.pitch_arrived(self._clock()):
+            done = False
         if self._t_yaw is not None:
             current = self._yaw.deg()
             if current is None:

@@ -68,6 +68,9 @@ class FakeHardware(HardwareBase):
     def yaw_epoch(self) -> int:
         return self._yaw_epoch
 
+    def get_power_mode(self) -> str:
+        return self.power_mode
+
     def reboot_uno(self) -> None:
         """偽の UNO が再起動した（`B` 行を送った）ことにする。累計は 0 から数え直す。"""
         self._yaw_total = 0.0

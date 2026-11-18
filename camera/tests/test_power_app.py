@@ -396,8 +396,10 @@ async def test_uno_lines_follow_the_power_state_through_the_app(loop) -> None:
         return [w.decode("ascii").strip() for w in serial.written]
 
     try:
-        await hw.set_pitch(12.0)  # 軸の目標角
-        await camera.control_step()
+        await camera.control.set_pitch_target(12.0)  # 軸の目標角
+        for _ in range(20):  # 行き過ぎて戻るまで周期を回す
+            clock.advance(100)
+            await camera.control_step()
         await wait_until(lambda: any(l.startswith("M ") and l.endswith(" 120 0") for l in lines()))
 
         clock.advance(IDLE)

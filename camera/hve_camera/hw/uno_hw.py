@@ -153,6 +153,11 @@ class UnoHardware(HardwareBase):
         """`B` 行（UNO の再起動）を受けた回数。"""
         return self._yaw_epoch
 
+    def get_power_mode(self) -> str:
+        """いまの省電力の段階（送信スレッドと共有する値を読む）。"""
+        with self._lock:
+            return self._power_mode
+
     async def set_pitch(self, angle_deg: float) -> None:
         """ピッチの目標角を覚えるだけ（送るのは `io_cmd_period_ms` ごとのスレッド）。"""
         with self._lock:
