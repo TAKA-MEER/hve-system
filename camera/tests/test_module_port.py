@@ -287,8 +287,10 @@ async def test_aim_yaw_goes_to_the_target_and_arrives(rig: Rig) -> None:
 
     # 動いている間: 持ち主は ss。画面には busy_label が出る
     assert record(rig) == {"by": "ss", "press": 7, "pitch_deg": -20.0, "yaw_deg": 30.0, "status": "MOVING", "reason": "NONE"}
-    assert rig.hw.pitch_deg == -20.0  # ピッチは目標角を渡した周期で効く
+    await rig.pump()
+    assert rig.hw.pitch_deg == -17.0  # 行き過ぎ点（-20 + 3。起動時は向きが分からないので逆とみなす）
     module_state = rig.camera.build_module_state()
+    assert module_state["pitch_deg"] == -20.0  # 報告する目標角は行き過ぎ点でない
     assert module_state["owner"] == "module" and module_state["owner_name"] == "ss"
     assert module_state["owner_operator"] == "auto"
     await rig.pump()
@@ -298,6 +300,7 @@ async def test_aim_yaw_goes_to_the_target_and_arrives(rig: Rig) -> None:
     steps = await pump_until(rig, lambda: record(rig)["status"] != "MOVING")
     assert steps > 20  # 10 deg/s で 30° なので 3 秒ほどかかる（一瞬で着いたことにしない）
     assert record(rig)["status"] == "ARRIVED" and record(rig)["reason"] == "NONE"
+    assert rig.hw.pitch_deg == -20.0  # 戻りの指令が効いたあと
     assert abs(yaw_now(rig) - 30) <= rig.params["aim_yaw_tol_deg"]
     assert rig.hw.yaw_direction in (None, "left")
     assert rig.hw.yaw_running is False  # 着いたら止める
@@ -331,10 +334,13 @@ async def test_arrived_press_does_not_move_again_but_a_new_press_does(rig: Rig) 
     assert rig.hw.yaw_running and rig.hw.yaw_direction == "right"
 
 
-async def test_pitch_only_aim_arrives_in_the_same_cycle(rig: Rig) -> None:
+async def test_pitch_only_aim_arrives_after_the_return_wait(rig: Rig) -> None:
     ws = await connect(rig)
     await send_aim(ws, 1, pitch=-30)
-    assert record(rig)["status"] == "ARRIVED"  # 目標角を渡した周期で着いたとみなす
+    assert record(rig)["status"] == "MOVING"  # 目標角を渡した周期では着いたことにしない
+    await pump_until(rig, lambda: record(rig)["status"] == "ARRIVED")
+    # 行き過ぎ点（-27）→ 戻り（-30）の順に指令が出た
+    assert rig.hw.pitch_history == [-27.0, -30.0], rig.hw.pitch_history
     assert rig.hw.pitch_deg == -30
     assert rig.camera.port.owner is None
     assert rig.camera.build_module_state()["pitch_deg"] == -30
@@ -379,7 +385,7 @@ async def test_yaw_before_zero_is_unknown_and_nothing_moves(rig: Rig) -> None:
     assert state["yaw_deg"] is None and state["yaw_zeroed"] is False
     # 片方だけ（ピッチ）なら原点の前でも受け付ける
     await send_aim(ws, 2, pitch=-10)
-    assert record(rig)["status"] == "ARRIVED"
+    await pump_until(rig, lambda: record(rig)["status"] == "ARRIVED")
 
 
 async def test_pitch_outside_the_range_is_rejected_not_rounded(rig: Rig) -> None:
@@ -390,9 +396,12 @@ async def test_pitch_outside_the_range_is_rejected_not_rounded(rig: Rig) -> None
     await send_aim(ws, 2, pitch=-45.5)
     assert record(rig)["reason"] == "TARGET_RANGE" and rig.hw.pitch_history == []
     await send_aim(ws, 3, pitch=45)  # 境目は受け付ける
-    assert record(rig)["status"] == "ARRIVED" and rig.hw.pitch_deg == 45
+    assert record(rig)["status"] == "MOVING"
+    await pump_until(rig, lambda: record(rig)["status"] == "ARRIVED")
+    assert rig.hw.pitch_deg == 45
     await send_aim(ws, 4, pitch=-45)
-    assert record(rig)["status"] == "ARRIVED" and rig.hw.pitch_deg == -45
+    await pump_until(rig, lambda: record(rig)["status"] == "ARRIVED")
+    assert rig.hw.pitch_deg == -45
     await zero_yaw(rig)
     await send_aim(ws, 5, yaw=180)  # -180 以上 180 未満
     assert record(rig)["reason"] == "TARGET_RANGE"
@@ -517,7 +526,9 @@ async def test_lower_press_than_seen_is_dropped(rig: Rig) -> None:
     ws = await connect(rig)
     await send_aim(ws, 5, pitch=-10)
     await send_aim(ws, 4, pitch=-20)  # 古い press
-    assert rig.hw.pitch_deg == -10 and record(rig)["press"] == 5
+    await rig.pump()
+    assert record(rig)["press"] == 5 and rig.camera.control.pitch_deg == -10.0
+    assert rig.hw.pitch_deg == -7.0  # 行き過ぎ点（古い press の -20 には行かない）
 
 
 # --- ヨーの原点 ----------------------------------------------------------------------------------
@@ -619,7 +630,8 @@ async def test_snapshot_passes_the_image_and_adds_headers(rig: Rig) -> None:
         await zero_yaw(rig)
         ws = await connect(rig)
         await send_aim(ws, 1, pitch=-12)
-        await rig.pump(1000)
+        await rig.pump(1000)  # 行き過ぎ点と戻りの指令が両方出た周期
+        await rig.pump(1000)  # ここから 1000 ms 静止
         response = await get(rig)
         assert response.status == 200
         assert await response.read() == b"\xff\xd8fake-jpeg\xff\xd9"
@@ -692,10 +704,14 @@ async def test_still_ms_restarts_when_the_pitch_or_yaw_moves(rig: Rig) -> None:
         await rig.pump(2000)
         assert int((await get(rig, "/api/snapshot")).headers["X-Still-Ms"]) >= 2000
 
-        # ピッチの目標が変わったら数え直す
+        # ピッチの指令が変わるたびに数え直す（行き過ぎ点・戻りの両方）
         await send_aim(ws, 1, pitch=-10)
         await rig.pump(300)
-        assert int((await get(rig, "/api/snapshot")).headers["X-Still-Ms"]) == 300
+        assert int((await get(rig, "/api/snapshot")).headers["X-Still-Ms"]) == 0  # 行き過ぎ点の指令
+        await rig.pump(1000)
+        assert int((await get(rig, "/api/snapshot")).headers["X-Still-Ms"]) == 0  # 戻りの指令
+        await rig.pump(500)
+        assert int((await get(rig, "/api/snapshot")).headers["X-Still-Ms"]) == 500
 
         # ヨーが回っている間は、撮った 1 枚（`X-Frame-Age-Ms: 120`）より新しい動きが見える
         await send_aim(ws, 2, yaw=60)
