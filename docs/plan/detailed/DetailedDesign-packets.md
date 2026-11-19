@@ -100,6 +100,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **段階 13（2026-11-19。昇降の速さの制御の揺れ・限界を測る用意。[DetailedDesign.md](DetailedDesign.md) §4.1.2）**: `WP-LIFT-19` だけ。昇降部のファームと `tools/lift_probe.py` だけで、プロトコル・画面・カメラモジュールは変えない（`state.duty` は整数 % のまま）。速さの上限・設定の既定値は、実機で限界を測ってから別に決める。
 
+**段階 14（2026-11-19。昇降の速さの範囲と既定値。spec [Spec-ui.md](../spec/Spec-ui.md) §2）**: `WP-LIFT-20` だけ（昇降部のファーム・昇降部の画面・カメラモジュール・道具をまとめて 1 つ。値を揃えるだけなので分けない）。**互換**: 古い画面は 100 を超える値を入れさせないだけ。保存済みの設定（実機は上限 100・初期値 100）はそのまま読める。
+
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
 **2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
@@ -687,3 +689,22 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   9. `LIFT_SPEED_ABS_MAX_MM_S` を 100 に戻す（`hold` の `speed` 200 が 200 のまま `SpeedLoop` に渡ることで縛る）
 - **native で縛れないもの**（管理担当が目と実機で見る）: `hal_esp32.cpp` の 8 bit への切り詰め・`ledcSetup` の分解能・組み立て用ファームの ×10
 - **実機で管理担当が確かめる**: 30 mm/s の上昇・下降で、デューティが整数 % の間を往復しないか（`state.duty` は % なので、揺れは `speed_meas` で見る）・下降の揺れが前より小さいか／目標 250 mm/s・出力の上限 50 % で、上昇・下降それぞれデューティが 50 % に張りついたときの `speed_meas` の頭打ち（＝昇降機の限界）。**下降は下端の行き過ぎと、軽い状態でロープがたるむこと（2026-10-28 に表示 −230 mm）に気をつけ、短い区間で測る**。`MAX_RUN` は目標の速さで数えるので、目標 250 では全行程の途中で止まりうる（止まる側なのでよい）
+
+### `WP-LIFT-20` 昇降の速さの範囲 0〜255・既定 {10, 200, 100}
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §2 の速度の行、[-names.md](DetailedDesign-names.md) §5.1 の `LIFT_SPEED_ABS_MAX_MM_S`・「昇降の設定の既定値」、[-protocol.md](DetailedDesign-protocol.md) §3（設定の検証）
+- 作るもの（値を揃える。**同じ値を 2 か所以上に直書きしているので、全部探して直す**。`grep -rn` で `100`・`60`・`30` の昇降の速さを洗う。ピッチ・ヨー・`motor_max_pct`〈`abs_high: 100` は出力の上限 %〉は**変えない**）:
+  - ファーム: `lift_decide.h` の `LIFT_SPEED_ABS_MAX_MM_S` を 255・`lift_settings.h` の既定を `{10, 200, 100}`・`lift_core_version` を上げる
+  - 昇降部の画面: `firmware/lift/web/app.js` の `lift_up`・`lift_down` の `abs_high` を 255
+  - カメラモジュール: `camera/hve_camera/settings.py` の `_LIFT_SPEED_ABS_MAX_MM_S` を 255・既定を `{10, 200, 100}`・`camera/hve_camera/hw/fake_lift.py` の上限を 255・`camera/web/settings.js` の `abs_high` を 255
+  - 道具: `tools/fake_lift_server.py`（上限・既定）・`tools/lift_probe.py` の `LIFT_SPEED_ABS_MAX_MM_S` を 255
+  - **`docs/使い方.md`**: 速さの範囲・既定値が書いてあれば直す
+  - 試験の固定値（`{min: 10, max: 60, init: 30}` などの例の値）は、既定値を確かめている試験だけ直す（ただの例の値は直さなくてよい）
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`.venv38/bin/python -m pytest camera/tests`・`.venv/bin/python -m pytest tools/tests`・`node --test firmware/lift/web/tests/web.test.js camera/web/tests/web.test.js` が通る。次の変異がそれぞれ赤:
+  1. ファームの `LIFT_SPEED_ABS_MAX_MM_S` を 250 に戻す（設定の検証が 255 を通さない・`hold` の 255 が 250 に丸まる）
+  2. ファームの既定を `{10, 60, 30}` に戻す
+  3. `camera/hve_camera/settings.py` の上限を 100 に戻す（255 の設定を検証で落とす）
+  4. カメラモジュールの既定を戻す
+  5. `firmware/lift/web/app.js`・`camera/web/settings.js` の `abs_high` を 100 に戻す（それぞれ）
+  6. `tools/fake_lift_server.py` の上限・既定を戻す
+- **実機で管理担当が確かめる**: 昇降部の画面とカメラモジュールの画面で、上限 255 を保存できる・256 は断られる／スライダーで 200 mm/s を出せる

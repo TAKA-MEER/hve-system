@@ -308,15 +308,15 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
   // ---- 設定（機器に保存されている想定。既定値は camera/hve_camera/settings.py と同じ） ----
   // 昇降の速さは実際の速さ [mm/s]（Spec-ui.md §1。昇降部がエンコーダで測って保つ）
   const AXES = [
-    {key:'lift_up',   name:'上昇',   unit:'mm/s',  abs:[0,100],  step:1},
-    {key:'lift_down', name:'下降',   unit:'mm/s',  abs:[0,100],  step:1},
+    {key:'lift_up',   name:'上昇',   unit:'mm/s',  abs:[0,255],  step:1},
+    {key:'lift_down', name:'下降',   unit:'mm/s',  abs:[0,255],  step:1},
     {key:'pitch',     name:'ピッチ', unit:'deg/s', abs:[0.1,60], step:0.5},
     {key:'yaw',       name:'ヨー',   unit:'deg/s', abs:[0.1,60], step:0.5},
   ];
   const MOTOR = {key:'motor_max_pct', name:'モータへの出力の上限', unit:'%', abs:[10,100]};  // Spec-ui.md §2.1
   const MARGIN = {key:'ceil_margin_mm', name:'天井の閾値', unit:'mm', abs:[150,3000]};       // Spec-ui.md §2.3
   let settings = {
-    lift_up:{min:10,max:60,init:30}, lift_down:{min:10,max:60,init:30},
+    lift_up:{min:10,max:200,init:100}, lift_down:{min:10,max:200,init:100},
     pitch:{min:1,max:30,init:10},    yaw:{min:1,max:30,init:10},
     motor_max_pct:50,
     ceil_standalone:true,  // 単体の操作でも天井で止める（Spec-ui.md §2.2。既定は入）
