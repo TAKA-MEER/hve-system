@@ -167,6 +167,27 @@ void drive_up_with_progress(LiftController* ctrl, FakeHal* hal, uint32_t end_ms,
   }
 }
 
+// エンコーダを enc_mm_s で進めながら、target_mm_s の hold を step_ms ごとに step する。
+// count_acc は呼び出し側が持ち越し、位相の期間をまたいで測った速さを続ける。
+// モータが止まっている間も数を進める（偽 HAL が測った速さを決める）
+void drive_enc(LiftController* ctrl, FakeHal* hal, uint32_t start_ms, uint32_t end_ms,
+               uint32_t step_ms, int press, LiftDir dir, int target_mm_s, double enc_mm_s,
+               double* count_acc) {
+  for (uint32_t t = start_ms; t <= end_ms; t += step_ms) {
+    *count_acc += (dir == LiftDir::UP ? ENC_UP_SIGN : -ENC_UP_SIGN) * enc_mm_s *
+                  static_cast<double>(step_ms) / LIFT_UM_PER_COUNT;
+    hal->set_encoder_count(static_cast<int32_t>(*count_acc));
+    hal->set_height(500, true, t);
+    HoldMsg hold = up_hold(press, target_mm_s, t);
+    hold.dir = dir;
+    if (dir == LiftDir::DOWN) {
+      hold.has_ceiling = false;
+    }
+    ctrl->on_hold(ui(1), hold, t);
+    ctrl->step(t);
+  }
+}
+
 }  // namespace
 
 // --- 起動直後とウォッチドッグ ---
@@ -876,15 +897,17 @@ void test_speed_loop_cap_is_ten_times_motor_max_pct() {
   TEST_ASSERT_LESS_OR_EQUAL_INT(50, ctrl.state().duty);
 }
 
-// (f2) 0.1 % 刻み（‰）の値がモータに出る。前向きは 26 × 0.4 = 10.4 %（104 ‰）。
+// (f2) 0.1 % 刻み（‰）の値がモータに出る。前向きは下駄 10 ＋ 26 × 0.15 = 13.9 %（139 ‰）。
 // エンコーダをちょうど目標の速さ（20 カウント / 20 ms）で進めると、ずらし窓の 2 本目の step 以降
 // 測った速さはちょうど 26.0 mm/s（20 × 26 / 20）で偏差 0 になる。最初の step だけ測った速さが 0 で、
-// その積分の残り（26 × 20 ms = 0.52 mm × Ki）を含めた値で安定する（前向き 0.4 × 26 = 10.4 % ＋ 0.52 × Ki。
-// 係数を変えても崩れないよう、期待値は定数から求める。Ki 1.0 で 10.92 % = 109 ‰）。
-// 整数 % の出力なら 11 % で、10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
+// その積分の残り（26 × 20 ms = 0.52 mm × Ki）を含めた値で安定する（前向き 13.9 % ＋ 0.52 × Ki。
+// 係数を変えても崩れないよう、期待値は定数から求める。Ki 1.5 で 14.68 % = 147 ‰）。
+// 整数 % の出力なら 15 % で、10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
 // 上の 2 つの試験で、目標 26 mm/s・最初の step の積分の残り 0.52 mm のときに落ち着く出力 [‰]
 static int settled_permille_26() {
-  return static_cast<int>((LIFT_FF_UP_PCT_PER_MM_S * 26.0f + LIFT_SPEED_KI * 0.52f) * 10.0f + 0.5f);
+  return static_cast<int>(
+      (LIFT_FF_UP_OFFSET_PCT + LIFT_FF_UP_PCT_PER_MM_S * 26.0f + LIFT_SPEED_KI * 0.52f) * 10.0f +
+      0.5f);
 }
 
 void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
@@ -908,7 +931,7 @@ void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
   TEST_ASSERT_TRUE(duty % 10 != 0);  // 0.1 % 単位の刻み（10 ‰ 単位ならこの剰余は 0）
 }
 
-// (f5) state.duty は ‰ を四捨五入した整数 %（109 ‰ → 11 %）。‰ をそのまま出すと 109 になる。
+// (f5) state.duty は ‰ を四捨五入した整数 %（147 ‰ → 15 %）。‰ をそのまま出すと 147 になる。
 void test_state_duty_is_rounded_percent_not_permille() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -929,8 +952,8 @@ void test_state_duty_is_rounded_percent_not_permille() {
 }
 
 // (f9) 速さの上限 250（仮）で hold の speed 200 がそのまま SpeedLoop に渡る。
-// 上昇の前向きは 200 × 0.4 = 80 % で既定の上限 50 % を超えるので、モータは 500 ‰（50 %）に張りつく。
-// 上限が 100 に戻れば FF 40 % + P 4 % = 44 % = 440 ‰ になる。
+// 上昇の前向きは下駄 10 ＋ 200 × 0.15 = 40 % に、最初の step の比例（200 × Kp）が足されて
+// 48 % になる（積分は上限に当たるので進めない）。上限 50 % の半分（500 ‰）までは出ない。
 void test_hold_speed_200_passes_through_to_speed_loop() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -939,7 +962,101 @@ void test_hold_speed_200_passes_through_to_speed_loop() {
   ctrl.on_hold(ui(1), up_hold(1, 200, 0), 0);
   const LiftState state = ctrl.step(0);
   TEST_ASSERT_EQUAL_INT(200, state.speed);
+  TEST_ASSERT_EQUAL_INT(480, hal.motor_duty());
+}
+
+// (WP-LIFT-21 変異 1) 上限に当たっているとき、偏差が負（速すぎ）なら積分を進めて
+// 丸めを解く。上限 30 %・目標 200 mm/s（前向き 40 %）で測った速さを 270 mm/s で続けると、
+// モータの値が上限（300 ‰）より下がる。積分を両向きで止める変異だと張りついたままになる。
+void test_integral_unwinds_at_cap_when_too_fast() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  ctrl.set_motor_max_pct(30);
+  double acc = 0.0;
+  drive_enc(&ctrl, &hal, 0, 2000, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 200, 270.0, &acc);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  TEST_ASSERT_LESS_THAN(300, hal.motor_duty());
+}
+
+// (WP-LIFT-21 変異 2) 上限に当たっているとき、偏差が正（遅すぎ）では積分を進めない。
+// 目標 255 mm/s（前向き 48.25 %＋比例で上限 50 % を超える）を測った速さ 10 mm/s で回すと
+// 上限に当たる。このとき積分が溜まると、測った速さを目標に揃えても上限から下がらない。
+void test_integral_does_not_grow_at_cap_when_too_slow() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  double acc = 0.0;
+  drive_enc(&ctrl, &hal, 0, 1000, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 255, 10.0, &acc);
   TEST_ASSERT_EQUAL_INT(500, hal.motor_duty());
+  drive_enc(&ctrl, &hal, 1020, 2000, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 255, 255.0, &acc);
+  TEST_ASSERT_LESS_THAN(500, hal.motor_duty());
+}
+
+// (WP-LIFT-21 変異 3a) 0 に当たっているとき、偏差が正（遅すぎ）なら積分を進めて
+// 丸めを解く。目標 255 mm/s・測った速さ 500 mm/s で積分を深く負にして 0 に当てる。
+// 次に目標を 30 mm/s・測った速さ 10 mm/s にすると、丸めを解く向きの積分で出力が戻る。
+// 両向きで止める変異だと 0 のままになる。
+void test_integral_unwinds_at_floor_when_too_slow() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  double acc = 0.0;
+  drive_enc(&ctrl, &hal, 0, 200, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 255, 500.0, &acc);
+  // 積分が深く負になり、進めた候補は 0 を下回る（出力は進めない値のまま小さく残る）
+  TEST_ASSERT_LESS_THAN(50, hal.motor_duty());
+  drive_enc(&ctrl, &hal, 220, 2400, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 30, 10.0, &acc);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+}
+
+// (WP-LIFT-21 変異 3b) 0 に当たっているとき、偏差が負（速すぎ）では積分を進めない。
+// 0 に当てたあと、速すぎを続けても積分は深くならない。測った速さを目標に揃えれば
+// 前向きが出る。両向きで進める変異だと積分が深くなり、揃えても 0 のままになる。
+void test_integral_does_not_grow_at_floor_when_too_fast() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  double acc = 0.0;
+  drive_enc(&ctrl, &hal, 0, 200, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 255, 500.0, &acc);
+  TEST_ASSERT_LESS_THAN(50, hal.motor_duty());
+  drive_enc(&ctrl, &hal, 220, 1220, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 255, 500.0, &acc);
+  TEST_ASSERT_LESS_THAN(50, hal.motor_duty());
+  drive_enc(&ctrl, &hal, 1240, 2200, LIFT_SPEED_CTRL_MS, 1, LiftDir::UP, 255, 255.0, &acc);
+  TEST_ASSERT_TRUE(hal.motor_moving());
+}
+
+// (WP-LIFT-21 変異 4・5) 下降の落ち着く値も下降の下駄・傾きから求める（26 mm/s）。
+// 上昇と下降を取り違えたり、下駄を足さなければこの値にならない。
+static int settled_permille_down_26() {
+  return static_cast<int>((LIFT_FF_DOWN_OFFSET_PCT + LIFT_FF_DOWN_PCT_PER_MM_S * 26.0f +
+                           LIFT_SPEED_KI * 0.52f) *
+                              10.0f +
+                          0.5f);
+}
+
+void test_motor_duty_down_settles_at_down_feedforward() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  ctrl.on_hold(ui(1), down_hold(1, 26), 0);
+  hal.set_encoder_count(0);
+  ctrl.step(0);
+  int duty = -1;
+  for (uint32_t t = LIFT_SPEED_CTRL_MS; t <= 200; t += LIFT_SPEED_CTRL_MS) {
+    hal.set_encoder_count(-static_cast<int32_t>(t));
+    hal.set_height(500, true, t);
+    ctrl.on_hold(ui(1), down_hold(1, 26), t);
+    ctrl.step(t);
+    duty = hal.motor_duty();
+  }
+  TEST_ASSERT_TRUE(hal.motor_moving());
+  TEST_ASSERT_EQUAL_INT(settled_permille_down_26(), duty);
+}
+
+// (WP-LIFT-21 変異 6) 目標 0 では下駄を出さない。
+void test_target_zero_outputs_no_feedforward_offset() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  hal.set_height(500, true, 0);
+  ctrl.on_hold(ui(1), up_hold(1, 0, 0), 0);
+  ctrl.step(0);
+  TEST_ASSERT_EQUAL_INT(0, hal.motor_duty());
 }
 
 // (f6) ずらし窓: エンコーダの速さを窓の途中で変えると、測った速さは LIFT_SPEED_CTRL_MS ごとに
@@ -2827,6 +2944,12 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_motor_duty_is_in_permille_with_0_1_percent_steps);
   RUN_TEST(test_state_duty_is_rounded_percent_not_permille);
   RUN_TEST(test_hold_speed_200_passes_through_to_speed_loop);
+  RUN_TEST(test_integral_unwinds_at_cap_when_too_fast);
+  RUN_TEST(test_integral_does_not_grow_at_cap_when_too_slow);
+  RUN_TEST(test_integral_unwinds_at_floor_when_too_slow);
+  RUN_TEST(test_integral_does_not_grow_at_floor_when_too_fast);
+  RUN_TEST(test_motor_duty_down_settles_at_down_feedforward);
+  RUN_TEST(test_target_zero_outputs_no_feedforward_offset);
   RUN_TEST(test_speed_meas_slides_every_control_period);
   RUN_TEST(test_speed_window_is_not_shortened_by_a_stall);
   RUN_TEST(test_speed_meas_shows_coast_after_stop_command);

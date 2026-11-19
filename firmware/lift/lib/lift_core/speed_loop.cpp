@@ -25,11 +25,13 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
   // 係数は %・mm/s のまま計算し、出力だけ 0.1 % 刻み（‰）で返す（§4.1.2）。
   // 上限は max_pct [%] = max_pct × 10 [‰] の意味
   const float cap = static_cast<float>(max_pct);
+  const float ff_offset =
+      (dir == LiftDir::DOWN) ? LIFT_FF_DOWN_OFFSET_PCT : LIFT_FF_UP_OFFSET_PCT;
   const float ff_gain =
       (dir == LiftDir::DOWN) ? LIFT_FF_DOWN_PCT_PER_MM_S : LIFT_FF_UP_PCT_PER_MM_S;
   const float target = static_cast<float>(target_mm_s);
   const float error = target - measured_mm_s;
-  const float ff = ff_gain * target;
+  const float ff = (target_mm_s > 0) ? ff_offset + ff_gain * target : 0.0f;
   const float p = LIFT_SPEED_KP * error;
 
   // 積分を進めた場合の出力。丸めに当たらなければこれを出す
@@ -39,7 +41,11 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
   }
   float out = ff + p + LIFT_SPEED_KI * advanced;
   if (out > cap) {
-    // 上の丸めに当たったので積分は進めない。進めない値でも丸める
+    // 上の丸めに当たった。偏差が負（速すぎ）なら積分を進めて丸めを解く向きに動く。
+    // それ以外（丸めを深くする向き）では積分は進めない。進めない値でも丸める
+    if (error < 0.0f) {
+      integral_ = advanced;
+    }
     out = ff + p + LIFT_SPEED_KI * integral_;
     if (out > cap) {
       out = cap;
@@ -49,6 +55,11 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
     return static_cast<int>(out * 10.0f + 0.5f);
   }
   if (out < 0.0f) {
+    // 下の丸めに当たった。偏差が正（遅すぎ）なら積分を進めて丸めを解く向きに動く。
+    // それ以外では積分は進めない
+    if (error > 0.0f) {
+      integral_ = advanced;
+    }
     out = ff + p + LIFT_SPEED_KI * integral_;
     if (out < 0.0f) {
       out = 0.0f;
