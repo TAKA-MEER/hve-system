@@ -11,7 +11,8 @@ class LiftHal {
   virtual ~LiftHal() {}
 
   // モータへ方向とデューティを出す。停止は STOP と 0 で表す
-  virtual void motor_set(LiftDir dir, int duty_pct) = 0;
+  // duty は ‰（0〜LIFT_DUTY_ABS_MAX_PERMILLE。DetailedDesign.md §4.1.2）
+  virtual void motor_set(LiftDir dir, int duty_permille) = 0;
 
   // 下端スイッチが押されているか
   virtual bool bottom_pressed() = 0;

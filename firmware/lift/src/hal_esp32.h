@@ -22,7 +22,7 @@ class LiftEsp32Hal : public LiftHal {
 
   // --- LiftHal ---
   // 判定の結果（lift_decide を通したもの）をモータへ出す。指令をそのまま出さないこと
-  void motor_set(LiftDir dir, int duty_pct) override;
+  void motor_set(LiftDir dir, int duty_permille) override;
   bool bottom_pressed() override;
   // エンコーダの生の数（原点に依らない。WP-LIFT-06 の速さの制御が使う）
   int32_t encoder_count() const override;

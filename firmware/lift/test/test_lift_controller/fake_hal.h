@@ -7,9 +7,9 @@
 
 class FakeHal : public LiftHal {
  public:
-  void motor_set(LiftDir dir, int duty_pct) override {
+  void motor_set(LiftDir dir, int duty_permille) override {
     motor_dir_ = dir;
-    motor_duty_ = duty_pct;
+    motor_duty_ = duty_permille;
     motor_calls_++;
   }
 
@@ -53,9 +53,9 @@ class FakeHal : public LiftHal {
 // poll() は LiftEsp32Hal::poll と同じく、数・読んだスイッチ・時刻を EncoderHeight へ渡す。
 class EncoderFakeHal : public LiftHal {
  public:
-  void motor_set(LiftDir dir, int duty_pct) override {
+  void motor_set(LiftDir dir, int duty_permille) override {
     motor_dir_ = dir;
-    motor_duty_ = duty_pct;
+    motor_duty_ = duty_permille;
   }
 
   bool bottom_pressed() override { return raw_pressed_; }

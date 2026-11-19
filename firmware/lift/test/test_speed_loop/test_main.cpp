@@ -6,13 +6,13 @@
 
 namespace {
 
-// 前向きだけの出力（目標 × 係数を四捨五入）
+// 前向きだけの出力（目標 × 係数を四捨五入して ‰ にしたもの。update の戻り値と同じ単位）
 int feedforward_up(int speed) {
-  return static_cast<int>(LIFT_FF_UP_PCT_PER_MM_S * static_cast<float>(speed) + 0.5f);
+  return static_cast<int>(LIFT_FF_UP_PCT_PER_MM_S * static_cast<float>(speed) * 10.0f + 0.5f);
 }
 
 int feedforward_down(int speed) {
-  return static_cast<int>(LIFT_FF_DOWN_PCT_PER_MM_S * static_cast<float>(speed) + 0.5f);
+  return static_cast<int>(LIFT_FF_DOWN_PCT_PER_MM_S * static_cast<float>(speed) * 10.0f + 0.5f);
 }
 
 }  // namespace
@@ -37,7 +37,7 @@ void test_output_is_clamped_while_integral_holds() {
   // 出力は上限を超えない
   const int clamped =
       loop.update(LIFT_SPEED_ABS_MAX_MM_S, 0.0f, LiftDir::UP, 1000, LIFT_DUTY_ABS_MAX_PCT);
-  TEST_ASSERT_LESS_OR_EQUAL_INT(LIFT_DUTY_ABS_MAX_PCT, clamped);
+  TEST_ASSERT_LESS_OR_EQUAL_INT(LIFT_DUTY_ABS_MAX_PERMILLE, clamped);
   // 丸めに当たっている間に積分が進んでいれば、偏差を 0 に戻しても前向きより大きい出力が残る
   const int back = loop.update(10, 10.0f, LiftDir::UP, LIFT_SPEED_CTRL_MS, LIFT_DUTY_ABS_MAX_PCT);
   TEST_ASSERT_INT_WITHIN(3, feedforward_up(10), back);
@@ -48,7 +48,7 @@ void test_output_is_clamped_at_motor_max_pct() {
   // 上限 50 % では 100 % まで出ない（Spec-ui §2.1。定格 12 V ÷ 電源 24 V）。
   // 1 周期で確実に上限を超える大きな偏差・長い周期なら、係数の値に依らず縛れる
   const int out = loop.update(LIFT_SPEED_ABS_MAX_MM_S, 0.0f, LiftDir::UP, 1000, 50);
-  TEST_ASSERT_LESS_OR_EQUAL_INT(50, out);
+  TEST_ASSERT_LESS_OR_EQUAL_INT(500, out);  // 50 % = 500 ‰
   // 丸めに当たっている間に積分が進んでいれば、偏差を 0 に戻しても前向きより大きい出力が残る
   const int back = loop.update(10, 10.0f, LiftDir::UP, LIFT_SPEED_CTRL_MS, 50);
   TEST_ASSERT_INT_WITHIN(3, feedforward_up(10), back);
@@ -65,8 +65,8 @@ void test_reset_clears_integral() {
   // reset() で積分が 0 に戻り、最初の出力は前向き＋比例だけになる
   loop.reset();
   const int after = loop.update(40, 0.0f, LiftDir::UP, 0, LIFT_DUTY_ABS_MAX_PCT);
-  const int expect =
-      static_cast<int>(LIFT_FF_UP_PCT_PER_MM_S * 40.0f + LIFT_SPEED_KP * 40.0f + 0.5f);
+  const int expect = static_cast<int>(
+      (LIFT_FF_UP_PCT_PER_MM_S * 40.0f + LIFT_SPEED_KP * 40.0f) * 10.0f + 0.5f);
   TEST_ASSERT_EQUAL_INT(expect, after);
 }
 

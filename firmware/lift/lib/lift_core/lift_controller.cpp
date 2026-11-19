@@ -605,19 +605,42 @@ LiftState LiftController::step(uint32_t now_ms) {
   }
   run_dir_ = cmd_dir;
 
-  // 速さを測る（窓の起点から LIFT_SPEED_WINDOW_MS 以上経てば取り直す。原点に依らない）
+  // 速さを測る（ずらし窓。原点に依らない。§4.1.2。指令に依らず常に記録する。停止中に滑って
+  // 下がっているのも state.speed_meas に出る。記録は止まっても捨てない（前のブロック窓と同じ））
   const int32_t enc_now = hal_->encoder_count();
-  if (!speed_win_valid_) {
-    speed_win_count_ = enc_now;
-    speed_win_ms_ = now_ms;
-    speed_win_valid_ = true;
+  // LIFT_SPEED_CTRL_MS ごとに数と時刻を記録し、毎周期「いまの数 − LIFT_SPEED_WINDOW_MS 前の記録」
+  // から求める。LIFT_SPEED_WINDOW_MS 以上前の記録のうちいちばん新しいものを使う
+  // （loop が詰まって周期が延びても窓がそれより短くならない）。記録が窓の長さぶん溜まるまでは、
+  // いちばん古い記録との差で求める（§4.1.2）
+  if (speed_samples_n_ == 0 ||
+      elapsed_ms(now_ms, speed_last_record_ms_) >= static_cast<int32_t>(LIFT_SPEED_CTRL_MS)) {
+    if (speed_samples_n_ < kSpeedSamples) {
+      speed_samples_[speed_samples_n_].count = enc_now;
+      speed_samples_[speed_samples_n_].ms = now_ms;
+      speed_samples_n_++;
+    } else {
+      for (int i = 0; i + 1 < kSpeedSamples; ++i) {
+        speed_samples_[i] = speed_samples_[i + 1];
+      }
+      speed_samples_[kSpeedSamples - 1].count = enc_now;
+      speed_samples_[kSpeedSamples - 1].ms = now_ms;
+    }
+    speed_last_record_ms_ = now_ms;
+  }
+  if (speed_samples_n_ > 0) {
+    int base = 0;
+    for (int i = speed_samples_n_ - 1; i >= 0; --i) {
+      if (elapsed_ms(now_ms, speed_samples_[i].ms) >=
+          static_cast<int32_t>(LIFT_SPEED_WINDOW_MS)) {
+        base = i;
+        break;
+      }
+    }
+    speed_up_mm_s_ = speed_from_counts(speed_samples_[base].count, enc_now,
+                                       speed_samples_[base].ms, now_ms, LIFT_UM_PER_COUNT,
+                                       ENC_UP_SIGN);
+  } else {
     speed_up_mm_s_ = 0.0f;
-  } else if (elapsed_ms(now_ms, speed_win_ms_) >=
-             static_cast<int32_t>(LIFT_SPEED_WINDOW_MS)) {
-    speed_up_mm_s_ = speed_from_counts(speed_win_count_, enc_now, speed_win_ms_, now_ms,
-                                       LIFT_UM_PER_COUNT, ENC_UP_SIGN);
-    speed_win_count_ = enc_now;
-    speed_win_ms_ = now_ms;
   }
 
   // #8a の数え（§4.1）。命令が stop になるか向きが替わるまで続ける。
@@ -719,7 +742,7 @@ LiftState LiftController::step(uint32_t now_ms) {
   const bool moving =
       has_owner && decided.reason == StopReason::NONE &&
       (decided.dir == LiftDir::UP || decided.dir == LiftDir::DOWN) && decided.dir == cmd_dir;
-  int duty = 0;
+  int duty_permille = 0;  // モータへ出すデューティ [‰]。SpeedLoop の出力のまま ‰ で通す（§4.1.2）
   if (moving) {
     // 止まった・向きが替わった・持ち主が替わったら積分を 0 に戻す（§4.1.2）
     if (!loop_started_ || decided.dir != loop_dir_ || owner.id != loop_owner_ ||
@@ -733,32 +756,33 @@ LiftState LiftController::step(uint32_t now_ms) {
       const float measured_fwd =
           (decided.dir == LiftDir::DOWN) ? -speed_up_mm_s_ : speed_up_mm_s_;
       const uint32_t dt = loop_elapsed <= 0 ? 0u : static_cast<uint32_t>(loop_elapsed);
-      duty = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt,
-                                motor_max_pct_);
+      duty_permille = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt,
+                                         motor_max_pct_);
       loop_at_ms_ = now_ms;
       loop_started_ = true;
       loop_dir_ = decided.dir;
       loop_owner_ = owner.id;
       loop_press_ = owner_press;
     } else {
-      duty = last_duty_;
+      duty_permille = last_duty_;
     }
-    hal_->motor_set(decided.dir, duty);
+    hal_->motor_set(decided.dir, duty_permille);
   } else {
     hal_->motor_set(LiftDir::STOP, 0);
     speed_loop_.reset();
     loop_started_ = false;
     loop_dir_ = LiftDir::STOP;
-    duty = 0;
+    duty_permille = 0;
   }
-  last_duty_ = duty;
+  last_duty_ = duty_permille;
 
-  turning_ = moving && duty > 0;
+  turning_ = moving && duty_permille > 0;
   run_speed_mm_s_ = decided.speed_mm_s;
   run_at_ms_ = now_ms;
 
   state_.dir = moving ? decided.dir : LiftDir::STOP;
-  state_.duty = duty;
+  // state.duty は今までどおり整数 %（‰ を四捨五入。画面・プロトコルは変えない。§4.1.2）
+  state_.duty = (duty_permille + 5) / 10;
   state_.reason = decided.reason;
   // 止めるときの dir は STOP（指令ではなく実際に出している方向）
   if (!moving) {

@@ -130,6 +130,7 @@ constexpr int BOTTOM_PRESSED_LEVEL = 1;  // HIGH
 // BOTTOM_PRESSED_LEVEL のときだけ true。
 bool bottom_pressed_from_level(int level);
 
-// デューティ [%] を LEDC に書く値（0〜(1 << resolution) - 1）にする。
-// 先に 0〜LIFT_DUTY_ABS_MAX_PCT に丸める。**停止（0%）は必ず 0 になる**。
-uint32_t motor_duty_to_pwm(int duty_pct, int resolution);
+// デューティ [‰] を LEDC に書く値（0〜(1 << resolution) - 1）にする。
+// 先に 0〜LIFT_DUTY_ABS_MAX_PERMILLE に丸める。**停止（0 ‰）は必ず 0 になる**。
+// 100 %（1000 ‰）= PWM の最大が基準（上限の値で割らない。DetailedDesign.md §4.1.2）
+uint32_t motor_duty_to_pwm(int duty_permille, int resolution);

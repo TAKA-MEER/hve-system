@@ -199,16 +199,22 @@ class LiftController {
   bool ceiling_standalone_ = LIFT_CEILING_STANDALONE_DEFAULT;  // set_ceiling_standalone で持たせる
   int ceiling_margin_mm_ = CEILING_MARGIN_MM_DEFAULT;  // set_ceiling_margin_mm で持たせる
   int motor_max_pct_ = LIFT_MOTOR_MAX_PCT_DEFAULT;  // モータへの出力の上限 [%]。set_motor_max_pct で持たせる
-  int last_duty_ = 0;          // 直前にモータへ出したデューティ（#8a の「動かしている」判定用）
+  int last_duty_ = 0;          // 直前にモータへ出したデューティ（‰。#8a の「動かしている」判定用）
   uint32_t loop_at_ms_ = 0;    // SpeedLoop を最後に進めた時刻
   bool loop_started_ = false;  // SpeedLoop を進めたことがあるか
   LiftDir loop_dir_ = LiftDir::STOP;  // SpeedLoop が持っている向き
   int loop_owner_ = -1;               // SpeedLoop が持っている持ち主の接続番号
   int loop_press_ = 0;               // 同じく press
-  // 速さの測定（窓の起点。LIFT_SPEED_WINDOW_MS ごとに取り直す）
-  int32_t speed_win_count_ = 0;
-  uint32_t speed_win_ms_ = 0;
-  bool speed_win_valid_ = false;
+  // 速さの測定（ずらし窓。DetailedDesign.md §4.1.2。WP-LIFT-19）
+  struct SpeedSample {
+    int32_t count;
+    uint32_t ms;
+  };
+  // 記録数は LIFT_SPEED_WINDOW_MS / LIFT_SPEED_CTRL_MS + 1（6）。loop が詰まったときの窓を保つため
+  static constexpr int kSpeedSamples = LIFT_SPEED_WINDOW_MS / LIFT_SPEED_CTRL_MS + 1;
+  SpeedSample speed_samples_[kSpeedSamples];
+  int speed_samples_n_ = 0;
+  uint32_t speed_last_record_ms_ = 0;
   float speed_up_mm_s_ = 0.0f;  // 測った速さ（上向きが正）
   // #8a の数え（DetailedDesign.md §4.1）。持ち主が替わっても数え直さない
   bool stalled_ = false;

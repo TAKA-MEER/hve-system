@@ -22,9 +22,10 @@ constexpr bool LIFT_TOP_DETECT_ENABLED = true;
 constexpr int LIFT_MAX_RUN_PCT = 150;           // 連続駆動の上限 = 全行程の何 % を進んだとみなしたら止めるか [%]（仮。#4b）
 constexpr int LIFT_STROKE_FALLBACK_MM = 1900;   // LIFT_TOP_MM が未設定（-1）のとき #8 が使う全行程 [mm]（仮。機械の上端の表示 1891 mm）
 constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上限 [%]。% ⇔ PWM の換算の基準（モータ保護の上限ではない）
+constexpr int LIFT_DUTY_ABS_MAX_PERMILLE = 1000;  // デューティの絶対上限 [‰]。SpeedLoop の出力・motor_set・motor_duty_to_pwm の単位（DetailedDesign.md §4.1.2）
 constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上限の既定値 [%]（定格 12 V ÷ 電源 24 V。Spec-ui §2.1）
 constexpr int LIFT_MOTOR_MAX_PCT_MIN = 10;      // モータへの出力の上限の下限 [%]（同上。上限は LIFT_DUTY_ABS_MAX_PCT）
-constexpr int LIFT_SPEED_ABS_MAX_MM_S = 100;    // 速さの絶対上限 [mm/s]（仮。H-V3）
+constexpr int LIFT_SPEED_ABS_MAX_MM_S = 250;    // 速さの絶対上限 [mm/s]（仮。昇降機の限界を測るため WP-LIFT-19 で 100 から上げた）
 constexpr uint32_t LIFT_ARM_LINK_TIMEOUT_MS = 1000;  // 最後の arm からこれだけ届かなければアームの制御器と通信できない（仮。#4e）
 constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進まなければ止めるまでの時間（仮）
 // 止めずに済む進行方向への最小の進みは hal_core.h の LIFT_STALL_MIN_UM /
@@ -109,7 +110,7 @@ struct ArmInfo {
 struct LiftState {
   int seq = 0;                  // 送出ごとの連番
   LiftDir dir = LiftDir::STOP;  // 指令ではなく、実際にモータへ出している方向
-  int duty = 0;                 // 実際にモータへ出しているデューティ [%]
+  int duty = 0;                 // 実際にモータへ出しているデューティ [%]（内部は ‰・送るのは四捨五入した %）
   int speed = 0;                // 目標の速さ [mm/s]
   int speed_meas = 0;           // エンコーダで測った速さ [mm/s]（上向きが正）
   StopReason reason = StopReason::NONE;

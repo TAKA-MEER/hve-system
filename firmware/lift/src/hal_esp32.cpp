@@ -126,7 +126,7 @@ void LiftEsp32Hal::poll(uint32_t now_ms) {
   height_at_ms_ = now_ms;
 }
 
-void LiftEsp32Hal::motor_set(LiftDir dir, int duty_pct) {
+void LiftEsp32Hal::motor_set(LiftDir dir, int duty_permille) {
   if (dir == LiftDir::STOP) {
     // 停止は PWM 0。DIR は動かさない（不回っているのに向きだけ変えても意味がない）
     ledcWrite(PWM_CH, 0);
@@ -134,8 +134,9 @@ void LiftEsp32Hal::motor_set(LiftDir dir, int duty_pct) {
   }
   const bool up = (dir == LiftDir::UP);
   digitalWrite(MOTOR_DIR_PIN, (up == MOTOR_DIR_UP_LEVEL) ? HIGH : LOW);
-  // 0% なら必ず 0 になることは motor_duty_to_pwm で保証されている
-  ledcWrite(PWM_CH, static_cast<uint8_t>(motor_duty_to_pwm(duty_pct, PWM_RESOLUTION)));
+  // 0 ‰ なら必ず 0 になることは motor_duty_to_pwm で保証されている
+  // 10 bit の値なので 8 bit への切り詰めはしない（WP-LIFT-19。切り詰めると 26 % が 10/1023 で回らない）
+  ledcWrite(PWM_CH, motor_duty_to_pwm(duty_permille, PWM_RESOLUTION));
 }
 
 bool LiftEsp32Hal::bottom_pressed() {
