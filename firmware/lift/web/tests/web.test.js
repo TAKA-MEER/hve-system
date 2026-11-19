@@ -45,12 +45,12 @@ test('速度の数値の書式（昇降は実際の速さ [mm/s] の整数）', 
   assert.equal(app.formatSpeed('25'), '25 mm/s');
 });
 
-test('速度の設定項目は mm/s・0〜100・刻み 1（spec §1・§2）', () => {
+test('速度の設定項目は mm/s・0〜255・刻み 1（spec §1・§2）', () => {
   assert.deepEqual(app.SETTING_AXES.map((a) => a.key), ['lift_up', 'lift_down']);
   for (const axis of app.SETTING_AXES) {
     assert.equal(axis.unit, 'mm/s');
     assert.equal(axis.abs_low, 0);
-    assert.equal(axis.abs_high, 100);
+    assert.equal(axis.abs_high, 255);
     assert.equal(axis.step, 1);
   }
 });
@@ -310,9 +310,9 @@ test('初期値が上限を超える / 下限より小さいものも保存で�
 });
 
 test('絶対的な範囲を外すのも保存できない（protocol §3）', () => {
-  assert.equal(app.validateSettingsDraft(withChange('lift_up', 'max', 101)).ok, false);
+  assert.equal(app.validateSettingsDraft(withChange('lift_up', 'max', 256)).ok, false);
   assert.equal(app.validateSettingsDraft(withChange('lift_up', 'min', -1)).ok, false);
-  const over = app.validateSettingsDraft(withChange('lift_up', 'max', 101));
+  const over = app.validateSettingsDraft(withChange('lift_up', 'max', 256));
   assert.match(over.errors[0].text, /mm\/s/);
 });
 
