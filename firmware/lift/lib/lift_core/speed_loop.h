@@ -12,7 +12,7 @@
 constexpr uint32_t LIFT_SPEED_CTRL_MS = 20;    // 制御の周期
 constexpr uint32_t LIFT_SPEED_WINDOW_MS = 100;  // 速さを測る窓
 constexpr float LIFT_SPEED_KP = 0.04f;          // [%/(mm/s)]。仮（WP-LIFT-19）
-constexpr float LIFT_SPEED_KI = 1.0f;           // [%/mm]。仮（2026-11-19 実機: 0.5 では高さで周期的に変わる負荷に遅れ 30±10 mm/s）
+constexpr float LIFT_SPEED_KI = 1.5f;           // [%/mm]。仮（2026-11-19 実機: ドラム 1 回転ごとの負荷に遅れる。0.5 → 1.0 で揺れが 4 割減。1.5 を試す）
 constexpr float LIFT_FF_UP_PCT_PER_MM_S = 0.4f;    // 上昇の前向き（30 mm/s に 13〜16 % 要った）
 constexpr float LIFT_FF_DOWN_PCT_PER_MM_S = 0.22f; // 下降の前向き（30 mm/s に 6〜8 % 要った）
 
