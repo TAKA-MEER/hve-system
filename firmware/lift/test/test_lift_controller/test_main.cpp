@@ -879,8 +879,14 @@ void test_speed_loop_cap_is_ten_times_motor_max_pct() {
 // (f2) 0.1 % 刻み（‰）の値がモータに出る。前向きは 26 × 0.4 = 10.4 %（104 ‰）。
 // エンコーダをちょうど目標の速さ（20 カウント / 20 ms）で進めると、ずらし窓の 2 本目の step 以降
 // 測った速さはちょうど 26.0 mm/s（20 × 26 / 20）で偏差 0 になる。最初の step だけ測った速さが 0 で、
-// その積分の残り（26 × 20 ms = 0.52 mm。Ki 0.5 で 0.26 %）を含めて 10.66 % = 107 ‰ で安定する。
+// その積分の残り（26 × 20 ms = 0.52 mm × Ki）を含めた値で安定する（前向き 0.4 × 26 = 10.4 % ＋ 0.52 × Ki。
+// 係数を変えても崩れないよう、期待値は定数から求める。Ki 1.0 で 10.92 % = 109 ‰）。
 // 整数 % の出力なら 11 % で、10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
+// 上の 2 つの試験で、目標 26 mm/s・最初の step の積分の残り 0.52 mm のときに落ち着く出力 [‰]
+static int settled_permille_26() {
+  return static_cast<int>((LIFT_FF_UP_PCT_PER_MM_S * 26.0f + LIFT_SPEED_KI * 0.52f) * 10.0f + 0.5f);
+}
+
 void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -898,11 +904,11 @@ void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
   }
   TEST_ASSERT_TRUE(hal.motor_moving());
   TEST_ASSERT_EQUAL_INT(26, ctrl.state().speed_meas);
-  TEST_ASSERT_EQUAL_INT(107, duty);
+  TEST_ASSERT_EQUAL_INT(settled_permille_26(), duty);
   TEST_ASSERT_TRUE(duty % 10 != 0);  // 0.1 % 単位の刻み（10 ‰ 単位ならこの剰余は 0）
 }
 
-// (f5) state.duty は ‰ を四捨五入した整数 %（107 ‰ → 11 %）。‰ をそのまま出すと 107 になる。
+// (f5) state.duty は ‰ を四捨五入した整数 %（109 ‰ → 11 %）。‰ をそのまま出すと 109 になる。
 void test_state_duty_is_rounded_percent_not_permille() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -917,8 +923,9 @@ void test_state_duty_is_rounded_percent_not_permille() {
     ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
     state = ctrl.step(t);
   }
-  TEST_ASSERT_EQUAL_INT(107, hal.motor_duty());
-  TEST_ASSERT_EQUAL_INT(11, state.duty);
+  TEST_ASSERT_EQUAL_INT(settled_permille_26(), hal.motor_duty());
+  TEST_ASSERT_EQUAL_INT((settled_permille_26() + 5) / 10, state.duty);
+  TEST_ASSERT_TRUE(settled_permille_26() > 100);  // ‰ と % の取り違えが試験で分かる大きさ
 }
 
 // (f9) 速さの上限 250（仮）で hold の speed 200 がそのまま SpeedLoop に渡る。
