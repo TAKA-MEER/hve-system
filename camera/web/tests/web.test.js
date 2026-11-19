@@ -368,6 +368,16 @@ test('絶対的な範囲を外すのも保存できない（protocol §3）', ()
   assert.equal(settings.validateSettingsDraft(withChange('pitch', 'init', 0)).ok, false);
 });
 
+test('昇降の設定項目は mm/s・0〜255・刻み 1（spec §1・§2）', () => {
+  const axes = Object.fromEntries(settings.SETTING_AXES.map((a) => [a.key, a]));
+  for (const key of ['lift_up', 'lift_down']) {
+    assert.equal(axes[key].unit, 'mm/s');
+    assert.equal(axes[key].abs_low, 0);
+    assert.equal(axes[key].abs_high, 255);
+    assert.equal(axes[key].step, 1);
+  }
+});
+
 test('昇降の設定は mm/s・整数（brief §1）', () => {
   const axes = Object.fromEntries(settings.SETTING_AXES.map((a) => [a.key, a]));
   assert.equal(axes.lift_up.unit, 'mm/s');
