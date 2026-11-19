@@ -34,7 +34,7 @@ void motor_apply(ManualDir dir) {
   }
   const bool up = (dir == ManualDir::UP);
   digitalWrite(MOTOR_DIR_PIN, (up == MOTOR_DIR_UP_LEVEL) ? HIGH : LOW);
-  ledcWrite(PWM_CH, motor_duty_to_pwm(MANUAL_DUTY_PCT, PWM_RESOLUTION));
+  ledcWrite(PWM_CH, motor_duty_to_pwm(MANUAL_DUTY_PCT * 10, PWM_RESOLUTION));
 }
 
 }  // namespace

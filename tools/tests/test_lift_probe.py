@@ -209,7 +209,17 @@ def test_build_release_carries_the_same_press():
 
 def test_build_hold_clamps_speed():
     hold = build_hold({"dir": "up", "speed_mm_s": 140, "press": 1, "ceiling_near": True})
-    assert hold["speed"] == 100
+    assert hold["speed"] == 140  # 250 の上限（WP-LIFT-19）までは丸めない
+    hold = build_hold({"dir": "up", "speed_mm_s": 300, "press": 1, "ceiling_near": True})
+    assert hold["speed"] == 250
+    assert hold["speed"] == lift_probe.LIFT_SPEED_ABS_MAX_MM_S
+
+
+def test_clamp_speed_uses_the_absolute_max_constant():
+    assert clamp_speed(0) == 0
+    assert clamp_speed(lift_probe.LIFT_SPEED_ABS_MAX_MM_S) == lift_probe.LIFT_SPEED_ABS_MAX_MM_S
+    assert clamp_speed(lift_probe.LIFT_SPEED_ABS_MAX_MM_S + 1) == lift_probe.LIFT_SPEED_ABS_MAX_MM_S
+    assert clamp_speed(-5) == 0
 
 
 # --- state の表示 -------------------------------------------------------

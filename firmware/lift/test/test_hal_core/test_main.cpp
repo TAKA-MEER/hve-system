@@ -12,9 +12,9 @@ namespace {
 constexpr int kHigh = 1;
 constexpr int kLow = 0;
 
-// PWM の分解能。names.md §5 の PWM_RESOLUTION（昇降部 config.h / 8 bit）と同じ値。
+// PWM の分解能。names.md §5 の PWM_RESOLUTION（昇降部 config.h / 10 bit。WP-LIFT-19）と同じ値。
 // ここでは引数として渡すだけなので config.h ではなく試験側で持つ。
-constexpr int kResolution = 8;
+constexpr int kResolution = 10;
 constexpr uint32_t kFullScale = (1u << kResolution) - 1;
 
 // エンコーダ 1 周のカウント（ENC_PPR 360 の 4 逓倍）。設計値で 37.5 mm。
@@ -302,29 +302,29 @@ void test_duty_negative_gives_zero_pwm() {
 }
 
 void test_duty_full_gives_full_scale() {
-  TEST_ASSERT_EQUAL_UINT32(kFullScale, motor_duty_to_pwm(100, kResolution));
+  TEST_ASSERT_EQUAL_UINT32(kFullScale, motor_duty_to_pwm(1000, kResolution));
 }
 
 void test_duty_over_full_is_clamped() {
-  TEST_ASSERT_EQUAL_UINT32(kFullScale, motor_duty_to_pwm(250, kResolution));
+  TEST_ASSERT_EQUAL_UINT32(kFullScale, motor_duty_to_pwm(1500, kResolution));
 }
 
 void test_duty_is_linear_in_pwm() {
-  // 8 bit なら 40% で 102。比例の関係が崩れていないことを見る
-  TEST_ASSERT_EQUAL_UINT32(kFullScale * 40 / 100, motor_duty_to_pwm(40, kResolution));
-  TEST_ASSERT_EQUAL_UINT32(kFullScale / 4, motor_duty_to_pwm(25, kResolution));
+  // 10 bit なら 40 %（400 ‰）で 409。比例の関係が崩れていないことを見る
+  TEST_ASSERT_EQUAL_UINT32(kFullScale * 400 / 1000, motor_duty_to_pwm(400, kResolution));
+  TEST_ASSERT_EQUAL_UINT32(kFullScale / 4, motor_duty_to_pwm(250, kResolution));
 }
 
 void test_duty_uses_abs_max_as_full_scale_not_motor_cap() {
-  // 100 % = PWM の最大が基準（LIFT_DUTY_ABS_MAX_PCT で割る）。
-  // 上限の値（50）で割ると 50 % が PWM の最大（= 24 V そのまま）になるので、
-  // 50 % はフルスケールの半分であることを縛る（Spec-ui §2.1）
-  TEST_ASSERT_EQUAL_UINT32(kFullScale / 2, motor_duty_to_pwm(50, kResolution));
-  TEST_ASSERT_EQUAL_UINT32(2047, motor_duty_to_pwm(50, 12));  // 4095 × 50 / 100 = 2047（切り捨て）
+  // 100 %（1000 ‰）= PWM の最大が基準（LIFT_DUTY_ABS_MAX_PERMILLE で割る）。
+  // 上限の値（50 %）で割ると 50 % が PWM の最大（= 24 V そのまま）になるので、
+  // 50 %（500 ‰）はフルスケールの半分であることを縛る（Spec-ui §2.1）
+  TEST_ASSERT_EQUAL_UINT32(kFullScale / 2, motor_duty_to_pwm(500, kResolution));
+  TEST_ASSERT_EQUAL_UINT32(2047, motor_duty_to_pwm(500, 12));  // 4095 × 500 / 1000 = 2047（切り捨て）
 }
 
 void test_pwm_stays_inside_the_channel() {
-  for (int duty = -20; duty <= 120; duty += 7) {
+  for (int duty = -20; duty <= 1200; duty += 7) {
     TEST_ASSERT_TRUE(motor_duty_to_pwm(duty, kResolution) <= kFullScale);
   }
 }
@@ -332,7 +332,7 @@ void test_pwm_stays_inside_the_channel() {
 void test_pwm_works_at_12_bit_too() {
   const uint32_t full = (1u << 12) - 1;
   TEST_ASSERT_EQUAL_UINT32(0, motor_duty_to_pwm(0, 12));
-  TEST_ASSERT_EQUAL_UINT32(full, motor_duty_to_pwm(100, 12));
+  TEST_ASSERT_EQUAL_UINT32(full, motor_duty_to_pwm(1000, 12));
 }
 
 // --- 下端スイッチの一瞬の誤り（2026-10-28。LIFT_BOTTOM_DEBOUNCE_MS・LIFT_HOME_ACCEPT_MM）---

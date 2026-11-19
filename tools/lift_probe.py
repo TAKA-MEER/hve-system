@@ -40,6 +40,8 @@ from typing import Any
 
 import aiohttp
 
+# 速さの絶対上限 [mm/s]。詳細設計の LIFT_SPEED_ABS_MAX_MM_S と同じ（WP-LIFT-19 で 250 に上げた限界を測る用）
+LIFT_SPEED_ABS_MAX_MM_S = 250
 # `hold` を送る周期。**仮**（DetailedDesign-names.md §5.2 の ui_hold_period_ms と同じ）
 lift_probe_period_ms = 100
 # 起動直後の速さ [mm/s]。**仮**（旧版の例の値。単位だけ替わった）
@@ -87,8 +89,8 @@ def key_action(key: str) -> str | None:
 
 
 def clamp_speed(speed_mm_s: int) -> int:
-    """速さを 0〜100 [mm/s] に丸める（protocol §2.1 は 0〜LIFT_SPEED_ABS_MAX_MM_S）。"""
-    return max(0, min(100, int(speed_mm_s)))
+    """速さを 0〜LIFT_SPEED_ABS_MAX_MM_S [mm/s] に丸める（protocol §2.1）。"""
+    return max(0, min(LIFT_SPEED_ABS_MAX_MM_S, int(speed_mm_s)))
 
 
 def initial_state(speed_mm_s: int = lift_probe_speed_mm_s,

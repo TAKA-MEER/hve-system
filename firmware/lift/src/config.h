@@ -39,11 +39,11 @@ constexpr uint8_t LIFT_SW_DOWN_PIN = 13;
 // 組み立て用ファームのデューティ [%]（固定。変えるときはここを直して書き込み直す）
 constexpr int MANUAL_DUTY_PCT = 40;
 
-// --- PWM（先行試作と同じ。LEDC ch0 / 5 kHz / 8 bit）---
+// --- PWM（先行試作と同じ。LEDC ch0 / 5 kHz。0.1 % 刻みを出すため 10 bit。WP-LIFT-19）---
 
 constexpr uint8_t PWM_CH = 0;
 constexpr uint32_t PWM_FREQ_HZ = 5000;
-constexpr uint8_t PWM_RESOLUTION = 8;
+constexpr uint8_t PWM_RESOLUTION = 10;
 
 // --- 状態の出し方（DetailedDesign-protocol.md §1・§2.2）---
 

@@ -106,14 +106,14 @@ bool bottom_pressed_from_level(int level) {
   return level == BOTTOM_PRESSED_LEVEL;
 }
 
-uint32_t motor_duty_to_pwm(int duty_pct, int resolution) {
+uint32_t motor_duty_to_pwm(int duty_permille, int resolution) {
   // 停止が 0 でなければ安全を満たさないので、ここを必ず通す
-  if (duty_pct <= 0 || resolution <= 0) {
+  if (duty_permille <= 0 || resolution <= 0) {
     return 0;
   }
-  if (duty_pct > LIFT_DUTY_ABS_MAX_PCT) {
-    duty_pct = LIFT_DUTY_ABS_MAX_PCT;
+  if (duty_permille > LIFT_DUTY_ABS_MAX_PERMILLE) {
+    duty_permille = LIFT_DUTY_ABS_MAX_PERMILLE;
   }
   const int64_t full_scale = (static_cast<int64_t>(1) << resolution) - 1;
-  return static_cast<uint32_t>((static_cast<int64_t>(duty_pct) * full_scale) / LIFT_DUTY_ABS_MAX_PCT);
+  return static_cast<uint32_t>((static_cast<int64_t>(duty_permille) * full_scale) / LIFT_DUTY_ABS_MAX_PERMILLE);
 }

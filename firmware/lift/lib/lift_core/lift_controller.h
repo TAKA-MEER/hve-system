@@ -199,7 +199,7 @@ class LiftController {
   bool ceiling_standalone_ = LIFT_CEILING_STANDALONE_DEFAULT;  // set_ceiling_standalone で持たせる
   int ceiling_margin_mm_ = CEILING_MARGIN_MM_DEFAULT;  // set_ceiling_margin_mm で持たせる
   int motor_max_pct_ = LIFT_MOTOR_MAX_PCT_DEFAULT;  // モータへの出力の上限 [%]。set_motor_max_pct で持たせる
-  int last_duty_ = 0;          // 直前にモータへ出したデューティ（#8a の「動かしている」判定用）
+  int last_duty_ = 0;          // 直前にモータへ出したデューティ（‰。#8a の「動かしている」判定用）
   uint32_t loop_at_ms_ = 0;    // SpeedLoop を最後に進めた時刻
   bool loop_started_ = false;  // SpeedLoop を進めたことがあるか
   LiftDir loop_dir_ = LiftDir::STOP;  // SpeedLoop が持っている向き

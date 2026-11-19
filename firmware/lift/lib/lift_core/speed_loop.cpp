@@ -15,13 +15,15 @@ float speed_from_counts(int32_t prev_count, int32_t now_count, uint32_t prev_ms,
 
 int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_t dt_ms,
                       int max_pct) {
-  // 上限の外は絶対上限に丸める（呼び出し側が設定の値を渡す。ここでは守るだけ）
+  // 上限（% のまま渡す）の外は絶対上限に丸める（呼び出し側が設定の値を渡す。ここでは守るだけ）
   if (max_pct < 0) {
     max_pct = 0;
   }
   if (max_pct > LIFT_DUTY_ABS_MAX_PCT) {
     max_pct = LIFT_DUTY_ABS_MAX_PCT;
   }
+  // 係数は %・mm/s のまま計算し、出力だけ 0.1 % 刻み（‰）で返す（§4.1.2）。
+  // 上限は max_pct [%] = max_pct × 10 [‰] の意味
   const float cap = static_cast<float>(max_pct);
   const float ff_gain =
       (dir == LiftDir::DOWN) ? LIFT_FF_DOWN_PCT_PER_MM_S : LIFT_FF_UP_PCT_PER_MM_S;
@@ -44,7 +46,7 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
     } else if (out < 0.0f) {
       out = 0.0f;
     }
-    return static_cast<int>(out + 0.5f);
+    return static_cast<int>(out * 10.0f + 0.5f);
   }
   if (out < 0.0f) {
     out = ff + p + LIFT_SPEED_KI * integral_;
@@ -53,10 +55,10 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
     } else if (out > cap) {
       out = cap;
     }
-    return static_cast<int>(out + 0.5f);
+    return static_cast<int>(out * 10.0f + 0.5f);
   }
   integral_ = advanced;
-  return static_cast<int>(out + 0.5f);
+  return static_cast<int>(out * 10.0f + 0.5f);
 }
 
 void SpeedLoop::reset() { integral_ = 0.0f; }

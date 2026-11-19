@@ -719,7 +719,7 @@ LiftState LiftController::step(uint32_t now_ms) {
   const bool moving =
       has_owner && decided.reason == StopReason::NONE &&
       (decided.dir == LiftDir::UP || decided.dir == LiftDir::DOWN) && decided.dir == cmd_dir;
-  int duty = 0;
+  int duty_permille = 0;  // モータへ出すデューティ [‰]。SpeedLoop の出力のまま ‰ で通す（§4.1.2）
   if (moving) {
     // 止まった・向きが替わった・持ち主が替わったら積分を 0 に戻す（§4.1.2）
     if (!loop_started_ || decided.dir != loop_dir_ || owner.id != loop_owner_ ||
@@ -733,32 +733,33 @@ LiftState LiftController::step(uint32_t now_ms) {
       const float measured_fwd =
           (decided.dir == LiftDir::DOWN) ? -speed_up_mm_s_ : speed_up_mm_s_;
       const uint32_t dt = loop_elapsed <= 0 ? 0u : static_cast<uint32_t>(loop_elapsed);
-      duty = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt,
-                                motor_max_pct_);
+      duty_permille = speed_loop_.update(decided.speed_mm_s, measured_fwd, decided.dir, dt,
+                                         motor_max_pct_);
       loop_at_ms_ = now_ms;
       loop_started_ = true;
       loop_dir_ = decided.dir;
       loop_owner_ = owner.id;
       loop_press_ = owner_press;
     } else {
-      duty = last_duty_;
+      duty_permille = last_duty_;
     }
-    hal_->motor_set(decided.dir, duty);
+    hal_->motor_set(decided.dir, duty_permille);
   } else {
     hal_->motor_set(LiftDir::STOP, 0);
     speed_loop_.reset();
     loop_started_ = false;
     loop_dir_ = LiftDir::STOP;
-    duty = 0;
+    duty_permille = 0;
   }
-  last_duty_ = duty;
+  last_duty_ = duty_permille;
 
-  turning_ = moving && duty > 0;
+  turning_ = moving && duty_permille > 0;
   run_speed_mm_s_ = decided.speed_mm_s;
   run_at_ms_ = now_ms;
 
   state_.dir = moving ? decided.dir : LiftDir::STOP;
-  state_.duty = duty;
+  // state.duty は今までどおり整数 %（‰ を四捨五入。画面・プロトコルは変えない。§4.1.2）
+  state_.duty = (duty_permille + 5) / 10;
   state_.reason = decided.reason;
   // 止めるときの dir は STOP（指令ではなく実際に出している方向）
   if (!moving) {
