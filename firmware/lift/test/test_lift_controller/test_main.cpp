@@ -877,9 +877,10 @@ void test_speed_loop_cap_is_ten_times_motor_max_pct() {
 }
 
 // (f2) 0.1 % 刻み（‰）の値がモータに出る。前向きは 26 × 0.4 = 10.4 %（104 ‰）。
-// 測定が 0 の初期区間（ブロック窓の最初の 100 ms = 5 周期）の積分の残り（26 × 20 ms × 5 = 2.6 mm。
-// Ki 0.5 で 1.3 %）も含めて 11.7 % = 117 ‰ で安定する。整数 % の出力なら 12 % で、
-// 10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
+// エンコーダをちょうど目標の速さ（20 カウント / 20 ms）で進めると、ずらし窓の 2 本目の step 以降
+// 測った速さはちょうど 26.0 mm/s（20 × 26 / 20）で偏差 0 になる。最初の step だけ測った速さが 0 で、
+// その積分の残り（26 × 20 ms = 0.52 mm。Ki 0.5 で 0.26 %）を含めて 10.66 % = 107 ‰ で安定する。
+// 整数 % の出力なら 11 % で、10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
 void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -897,11 +898,11 @@ void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
   }
   TEST_ASSERT_TRUE(hal.motor_moving());
   TEST_ASSERT_EQUAL_INT(26, ctrl.state().speed_meas);
-  TEST_ASSERT_EQUAL_INT(117, duty);
+  TEST_ASSERT_EQUAL_INT(107, duty);
   TEST_ASSERT_TRUE(duty % 10 != 0);  // 0.1 % 単位の刻み（10 ‰ 単位ならこの剰余は 0）
 }
 
-// (f5) state.duty は ‰ を四捨五入した整数 %（117 ‰ → 12 %）。‰ をそのまま出すと 117 になる。
+// (f5) state.duty は ‰ を四捨五入した整数 %（107 ‰ → 11 %）。‰ をそのまま出すと 107 になる。
 void test_state_duty_is_rounded_percent_not_permille() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -916,8 +917,8 @@ void test_state_duty_is_rounded_percent_not_permille() {
     ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
     state = ctrl.step(t);
   }
-  TEST_ASSERT_EQUAL_INT(117, hal.motor_duty());
-  TEST_ASSERT_EQUAL_INT(12, state.duty);
+  TEST_ASSERT_EQUAL_INT(107, hal.motor_duty());
+  TEST_ASSERT_EQUAL_INT(11, state.duty);
 }
 
 // (f9) 速さの上限 250（仮）で hold の speed 200 がそのまま SpeedLoop に渡る。
@@ -932,6 +933,93 @@ void test_hold_speed_200_passes_through_to_speed_loop() {
   const LiftState state = ctrl.step(0);
   TEST_ASSERT_EQUAL_INT(200, state.speed);
   TEST_ASSERT_EQUAL_INT(500, hal.motor_duty());
+}
+
+// (f6) ずらし窓: エンコーダの速さを窓の途中で変えると、測った速さは LIFT_SPEED_CTRL_MS ごとに
+// 変わる（次のブロック境界まで 100 ms 変わらないブロック窓とは違う）。
+// 20 カウント / 20 ms（26 mm/s）を 200 ms 進めたあと、10 カウント / 20 ms にする。
+// 最初の step のあと、窓（100 ms 前の記録との差）は 90 カウント / 100 ms = 23.4 mm/s になる。
+void test_speed_meas_slides_every_control_period() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  LiftState state;
+  for (uint32_t t = 0; t <= 200; t += LIFT_SPEED_CTRL_MS) {
+    hal.set_height(500, true, t);
+    hal.set_encoder_count(static_cast<int32_t>(t));
+    ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
+    state = ctrl.step(t);
+  }
+  TEST_ASSERT_EQUAL_INT(26, state.speed_meas);
+  hal.set_height(500, true, 220);
+  hal.set_encoder_count(210);  // 窓の残りは旧速さ（20/step）・いまは 10/step
+  ctrl.on_hold(ui(1), up_hold(1, 26, 220), 220);
+  TEST_ASSERT_EQUAL_INT(23, ctrl.step(220).speed_meas);
+  hal.set_height(500, true, 240);
+  hal.set_encoder_count(220);
+  ctrl.on_hold(ui(1), up_hold(1, 26, 240), 240);
+  TEST_ASSERT_EQUAL_INT(21, ctrl.step(240).speed_meas);
+}
+
+// (f7) ずらし窓は周期が詰まったときも LIFT_SPEED_WINDOW_MS より短くならない。
+// 20 ms 刻みで 100 ms 進めたあと 80 ms の間隔で進める（この間は 10 カウント / 20 ms 相当）。
+// t=180 では 100 ms 前の記録（t=80）との差 60 カウント / 100 ms = 15.6 mm/s になる。
+// 最も新しい記録（t=100）との差で求める変異は 40 / 80 ms = 13 mm/s になる。
+void test_speed_window_is_not_shortened_by_a_stall() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  LiftState state;
+  for (uint32_t t = 0; t <= 100; t += LIFT_SPEED_CTRL_MS) {
+    hal.set_height(500, true, t);
+    hal.set_encoder_count(static_cast<int32_t>(t));
+    ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
+    state = ctrl.step(t);
+  }
+  TEST_ASSERT_EQUAL_INT(26, state.speed_meas);
+  hal.set_height(500, true, 180);
+  hal.set_encoder_count(140);  // 直前 100 ms 間は旧 20/step で、最後 80 ms は 10/step 相当
+  ctrl.on_hold(ui(1), up_hold(1, 26, 180), 180);
+  TEST_ASSERT_EQUAL_INT(16, ctrl.step(180).speed_meas);
+}
+
+// (f8a) 止まったら窓の記録を捨てる（測った速さが 0 に戻る。経てば 0 に戻るブロック窓とは違う）。
+void test_speed_window_is_discarded_on_stop() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  LiftState state;
+  for (uint32_t t = 0; t <= 100; t += LIFT_SPEED_CTRL_MS) {
+    hal.set_height(500, true, t);
+    hal.set_encoder_count(static_cast<int32_t>(t));
+    ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
+    state = ctrl.step(t);
+  }
+  TEST_ASSERT_EQUAL_INT(26, state.speed_meas);
+  ctrl.on_release(ui(1), 1);
+  hal.set_encoder_count(100);
+  TEST_ASSERT_EQUAL_INT(0, ctrl.step(120).speed_meas);
+}
+
+// (f8b) 向きが替わったら窓の記録を捨てる。同じ press のまま上昇から下降に替えると、最初の step で
+// 測った速さは 0（前の向きの記録で測れば -5 に見える）で、2 本目の step から下降側の -26 mm/s になる。
+void test_speed_window_is_discarded_on_direction_change() {
+  FakeHal hal;
+  LiftController ctrl(&hal, LIFT_TOP_MM);
+  LiftState state;
+  for (uint32_t t = 0; t <= 100; t += LIFT_SPEED_CTRL_MS) {
+    hal.set_height(500, true, t);
+    hal.set_encoder_count(static_cast<int32_t>(t));
+    ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
+    state = ctrl.step(t);
+  }
+  TEST_ASSERT_EQUAL_INT(26, state.speed_meas);
+  hal.set_height(500, true, 120);
+  hal.set_encoder_count(80);  // 下降 20 カウント / 20 ms
+  ctrl.on_hold(ui(1), down_hold(1, 26), 120);
+  TEST_ASSERT_EQUAL_INT(0, ctrl.step(120).speed_meas);
+  TEST_ASSERT_TRUE(hal.motor_dir() == LiftDir::DOWN);
+  hal.set_height(500, true, 140);
+  hal.set_encoder_count(60);
+  ctrl.on_hold(ui(1), down_hold(1, 26), 140);
+  TEST_ASSERT_EQUAL_INT(-26, ctrl.step(140).speed_meas);
 }
 
 void test_motor_is_written_on_every_step() {
@@ -2725,6 +2813,10 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_motor_duty_is_in_permille_with_0_1_percent_steps);
   RUN_TEST(test_state_duty_is_rounded_percent_not_permille);
   RUN_TEST(test_hold_speed_200_passes_through_to_speed_loop);
+  RUN_TEST(test_speed_meas_slides_every_control_period);
+  RUN_TEST(test_speed_window_is_not_shortened_by_a_stall);
+  RUN_TEST(test_speed_window_is_discarded_on_stop);
+  RUN_TEST(test_speed_window_is_discarded_on_direction_change);
   RUN_TEST(test_motor_is_written_on_every_step);
 
   RUN_TEST(test_state_reports_top_detect_true_and_module);

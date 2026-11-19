@@ -605,19 +605,51 @@ LiftState LiftController::step(uint32_t now_ms) {
   }
   run_dir_ = cmd_dir;
 
-  // 速さを測る（窓の起点から LIFT_SPEED_WINDOW_MS 以上経てば取り直す。原点に依らない）
+  // 速さを測る（ずらし窓。原点に依らない。§4.1.2）
   const int32_t enc_now = hal_->encoder_count();
-  if (!speed_win_valid_) {
-    speed_win_count_ = enc_now;
-    speed_win_ms_ = now_ms;
-    speed_win_valid_ = true;
+  // 止まった・向きが替わった・持ち主が替わったら記録を捨てる（前の向きで測った速さを持ち越さない）
+  if (!has_owner || cmd_dir == LiftDir::STOP || cmd_dir != speed_prev_dir_ ||
+      owner.id != speed_prev_owner_ || owner_press != speed_prev_press_ ||
+      !speed_prev_moving_) {
+    speed_samples_n_ = 0;
     speed_up_mm_s_ = 0.0f;
-  } else if (elapsed_ms(now_ms, speed_win_ms_) >=
-             static_cast<int32_t>(LIFT_SPEED_WINDOW_MS)) {
-    speed_up_mm_s_ = speed_from_counts(speed_win_count_, enc_now, speed_win_ms_, now_ms,
-                                       LIFT_UM_PER_COUNT, ENC_UP_SIGN);
-    speed_win_count_ = enc_now;
-    speed_win_ms_ = now_ms;
+  }
+  speed_prev_dir_ = cmd_dir;
+  speed_prev_owner_ = has_owner ? owner.id : -1;
+  speed_prev_press_ = owner_press;
+  // LIFT_SPEED_CTRL_MS ごとに数と時刻を記録し、毎周期「いまの数 − LIFT_SPEED_WINDOW_MS 前の記録」
+  // から求める。LIFT_SPEED_WINDOW_MS 以上前の記録のうちいちばん新しいものを使う
+  // （loop が詰まって周期が延びても窓がそれより短くならない）。記録が窓の長さぶん溜まるまでは、
+  // いちばん古い記録との差で求める（§4.1.2）
+  if (speed_samples_n_ == 0 ||
+      elapsed_ms(now_ms, speed_last_record_ms_) >= static_cast<int32_t>(LIFT_SPEED_CTRL_MS)) {
+    if (speed_samples_n_ < kSpeedSamples) {
+      speed_samples_[speed_samples_n_].count = enc_now;
+      speed_samples_[speed_samples_n_].ms = now_ms;
+      speed_samples_n_++;
+    } else {
+      for (int i = 0; i + 1 < kSpeedSamples; ++i) {
+        speed_samples_[i] = speed_samples_[i + 1];
+      }
+      speed_samples_[kSpeedSamples - 1].count = enc_now;
+      speed_samples_[kSpeedSamples - 1].ms = now_ms;
+    }
+    speed_last_record_ms_ = now_ms;
+  }
+  if (speed_samples_n_ > 0) {
+    int base = 0;
+    for (int i = speed_samples_n_ - 1; i >= 0; --i) {
+      if (elapsed_ms(now_ms, speed_samples_[i].ms) >=
+          static_cast<int32_t>(LIFT_SPEED_WINDOW_MS)) {
+        base = i;
+        break;
+      }
+    }
+    speed_up_mm_s_ = speed_from_counts(speed_samples_[base].count, enc_now,
+                                       speed_samples_[base].ms, now_ms, LIFT_UM_PER_COUNT,
+                                       ENC_UP_SIGN);
+  } else {
+    speed_up_mm_s_ = 0.0f;
   }
 
   // #8a の数え（§4.1）。命令が stop になるか向きが替わるまで続ける。
@@ -754,6 +786,7 @@ LiftState LiftController::step(uint32_t now_ms) {
   last_duty_ = duty_permille;
 
   turning_ = moving && duty_permille > 0;
+  speed_prev_moving_ = moving;
   run_speed_mm_s_ = decided.speed_mm_s;
   run_at_ms_ = now_ms;
 

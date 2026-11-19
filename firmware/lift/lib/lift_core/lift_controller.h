@@ -205,11 +205,22 @@ class LiftController {
   LiftDir loop_dir_ = LiftDir::STOP;  // SpeedLoop が持っている向き
   int loop_owner_ = -1;               // SpeedLoop が持っている持ち主の接続番号
   int loop_press_ = 0;               // 同じく press
-  // 速さの測定（窓の起点。LIFT_SPEED_WINDOW_MS ごとに取り直す）
-  int32_t speed_win_count_ = 0;
-  uint32_t speed_win_ms_ = 0;
-  bool speed_win_valid_ = false;
+  // 速さの測定（ずらし窓。DetailedDesign.md §4.1.2。WP-LIFT-19）
+  struct SpeedSample {
+    int32_t count;
+    uint32_t ms;
+  };
+  // 記録数は LIFT_SPEED_WINDOW_MS / LIFT_SPEED_CTRL_MS + 1（6）。loop が詰まったときの窓を保つため
+  static constexpr int kSpeedSamples = LIFT_SPEED_WINDOW_MS / LIFT_SPEED_CTRL_MS + 1;
+  SpeedSample speed_samples_[kSpeedSamples];
+  int speed_samples_n_ = 0;
+  uint32_t speed_last_record_ms_ = 0;
   float speed_up_mm_s_ = 0.0f;  // 測った速さ（上向きが正）
+  // ずらし窓の記録を捨てる条件（止まった・向きが替わった・持ち主が替わった）の前周期の値
+  LiftDir speed_prev_dir_ = LiftDir::STOP;
+  int speed_prev_owner_ = -1;
+  int speed_prev_press_ = 0;
+  bool speed_prev_moving_ = false;
   // #8a の数え（DetailedDesign.md §4.1）。持ち主が替わっても数え直さない
   bool stalled_ = false;
   LiftDir stall_dir_ = LiftDir::STOP;  // 数えている方向（替われば取り直す）
