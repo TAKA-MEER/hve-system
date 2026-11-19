@@ -5,7 +5,7 @@
 
 - 4 項目（`lift_up`・`lift_down`・`pitch`・`yaw`）すべてが揃う
 - `min ≦ init ≦ max`
-- `lift_*` は 0〜`LIFT_SPEED_ABS_MAX_MM_S`（100）[mm/s] の整数・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
+- `lift_*` は 0〜`LIFT_SPEED_ABS_MAX_MM_S`（255）[mm/s] の整数・`pitch` / `yaw` は 0 超〜`axis_speed_abs_max_dps`
 - `motor_max_pct`（`PUT` では必須。10〜100 の整数。真偽値は不可。spec
   [Spec-ui.md](../../docs/plan/spec/Spec-ui.md) §2.1）
 - `ceiling_standalone`（**無くてもよい**。あれば真偽値。単体の操作でも天井で止めるか。spec §2.2。
@@ -38,7 +38,7 @@ _SPEED_AXES = ("lift_up", "lift_down", "pitch", "yaw")
 _SPEED_FIELDS = ("min", "max", "init")
 
 #: 昇降の速さの絶対範囲の上限 [mm/s]。protocol §3。names §5 `LIFT_SPEED_ABS_MAX_MM_S`。
-_LIFT_SPEED_ABS_MAX_MM_S = 100
+_LIFT_SPEED_ABS_MAX_MM_S = 255
 
 #: 0 を含める（0 以上でよい）軸。昇降の 2 軸（目標の速さ [mm/s] の整数）。
 _LIFT_SPEED_AXES = ("lift_up", "lift_down")
@@ -48,8 +48,8 @@ _POSITIVE_ONLY_AXES = ("pitch", "yaw")
 
 #: ファイルが無い・壊れているときの既定値。protocol §3 の例の値。**仮**（names §5）。
 _DEFAULT_SETTINGS: dict[str, dict[str, float]] = {
-    "lift_up": {"min": 10, "max": 60, "init": 30},
-    "lift_down": {"min": 10, "max": 60, "init": 30},
+    "lift_up": {"min": 10, "max": 200, "init": 100},
+    "lift_down": {"min": 10, "max": 200, "init": 100},
     "pitch": {"min": 1, "max": 30, "init": 10},
     "yaw": {"min": 1, "max": 30, "init": 10},
 }
