@@ -41,7 +41,11 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
   }
   float out = ff + p + LIFT_SPEED_KI * advanced;
   if (out > cap) {
-    // 上の丸めに当たったので積分は進めない。進めない値でも丸める
+    // 上の丸めに当たった。偏差が負（速すぎ）なら積分を進めて丸めを解く向きに動く。
+    // それ以外（丸めを深くする向き）では積分は進めない。進めない値でも丸める
+    if (error < 0.0f) {
+      integral_ = advanced;
+    }
     out = ff + p + LIFT_SPEED_KI * integral_;
     if (out > cap) {
       out = cap;
@@ -51,6 +55,11 @@ int SpeedLoop::update(int target_mm_s, float measured_mm_s, LiftDir dir, uint32_
     return static_cast<int>(out * 10.0f + 0.5f);
   }
   if (out < 0.0f) {
+    // 下の丸めに当たった。偏差が正（遅すぎ）なら積分を進めて丸めを解く向きに動く。
+    // それ以外では積分は進めない
+    if (error > 0.0f) {
+      integral_ = advanced;
+    }
     out = ff + p + LIFT_SPEED_KI * integral_;
     if (out < 0.0f) {
       out = 0.0f;
