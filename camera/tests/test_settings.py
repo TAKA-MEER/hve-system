@@ -17,8 +17,8 @@ ABS_MAX_DPS = PARAMS["axis_speed_abs_max_dps"]
 # protocol §3 の例の値。実装の定数ではなく仕様どおりの値をここに固定する。
 # カメラモジュールのファイルが持つのは 4 軸だけ（`motor_max_pct` の持ち主は昇降部）。
 PROTOCOL_DEFAULTS = {
-    "lift_up": {"min": 10, "max": 60, "init": 30},
-    "lift_down": {"min": 10, "max": 60, "init": 30},
+    "lift_up": {"min": 10, "max": 200, "init": 100},
+    "lift_down": {"min": 10, "max": 200, "init": 100},
     "pitch": {"min": 1, "max": 30, "init": 10},
     "yaw": {"min": 1, "max": 30, "init": 10},
 }
@@ -155,7 +155,7 @@ def test_min_equal_to_init_equal_to_max_passes(axis):
 
 def test_several_problems_are_all_listed():
     data = variant(
-        lift_up={"min": 10, "max": 200, "init": 30},
+        lift_up={"min": 10, "max": 300, "init": 30},
         pitch={"min": 0, "max": ABS_MAX_DPS + 10, "init": 0},
     )
     errors = validate_settings(data, PARAMS)
@@ -169,13 +169,13 @@ def test_several_problems_are_all_listed():
 
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
-def test_lift_speed_0_to_100_is_inclusive(axis):
-    assert validate_settings(variant(**{axis: {"min": 0, "max": 100, "init": 0}}), PARAMS) == []
+def test_lift_speed_0_to_255_is_inclusive(axis):
+    assert validate_settings(variant(**{axis: {"min": 0, "max": 255, "init": 0}}), PARAMS) == []
 
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
-def test_lift_speed_over_100_is_reported(axis):
-    errors = validate_settings(variant(**{axis: {"min": 10, "max": 101, "init": 30}}), PARAMS)
+def test_lift_speed_over_255_is_reported(axis):
+    errors = validate_settings(variant(**{axis: {"min": 10, "max": 256, "init": 30}}), PARAMS)
     assert len(errors) == 1
     assert f"{axis}.max" in errors[0]
 
@@ -188,7 +188,7 @@ def test_lift_speed_below_0_is_reported(axis):
 
 
 @pytest.mark.parametrize("axis", ["lift_up", "lift_down"])
-@pytest.mark.parametrize("field,value", [("min", 10.5), ("max", 60.5), ("init", 30.5)])
+@pytest.mark.parametrize("field,value", [("min", 10.5), ("max", 200.5), ("init", 30.5)])
 def test_lift_speed_must_be_an_integer(axis, field, value):
     """昇降の速さは mm/s の整数（protocol §3）。小数は落とす（順序は保った値で）。"""
     errors = validate_settings(with_field(axis, field, value), PARAMS)
@@ -336,7 +336,7 @@ def test_load_does_not_hand_out_the_defaults_by_reference(settings_path):
     data, _ = load_settings(settings_path, PARAMS)
     data["lift_up"]["init"] = 999
     again, _ = load_settings(settings_path, PARAMS)
-    assert again["lift_up"]["init"] == 30
+    assert again["lift_up"]["init"] == 100
 
 
 # --- 保存 -------------------------------------------------------------------------------------

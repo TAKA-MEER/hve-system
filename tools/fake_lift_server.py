@@ -69,7 +69,7 @@ CEILING_STALE_MS = 600  # 仮
 LIFT_MAX_RUN_PCT = 150  # 仮（連続駆動の上限 = 全行程の何 % か。spec #4b）
 LIFT_TOP_MM = 1800  # 偽物は上端の判定を持たないので、連続駆動の上限の全行程はこれで数える
 LIFT_DUTY_ABS_MAX_PCT = 100
-LIFT_SPEED_ABS_MAX_MM_S = 100  # 仮（設定の検証の上限・命令の丸め）
+LIFT_SPEED_ABS_MAX_MM_S = 255  # 設定の検証の上限・命令の丸め（spec Spec-ui §2）
 LIFT_STALL_MS = 500  # 仮（spec #4d。動き出しの遅れより長く）
 LIFT_STATE_PERIOD_MS = 100  # 仮
 LIFT_MOTOR_MAX_PCT_DEFAULT = 50  # モータへの出力の上限の既定値 [%]（Spec-ui §2.1）
@@ -83,8 +83,8 @@ FW = "fake-0.4.0"
 PROVISIONAL = ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"]
 
 DEFAULT_SETTINGS = {
-    "lift_up": {"min": 10, "max": 60, "init": 30},
-    "lift_down": {"min": 10, "max": 60, "init": 30},
+    "lift_up": {"min": 10, "max": 200, "init": 100},
+    "lift_down": {"min": 10, "max": 200, "init": 100},
     "motor_max_pct": LIFT_MOTOR_MAX_PCT_DEFAULT,
     # 単体の操作（昇降部の画面・物理ボタン）でも天井で止めるか（spec Spec-ui §2.2。既定は入）
     "ceiling_standalone": True,
@@ -119,14 +119,15 @@ def validate_axis(values: dict) -> bool:
     if not (isinstance(values["min"], int) and isinstance(values["max"], int)
             and isinstance(values["init"], int)):
         return False
-    return 0 <= lo <= 100 and 0 <= hi <= 100 and 0 <= init <= 100 and lo <= init <= hi
+    return (0 <= lo <= LIFT_SPEED_ABS_MAX_MM_S and 0 <= hi <= LIFT_SPEED_ABS_MAX_MM_S
+            and 0 <= init <= LIFT_SPEED_ABS_MAX_MM_S and lo <= init <= hi)
 
 
 def validate_settings(body: dict) -> list[str]:
     errors = []
     for key in ("lift_up", "lift_down"):
         if not isinstance(body.get(key), dict) or not validate_axis(body[key]):
-            errors.append(f"{key}: 下限 ≦ 初期値 ≦ 上限・0〜100 mm/s の整数にしてください")
+            errors.append(f"{key}: 下限 ≦ 初期値 ≦ 上限・0〜255 mm/s の整数にしてください")
     motor = body.get("motor_max_pct")
     if (not isinstance(motor, int) or isinstance(motor, bool)
             or not LIFT_MOTOR_MAX_PCT_MIN <= motor <= LIFT_DUTY_ABS_MAX_PCT):

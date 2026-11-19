@@ -106,10 +106,10 @@ def test_decode_hold_drops_a_duty_only_hold():
 
 
 def test_decode_hold_clamps_speed_to_abs_max():
-    """`speed` は 0〜LIFT_SPEED_ABS_MAX_MM_S（100）に丸める。"""
-    hold = decode_hold(hold_text(speed=140, ceiling=FAR), 1000)
+    """`speed` は 0〜LIFT_SPEED_ABS_MAX_MM_S（255）に丸める。"""
+    hold = decode_hold(hold_text(speed=300, ceiling=FAR), 1000)
     assert hold is not None
-    assert hold["speed"] == 100
+    assert hold["speed"] == 255
 
 
 def test_decode_hold_drops_a_hold_with_a_broken_speed():
@@ -328,8 +328,8 @@ def test_second_hello_does_not_remove_the_sensor():
 
 
 def good_settings() -> dict:
-    return {"lift_up": {"min": 10, "max": 60, "init": 30},
-            "lift_down": {"min": 10, "max": 60, "init": 30},
+    return {"lift_up": {"min": 10, "max": 200, "init": 100},
+            "lift_down": {"min": 10, "max": 200, "init": 100},
             "motor_max_pct": 50}
 
 
@@ -374,7 +374,7 @@ async def test_settings_round_trip(aiohttp_client, tmp_path):
     app = fake.make_app(tmp_path, FakeLift())
     client = await aiohttp_client(app)
     body = await (await client.get("/api/settings")).json()
-    assert body["settings"]["lift_up"]["init"] == 30
+    assert body["settings"]["lift_up"] == {"min": 10, "max": 200, "init": 100}
     assert body["settings"]["motor_max_pct"] == 50
     bad = await client.put("/api/settings", json={"lift_up": {"min": 70, "max": 60, "init": 30},
                                                   "lift_down": {"min": 10, "max": 60, "init": 30},
@@ -384,7 +384,7 @@ async def test_settings_round_trip(aiohttp_client, tmp_path):
                                                       "lift_down": {"min": 10, "max": 60, "init": 30}})
     assert missing.status == 400
     kept = await (await client.get("/api/settings")).json()
-    assert kept["settings"]["lift_up"] == {"min": 10, "max": 60, "init": 30}
+    assert kept["settings"]["lift_up"] == {"min": 10, "max": 200, "init": 100}
     assert kept["settings"]["motor_max_pct"] == 50
     ok = await client.put("/api/settings", json=good_settings())
     assert ok.status == 200

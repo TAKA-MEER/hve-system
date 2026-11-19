@@ -12,8 +12,8 @@ constexpr bool LIFT_CEILING_STANDALONE_DEFAULT = true;
 // 1 軸ぶんの下限・上限・初期値 [mm/s]
 struct LiftAxisSettings {
   int min_mm_s = 10;
-  int max_mm_s = 60;
-  int init_mm_s = 30;
+  int max_mm_s = 200;
+  int init_mm_s = 100;
 };
 
 // 昇降の設定（DetailedDesign-names.md §1・既定値は §5.1）

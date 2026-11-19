@@ -22,7 +22,7 @@ from hve_camera.lift_link import LiftPort
 LIFT_CMD_TIMEOUT_MS = 600
 LIFT_TOP_MM = 1800  # 偽物は上端の判定を持たないので、連続駆動の上限の全行程はこれで数える
 LIFT_MAX_RUN_PCT = 150  # 連続駆動の上限 = 全行程の何 % か（lift_core の LIFT_MAX_RUN_PCT と同じ）
-LIFT_SPEED_ABS_MAX_MM_S = 100
+LIFT_SPEED_ABS_MAX_MM_S = 255
 LIFT_STATE_PERIOD_MS = 100
 CEILING_MARGIN_MM = 500  # 設定 `ceiling_margin_mm` の既定値（`CEILING_MARGIN_MM_DEFAULT` と同じ）
 CEILING_STALE_MS = 600

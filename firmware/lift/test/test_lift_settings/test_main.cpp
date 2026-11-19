@@ -16,6 +16,14 @@ LiftSettings defaults() { return LiftSettings(); }
 void test_defaults_are_valid() {
   TEST_ASSERT_TRUE(validate_lift_settings(defaults()));
   TEST_ASSERT_EQUAL_INT(LIFT_MOTOR_MAX_PCT_DEFAULT, defaults().motor_max_pct);
+  // WP-LIFT-20: 速さの絶対上限 255・既定 {10, 200, 100}（spec Spec-ui §2）
+  TEST_ASSERT_EQUAL_INT(255, LIFT_SPEED_ABS_MAX_MM_S);
+  TEST_ASSERT_EQUAL_INT(10, defaults().up.min_mm_s);
+  TEST_ASSERT_EQUAL_INT(200, defaults().up.max_mm_s);
+  TEST_ASSERT_EQUAL_INT(100, defaults().up.init_mm_s);
+  TEST_ASSERT_EQUAL_INT(10, defaults().down.min_mm_s);
+  TEST_ASSERT_EQUAL_INT(200, defaults().down.max_mm_s);
+  TEST_ASSERT_EQUAL_INT(100, defaults().down.init_mm_s);
 }
 
 void test_min_above_init_is_rejected() {
@@ -27,7 +35,7 @@ void test_min_above_init_is_rejected() {
 
 void test_init_above_max_is_rejected() {
   LiftSettings settings = defaults();
-  settings.down.init_mm_s = 61;
+  settings.down.init_mm_s = 201;
   TEST_ASSERT_FALSE(validate_lift_settings(settings));
 }
 

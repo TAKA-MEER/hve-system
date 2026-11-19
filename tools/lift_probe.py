@@ -40,8 +40,8 @@ from typing import Any
 
 import aiohttp
 
-# 速さの絶対上限 [mm/s]。詳細設計の LIFT_SPEED_ABS_MAX_MM_S と同じ（WP-LIFT-19 で 250 に上げた限界を測る用）
-LIFT_SPEED_ABS_MAX_MM_S = 250
+# 速さの絶対上限 [mm/s]。詳細設計の LIFT_SPEED_ABS_MAX_MM_S と同じ（spec Spec-ui §2）
+LIFT_SPEED_ABS_MAX_MM_S = 255
 # `hold` を送る周期。**仮**（DetailedDesign-names.md §5.2 の ui_hold_period_ms と同じ）
 lift_probe_period_ms = 100
 # 起動直後の速さ [mm/s]。**仮**（旧版の例の値。単位だけ替わった）

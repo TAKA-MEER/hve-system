@@ -12,8 +12,8 @@
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
 const SETTING_AXES = [
-  {key: 'lift_up',   name: '上昇',   unit: 'mm/s',  abs_low: 0,   abs_high: 100, step: 1},
-  {key: 'lift_down', name: '下降',   unit: 'mm/s',  abs_low: 0,   abs_high: 100, step: 1},
+  {key: 'lift_up',   name: '上昇',   unit: 'mm/s',  abs_low: 0,   abs_high: 255, step: 1},
+  {key: 'lift_down', name: '下降',   unit: 'mm/s',  abs_low: 0,   abs_high: 255, step: 1},
   {key: 'pitch',     name: 'ピッチ', unit: 'deg/s', abs_low: 0.1, abs_high: 60,  step: 0.5},
   {key: 'yaw',       name: 'ヨー',   unit: 'deg/s', abs_low: 0.1, abs_high: 60,  step: 0.5},
 ];

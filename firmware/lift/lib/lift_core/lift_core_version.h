@@ -3,5 +3,5 @@
 #pragma once
 
 inline const char* lift_core_version() {
-  return "0.7.0";
+  return "0.8.0";
 }

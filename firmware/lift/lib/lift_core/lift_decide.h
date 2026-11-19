@@ -25,7 +25,7 @@ constexpr int LIFT_DUTY_ABS_MAX_PCT = 100;      // デューティの絶対上�
 constexpr int LIFT_DUTY_ABS_MAX_PERMILLE = 1000;  // デューティの絶対上限 [‰]。SpeedLoop の出力・motor_set・motor_duty_to_pwm の単位（DetailedDesign.md §4.1.2）
 constexpr int LIFT_MOTOR_MAX_PCT_DEFAULT = 50;  // モータへの出力の上限の既定値 [%]（定格 12 V ÷ 電源 24 V。Spec-ui §2.1）
 constexpr int LIFT_MOTOR_MAX_PCT_MIN = 10;      // モータへの出力の上限の下限 [%]（同上。上限は LIFT_DUTY_ABS_MAX_PCT）
-constexpr int LIFT_SPEED_ABS_MAX_MM_S = 250;    // 速さの絶対上限 [mm/s]（仮。昇降機の限界を測るため WP-LIFT-19 で 100 から上げた）
+constexpr int LIFT_SPEED_ABS_MAX_MM_S = 255;    // 速さの絶対上限 [mm/s]（spec Spec-ui §2。昇降機の限界の実測を踏まえた確定値）
 constexpr uint32_t LIFT_ARM_LINK_TIMEOUT_MS = 1000;  // 最後の arm からこれだけ届かなければアームの制御器と通信できない（仮。#4e）
 constexpr uint32_t LIFT_STALL_MS = 500;         // 出力しているのに進まなければ止めるまでの時間（仮）
 // 止めずに済む進行方向への最小の進みは hal_core.h の LIFT_STALL_MIN_UM /

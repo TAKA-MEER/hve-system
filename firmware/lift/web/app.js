@@ -28,8 +28,8 @@ const lift_gauge_full_mm = 1800;  // 高さのゲージの満量
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
 const SETTING_AXES = [
-  {key: 'lift_up', name: '上昇', unit: 'mm/s', abs_low: 0, abs_high: 100, step: 1},
-  {key: 'lift_down', name: '下降', unit: 'mm/s', abs_low: 0, abs_high: 100, step: 1},
+  {key: 'lift_up', name: '上昇', unit: 'mm/s', abs_low: 0, abs_high: 255, step: 1},
+  {key: 'lift_down', name: '下降', unit: 'mm/s', abs_low: 0, abs_high: 255, step: 1},
 ];
 
 /* モータへの出力の上限 [%]（Spec-ui §2.1）。速度の 3 値ではなく 1 値 */
