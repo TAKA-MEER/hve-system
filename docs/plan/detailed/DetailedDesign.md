@@ -207,10 +207,11 @@ UnitV2 が一時的に固まると、Arduino の天井の行が受信バッフ�
 
 | 項目 | 決まり |
 | --- | --- |
-| 測った速さ | エンコーダの数の直近 `LIFT_SPEED_WINDOW_MS` の差 × `LIFT_UM_PER_COUNT` から mm/s。**原点の有無に依らない**（原点を取る前の下降でも効く） |
-| 出力 | `duty = 前向き（目標 × LIFT_FF_UP/DOWN_PCT_PER_MM_S） ＋ Kp × 偏差 ＋ Ki × 偏差の積分`。**`0`〜`motor_max_pct`（設定。既定 `LIFT_MOTOR_MAX_PCT_DEFAULT` = 50）に丸める**（spec [Spec-ui.md](../spec/Spec-ui.md) §2.1）。前向きの係数を上昇・下降で別に持つ（重力の分） |
+| 測った速さ | エンコーダの数の直近 `LIFT_SPEED_WINDOW_MS` の差 × `LIFT_UM_PER_COUNT` から mm/s。**原点の有無に依らない**（原点を取る前の下降でも効く）。**ずらし窓**: `LIFT_SPEED_CTRL_MS` ごとに数と時刻を記録し、毎周期「いまの数 − `LIFT_SPEED_WINDOW_MS` 前の記録」から求める（2026-11-19。それまでは窓の起点から 100 ms ごとに取り直すブロック窓で、測った値が 100 ms 変わらず、I が同じ古い偏差を 5 回積んで下降で揺れた）。記録が窓の長さぶん溜まるまでは、いちばん古い記録との差で求める |
+| 出力 | `duty = 前向き（目標 × LIFT_FF_UP/DOWN_PCT_PER_MM_S） ＋ Kp × 偏差 ＋ Ki × 偏差の積分`。**`0`〜`motor_max_pct`（設定。既定 `LIFT_MOTOR_MAX_PCT_DEFAULT` = 50）に丸める**（spec [Spec-ui.md](../spec/Spec-ui.md) §2.1）。前向きの係数を上昇・下降で別に持つ（重力の分）。**係数は %・mm/s のまま、出力を 0.1 % 刻み（‰ の整数。`LIFT_DUTY_ABS_MAX_PERMILLE` = 1000）で出す**（2026-11-19。整数 % では 1 % が約 5 mm/s にあたり、下降 30 mm/s〈6〜8 %〉で整数のあいだを往復した）。上限は `motor_max_pct × 10` ‰ |
+| ‰ の通る所 | `SpeedLoop::update` の戻り値・`LiftHal::motor_set` の引数・`last_duty_`（#8a の「動かしている」）・`motor_duty_to_pwm` の引数は ‰。**`state.duty` は今までどおり整数 %**（‰ を四捨五入して送る。画面・カメラモジュール・プロトコルは変えない）。設定の `motor_max_pct` も整数 % のまま |
 | モータ保護の上限の渡し方 | `LiftController::set_motor_max_pct()` で持たせ、`tick` が `SpeedLoop::update` の引数で渡す。`main.cpp` は起動時（NVS を読んだあと）と `PUT /api/settings` の成功時に呼ぶ。**動いている最中に下げたら、次の周期から新しい上限で丸める** |
-| デューティ → PWM | `motor_duty_to_pwm` は**今までどおり 100 % ＝ PWM の最大**（`LIFT_DUTY_ABS_MAX_PCT` で割る）。上限は % の側で掛ける。**上限の値で割らない**（割ると 50 % が PWM の最大になり、24 V がそのままかかる） |
+| デューティ → PWM | `motor_duty_to_pwm` は**今までどおり 100 %（1000 ‰）＝ PWM の最大**（`LIFT_DUTY_ABS_MAX_PERMILLE` で割る）。上限は ‰ の側で掛ける。**上限の値で割らない**（割ると 50 % が PWM の最大になり、24 V がそのままかかる）。**PWM は 10 bit**（`PWM_RESOLUTION`。5 kHz の LEDC で取れる。2026-11-19 に 8 bit から）。`ledcWrite` へ渡すときに 8 bit へ切り詰めない |
 | 周期 | `LIFT_SPEED_CTRL_MS` ごと（`LiftController::tick` の中。`loop` が詰まったら経過時間で割る） |
 | 積分の扱い | 出力が丸め（`0` と `motor_max_pct`）に当たっている間は積分を進めない。**止まった・向きが替わった・持ち主が替わったら 0 に戻す**（前の向きの積分を持ち越さない） |
 | 測った速さが逆向き | 偏差として扱い（出力を上げる方向に効く）、#8a が止める。`ENC_UP_SIGN` の取り違えをここで捕まえる |

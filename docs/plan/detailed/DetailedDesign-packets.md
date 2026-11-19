@@ -98,6 +98,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 **段階 12（2026-11-18。ピッチの遊びの片寄せ。[DetailedDesign.md](DetailedDesign.md) §4.3.1）**: `WP-CAM-16` だけ。`aim` の `ARRIVED` の意味を変える（2026-11-18 に ss-system が確かめた。ss は `ARRIVED` のあと 0.5 s 待って撮る・`X-Still-Ms` が `X-Frame-Age-Ms` より短い静止画は捨てる）。UNO のファームは変えない。実機に入ったら ss-system に知らせる。
 
+**段階 13（2026-11-19。昇降の速さの制御の揺れ・限界を測る用意。[DetailedDesign.md](DetailedDesign.md) §4.1.2）**: `WP-LIFT-19` だけ。昇降部のファームと `tools/lift_probe.py` だけで、プロトコル・画面・カメラモジュールは変えない（`state.duty` は整数 % のまま）。速さの上限・設定の既定値は、実機で限界を測ってから別に決める。
+
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
 **2026-10-06: 1・2・5 は通った**（`aiohttp` 3.6.2 などは OS に入っていた。[-hardware.md](DetailedDesign-hardware.md) §2.1.1）。
@@ -662,3 +664,26 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   6. 起動・UNO の再起動・省電力から戻ったときに片寄せしない（3 つ別々）
   7. 行き過ぎ点を範囲に丸めない
   8. `state.pitch_deg` に行き過ぎ点を出す
+
+### `WP-LIFT-19` 速さの制御の刻み・ずらし窓・係数（昇降部のファーム）
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.1.2（全部）・§4.1 の #8a、[-names.md](DetailedDesign-names.md) §5.1 の `LIFT_DUTY_ABS_MAX_PERMILLE`・`PWM_RESOLUTION`・`LIFT_SPEED_ABS_MAX_MM_S`・`LIFT_SPEED_KP`／`KI`
+- 作るもの（この順で。**刻みとずらし窓を先に入れ、係数はそのあと**）:
+  1. ‰: `lift_decide.h` に `LIFT_DUTY_ABS_MAX_PERMILLE`。`SpeedLoop::update` は ‰ を返す（上限は `max_pct × 10`。積分の止め方は今までどおり上限と 0 で）。`LiftHal::motor_set`・偽 HAL・`hal_esp32`・`last_duty_`・`motor_duty_to_pwm`（‰ を受け、`LIFT_DUTY_ABS_MAX_PERMILLE` で割る。0 以下は必ず 0）を ‰ に。`state.duty` は ‰ を四捨五入した整数 %。組み立て用ファーム（`MANUAL_DUTY_PCT` は % のまま、渡すところで ×10）
+  2. PWM: `config.h` の `PWM_RESOLUTION` を 10。**`hal_esp32.cpp` の `static_cast<uint8_t>(...)` を外す**（10 bit の値の上の桁が切れ、26 % が 10/1023 になって回らない）
+  3. ずらし窓: `LiftController` の速さの測り方を §4.1.2 の「測った速さ」の行のとおりに（記録の数は `LIFT_SPEED_WINDOW_MS / LIFT_SPEED_CTRL_MS + 1` 程度の固定長。`loop` が詰まって周期が延びても、`LIFT_SPEED_WINDOW_MS` 以上前の記録のうちいちばん新しいものを使う）。#8a・#8 は今までどおり測った速さを使わない
+  4. 係数: `LIFT_SPEED_KP` 0.04・`LIFT_SPEED_KI` 0.5（仮）
+  5. 速さの上限: `LIFT_SPEED_ABS_MAX_MM_S` を 250（仮。限界を測るため）。`tools/lift_probe.py` の `clamp_speed` も 250 に（定数にしてテストで縛る）。画面・カメラモジュール・設定の既定値は**変えない**
+  6. `lift_core_version` を上げる。**`docs/使い方.md`** に変わる操作はない（`lift_probe` の速さの上限だけ書いてあれば直す）
+- 受け入れ: `pio test -d firmware/lift -e native`・`pio run -d firmware/lift -e esp32dev`・`pio run -d firmware/lift -e esp32dev_manual`・`.venv/bin/python -m pytest tools/tests` が通る。次の変異がそれぞれ赤（**`LiftController` を偽 HAL で回し、`motor_set` に渡った値で縛る**。`SpeedLoop` の単体だけで縛らない）:
+  1. `SpeedLoop` の上限を `max_pct` のまま（×10 しない）で比べる（50 % の上限が 5 % になる）
+  2. `SpeedLoop` が ‰ でなく % を返す（出力が 1/10。または刻みが 10 ‰ 単位になる。目標と前向きから 0.1 % 単位の値〈例 FF だけで 6.6 %＝66 ‰〉が出ることで縛る）
+  3. `motor_duty_to_pwm` が `LIFT_DUTY_ABS_MAX_PCT`（100）で割る（10 bit で 50 % が最大を超える）
+  4. `motor_duty_to_pwm` が 0 ‰ で 0 以外を返す
+  5. `state.duty` に ‰ をそのまま出す
+  6. ずらし窓をブロック窓に戻す（偽 HAL で数を一定の速さで進め、窓の途中で速さを変えたとき、測った速さ〈`state.speed_meas`〉が `LIFT_SPEED_CTRL_MS` ごとに変わることで縛る）
+  7. ずらし窓が `LIFT_SPEED_WINDOW_MS` より短い記録との差を使う（周期が詰まったときに窓が縮む）
+  8. 止まった・向きが替わったときに窓の記録を捨てない、または捨てすぎて #8a の判定が変わる（今までの試験が赤になることで足りる）
+  9. `LIFT_SPEED_ABS_MAX_MM_S` を 100 に戻す（`hold` の `speed` 200 が 200 のまま `SpeedLoop` に渡ることで縛る）
+- **native で縛れないもの**（管理担当が目と実機で見る）: `hal_esp32.cpp` の 8 bit への切り詰め・`ledcSetup` の分解能・組み立て用ファームの ×10
+- **実機で管理担当が確かめる**: 30 mm/s の上昇・下降で、デューティが整数 % の間を往復しないか（`state.duty` は % なので、揺れは `speed_meas` で見る）・下降の揺れが前より小さいか／目標 250 mm/s・出力の上限 50 % で、上昇・下降それぞれデューティが 50 % に張りついたときの `speed_meas` の頭打ち（＝昇降機の限界）。**下降は下端の行き過ぎと、軽い状態でロープがたるむこと（2026-10-28 に表示 −230 mm）に気をつけ、短い区間で測る**。`MAX_RUN` は目標の速さで数えるので、目標 250 では全行程の途中で止まりうる（止まる側なのでよい）

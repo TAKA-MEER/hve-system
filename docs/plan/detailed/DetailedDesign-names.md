@@ -243,15 +243,17 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`LIFT_MAX_RUN_PCT`** | `lift_decide.h` | 150 | **仮**（spec #4b。全行程に対する割合 [%]。2026-10-29 に固定の `LIFT_MAX_RUN_MS` 10000 から替えた） |
 | **`LIFT_STROKE_FALLBACK_MM`** | `lift_decide.h` | 1900 | **仮**（`LIFT_TOP_MM` が未設定〈-1〉のときに #8 が使う全行程。2026-10-28 に機械の上端に当たった表示 1891 mm） |
 | `LIFT_DUTY_ABS_MAX_PCT` | `lift_decide.h` | 100 | MD10C（**% ⇔ PWM の換算の基準**。モータ保護の上限ではない） |
+| **`LIFT_DUTY_ABS_MAX_PERMILLE`** | `lift_decide.h` | 1000 | `SpeedLoop` の出力・`motor_set`・`motor_duty_to_pwm` の単位 ‰ の満量（2026-11-19。[DetailedDesign.md](DetailedDesign.md) §4.1.2） |
+| **`PWM_RESOLUTION`** / **`PWM_FREQ_HZ`** | `config.h` | 10 bit / 5000 Hz | 2026-11-19 に 8 bit から（0.1 % 刻みを出すため） |
 | **`LIFT_MOTOR_MAX_PCT_DEFAULT`** / **`LIFT_MOTOR_MAX_PCT_MIN`** | `lift_decide.h` | 50 / 10 | spec [Spec-ui.md](../spec/Spec-ui.md) §2.1（定格 12 V ÷ 電源 24 V）。設定の `motor_max_pct` の既定値と下限（2026-10-16） |
 | **`LiftSettings::motor_max_pct`** / JSON の **`motor_max_pct`** | `lift_settings.h` | モータへの出力の上限 [%]（設定。NVS に保存） | 同上 |
 | **`LiftController::set_motor_max_pct`** | `lift_controller.h` | 上限を `SpeedLoop` へ渡すために持たせる | [DetailedDesign.md](DetailedDesign.md) §4.1.2 |
 | **`CEILING_MARGIN_MM_DEFAULT`**（2026-11-06 に `CEILING_MARGIN_MM` から改名）/ **`CEILING_MARGIN_MM_MIN`** / **`CEILING_MARGIN_MM_MAX`** | `ceiling_check.h` | 500 / 150 / 3000 | 既定は**仮**（`H-V8`。v1 の `ceiling_margin_mm` を昇降部へ移した。spec `H-M4`）。2026-11-06 から設定 `ceiling_margin_mm` の既定値と範囲（spec Spec-ui §2.3）。判定は設定の値を使う |
 | **`CEILING_STALE_MS`** | `ceiling_check.h` | 600 | **仮**（`H-V8`。v1 の `ceiling_stale_ms` を昇降部へ移した） |
 | 昇降の設定の既定値 | `lift_settings.h` | `lift_up` / `lift_down` とも `{min:10, max:60, init:30}`（**mm/s**。spec 2026-10-15 で % から替えた） | **仮**（数だけ旧版の例の値。`H-V3`） |
-| **`LIFT_SPEED_ABS_MAX_MM_S`** | `lift_decide.h` | 100 | **仮**（設定の検証の上限・命令の丸め。`H-V3`） |
+| **`LIFT_SPEED_ABS_MAX_MM_S`** | `lift_decide.h` | 250 | **仮**（設定の検証の上限・命令の丸め。`H-V3`）。**2026-11-19 に 100 から、昇降機の限界を測るために上げた**（`WP-LIFT-19`。出力の上限 50 % に張りつかせて頭打ちの速さを読む）。限界が分かったら決め直し、画面（`abs_high` 100）・カメラモジュール（`_LIFT_SPEED_ABS_MAX_MM_S` 100）・設定の既定値もそのとき合わせる |
 | **`LIFT_SPEED_CTRL_MS`** / **`LIFT_SPEED_WINDOW_MS`** | `speed_loop.h` | 20 / 100 | **仮** |
-| **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.12 / 0.8（%/(mm/s)・%/mm） | 2026-10-26 に実機で合わせた（0.5 / 2.0 は 5 Hz で 0〜35 % を往復した。30 mm/s で上昇・下降とも平均 30 ± 1 mm/s）。`WP-MEAS-01` で速さを変えて確かめる |
+| **`LIFT_SPEED_KP`** / **`LIFT_SPEED_KI`** | `speed_loop.h` | 0.04 / 0.5（%/(mm/s)・%/mm） | **仮**（2026-11-19 ユーザー指示: 応答が遅くてよいので P を下げ I で合わせる。下降で揺れがありそう）。それまでは 0.12 / 0.8（2026-10-26 に実機で合わせた。0.5 / 2.0 は 5 Hz で 0〜35 % を往復した）。`WP-LIFT-19` を実機に入れて合わせる |
 | **`LIFT_FF_UP_PCT_PER_MM_S`** / **`LIFT_FF_DOWN_PCT_PER_MM_S`** | `speed_loop.h` | 0.4 / 0.22 | 同上（30 mm/s に要った出力: 上昇 13〜16 %・下降 6〜8 %） |
 | **`LIFT_STALL_MS`** | `lift_decide.h` | 500 | **仮**（spec #4d。動き出しの遅れより長く） |
 | **`LIFT_STALL_MIN_UM`** / **`LIFT_STALL_MIN_COUNTS`** | `hal_core.h` | 800 / 31（µm で決め、`LIFT_UM_PER_COUNT` で割って切り上げ。`WP-LIFT-09`） | **仮**（spec #4d。`lift_decide.h` から `hal_core.h` は include すると循環するのでこちらに置く） |
