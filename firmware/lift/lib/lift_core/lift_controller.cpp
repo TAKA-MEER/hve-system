@@ -605,18 +605,9 @@ LiftState LiftController::step(uint32_t now_ms) {
   }
   run_dir_ = cmd_dir;
 
-  // 速さを測る（ずらし窓。原点に依らない。§4.1.2）
+  // 速さを測る（ずらし窓。原点に依らない。§4.1.2。指令に依らず常に記録する。停止中に滑って
+  // 下がっているのも state.speed_meas に出る。記録は止まっても捨てない（前のブロック窓と同じ））
   const int32_t enc_now = hal_->encoder_count();
-  // 止まった・向きが替わった・持ち主が替わったら記録を捨てる（前の向きで測った速さを持ち越さない）
-  if (!has_owner || cmd_dir == LiftDir::STOP || cmd_dir != speed_prev_dir_ ||
-      owner.id != speed_prev_owner_ || owner_press != speed_prev_press_ ||
-      !speed_prev_moving_) {
-    speed_samples_n_ = 0;
-    speed_up_mm_s_ = 0.0f;
-  }
-  speed_prev_dir_ = cmd_dir;
-  speed_prev_owner_ = has_owner ? owner.id : -1;
-  speed_prev_press_ = owner_press;
   // LIFT_SPEED_CTRL_MS ごとに数と時刻を記録し、毎周期「いまの数 − LIFT_SPEED_WINDOW_MS 前の記録」
   // から求める。LIFT_SPEED_WINDOW_MS 以上前の記録のうちいちばん新しいものを使う
   // （loop が詰まって周期が延びても窓がそれより短くならない）。記録が窓の長さぶん溜まるまでは、
@@ -786,7 +777,6 @@ LiftState LiftController::step(uint32_t now_ms) {
   last_duty_ = duty_permille;
 
   turning_ = moving && duty_permille > 0;
-  speed_prev_moving_ = moving;
   run_speed_mm_s_ = decided.speed_mm_s;
   run_at_ms_ = now_ms;
 

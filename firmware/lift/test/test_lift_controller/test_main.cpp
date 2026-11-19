@@ -981,12 +981,14 @@ void test_speed_window_is_not_shortened_by_a_stall() {
   TEST_ASSERT_EQUAL_INT(16, ctrl.step(180).speed_meas);
 }
 
-// (f8a) 止まったら窓の記録を捨てる（測った速さが 0 に戻る。経てば 0 に戻るブロック窓とは違う）。
-void test_speed_window_is_discarded_on_stop() {
+// (f8a) 止まっても窓の記録は捨てない。測った速さは指令に依らない物の速さなので、release 後も
+// 数が進んでいれば（滑って下がっていれば）state.speed_meas が 0 でなく出る。
+// 毎周期「100 ms 前の記録との差」（窓は保つ）を縛る。
+void test_speed_meas_shows_coast_after_stop_command() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   LiftState state;
-  for (uint32_t t = 0; t <= 100; t += LIFT_SPEED_CTRL_MS) {
+  for (uint32_t t = 0; t <= 200; t += LIFT_SPEED_CTRL_MS) {
     hal.set_height(500, true, t);
     hal.set_encoder_count(static_cast<int32_t>(t));
     ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
@@ -994,32 +996,37 @@ void test_speed_window_is_discarded_on_stop() {
   }
   TEST_ASSERT_EQUAL_INT(26, state.speed_meas);
   ctrl.on_release(ui(1), 1);
-  hal.set_encoder_count(100);
-  TEST_ASSERT_EQUAL_INT(0, ctrl.step(120).speed_meas);
+  hal.set_height(500, true, 220);
+  hal.set_encoder_count(220);  // release 後も滑って進む（20 カウント / 20 ms）
+  TEST_ASSERT_EQUAL_INT(26, ctrl.step(220).speed_meas);
+  hal.set_height(500, true, 240);
+  hal.set_encoder_count(240);
+  TEST_ASSERT_EQUAL_INT(26, ctrl.step(240).speed_meas);
 }
 
-// (f8b) 向きが替わったら窓の記録を捨てる。同じ press のまま上昇から下降に替えると、最初の step で
-// 測った速さは 0（前の向きの記録で測れば -5 に見える）で、2 本目の step から下降側の -26 mm/s になる。
-void test_speed_window_is_discarded_on_direction_change() {
+// (f8b) 向きが替わっても窓の記録は捨てない。同じ press のまま上昇から下降に替えると、最初の step の
+// 測った速さは「窓に残った旧上昇の記録」から +16 mm/s（60 カウント / 100 ms）になり、次に下がる。
+// 捨ててしまう変異は最初の step で 0 になる。
+void test_speed_window_is_kept_across_a_direction_change() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
   LiftState state;
-  for (uint32_t t = 0; t <= 100; t += LIFT_SPEED_CTRL_MS) {
+  for (uint32_t t = 0; t <= 200; t += LIFT_SPEED_CTRL_MS) {
     hal.set_height(500, true, t);
     hal.set_encoder_count(static_cast<int32_t>(t));
     ctrl.on_hold(ui(1), up_hold(1, 26, t), t);
     state = ctrl.step(t);
   }
   TEST_ASSERT_EQUAL_INT(26, state.speed_meas);
-  hal.set_height(500, true, 120);
-  hal.set_encoder_count(80);  // 下降 20 カウント / 20 ms
-  ctrl.on_hold(ui(1), down_hold(1, 26), 120);
-  TEST_ASSERT_EQUAL_INT(0, ctrl.step(120).speed_meas);
+  hal.set_height(500, true, 220);
+  hal.set_encoder_count(180);  // 下降 20 カウント / 20 ms
+  ctrl.on_hold(ui(1), down_hold(1, 26), 220);
+  TEST_ASSERT_EQUAL_INT(16, ctrl.step(220).speed_meas);
   TEST_ASSERT_TRUE(hal.motor_dir() == LiftDir::DOWN);
-  hal.set_height(500, true, 140);
-  hal.set_encoder_count(60);
-  ctrl.on_hold(ui(1), down_hold(1, 26), 140);
-  TEST_ASSERT_EQUAL_INT(-26, ctrl.step(140).speed_meas);
+  hal.set_height(500, true, 240);
+  hal.set_encoder_count(160);
+  ctrl.on_hold(ui(1), down_hold(1, 26), 240);
+  TEST_ASSERT_EQUAL_INT(5, ctrl.step(240).speed_meas);  // 窓が旧速さから下降へ移りつつある
 }
 
 void test_motor_is_written_on_every_step() {
@@ -2815,8 +2822,8 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_hold_speed_200_passes_through_to_speed_loop);
   RUN_TEST(test_speed_meas_slides_every_control_period);
   RUN_TEST(test_speed_window_is_not_shortened_by_a_stall);
-  RUN_TEST(test_speed_window_is_discarded_on_stop);
-  RUN_TEST(test_speed_window_is_discarded_on_direction_change);
+  RUN_TEST(test_speed_meas_shows_coast_after_stop_command);
+  RUN_TEST(test_speed_window_is_kept_across_a_direction_change);
   RUN_TEST(test_motor_is_written_on_every_step);
 
   RUN_TEST(test_state_reports_top_detect_true_and_module);

@@ -216,11 +216,6 @@ class LiftController {
   int speed_samples_n_ = 0;
   uint32_t speed_last_record_ms_ = 0;
   float speed_up_mm_s_ = 0.0f;  // 測った速さ（上向きが正）
-  // ずらし窓の記録を捨てる条件（止まった・向きが替わった・持ち主が替わった）の前周期の値
-  LiftDir speed_prev_dir_ = LiftDir::STOP;
-  int speed_prev_owner_ = -1;
-  int speed_prev_press_ = 0;
-  bool speed_prev_moving_ = false;
   // #8a の数え（DetailedDesign.md §4.1）。持ち主が替わっても数え直さない
   bool stalled_ = false;
   LiftDir stall_dir_ = LiftDir::STOP;  // 数えている方向（替われば取り直す）
