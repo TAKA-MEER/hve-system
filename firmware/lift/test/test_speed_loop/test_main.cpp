@@ -81,6 +81,16 @@ void test_reset_clears_integral() {
   TEST_ASSERT_EQUAL_INT(expect, after);
 }
 
+void test_target_zero_has_no_feedforward_offset() {
+  SpeedLoop up;
+  SpeedLoop down;
+  // 目標 0 以下なら前向きは 0（下駄も出ない）
+  TEST_ASSERT_EQUAL_INT(0, up.update(0, 0.0f, LiftDir::UP, LIFT_SPEED_CTRL_MS,
+                                     LIFT_DUTY_ABS_MAX_PCT));
+  TEST_ASSERT_EQUAL_INT(0, down.update(0, 0.0f, LiftDir::DOWN, LIFT_SPEED_CTRL_MS,
+                                       LIFT_DUTY_ABS_MAX_PCT));
+}
+
 void test_down_uses_down_feedforward() {
   SpeedLoop up;
   SpeedLoop down;
@@ -122,6 +132,7 @@ int main(int /*argc*/, char** /*argv*/) {
   RUN_TEST(test_output_is_clamped_at_motor_max_pct);
   RUN_TEST(test_reset_clears_integral);
   RUN_TEST(test_down_uses_down_feedforward);
+  RUN_TEST(test_target_zero_has_no_feedforward_offset);
   RUN_TEST(test_reversed_speed_raises_output);
   RUN_TEST(test_speed_from_counts_converts_units);
 
