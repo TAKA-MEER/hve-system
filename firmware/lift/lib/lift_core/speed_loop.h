@@ -8,13 +8,15 @@
 #include "lift_decide.h"  // LiftDir・LIFT_DUTY_ABS_MAX_PCT・LIFT_DUTY_ABS_MAX_PERMILLE
 
 // 速さの制御の定数（DetailedDesign-names.md §5.1）。KP・KI は 2026-11-19 に.wp-lift-19 で仮の値にした
-// （応答が遅くてよいので P を下げ I で合わせる）。FF は 2026-10-26 に実機で合わせた
+// FF は 2026-11-19 の実機の出力から直線を当てた（下駄＋傾き。DetailedDesign-names.md §5.1）
 constexpr uint32_t LIFT_SPEED_CTRL_MS = 20;    // 制御の周期
 constexpr uint32_t LIFT_SPEED_WINDOW_MS = 100;  // 速さを測る窓
 constexpr float LIFT_SPEED_KP = 0.04f;          // [%/(mm/s)]。仮（WP-LIFT-19）
 constexpr float LIFT_SPEED_KI = 1.5f;           // [%/mm]。仮（2026-11-19 実機: ドラム 1 回転ごとの負荷に遅れる。0.5 → 1.0 で揺れが 4 割減。1.5 を試す）
-constexpr float LIFT_FF_UP_PCT_PER_MM_S = 0.4f;    // 上昇の前向き（30 mm/s に 13〜16 % 要った）
-constexpr float LIFT_FF_DOWN_PCT_PER_MM_S = 0.22f; // 下降の前向き（30 mm/s に 6〜8 % 要った）
+constexpr float LIFT_FF_UP_OFFSET_PCT = 10.0f;      // 上昇の前向きの下駄（2026-11-19 実機: 上昇 30 mm/s に 13〜16 %）
+constexpr float LIFT_FF_DOWN_OFFSET_PCT = 3.0f;    // 下降の前向きの下駄（2026-11-19 実機: 下降 30 mm/s に 7 %）
+constexpr float LIFT_FF_UP_PCT_PER_MM_S = 0.15f;   // 上昇の前向きの傾き（2026-11-19 実機: 約 260 mm/s に 50 %）
+constexpr float LIFT_FF_DOWN_PCT_PER_MM_S = 0.135f; // 下降の前向きの傾き（2026-11-19 実機: 200 mm/s に 31 %）
 
 // エンコーダの数の差と経過時間から、上向きが正の速さ [mm/s] を求める純関数。
 // um_per_count は 1 カウントあたりの進み [µm]、up_sign は上昇で数が増える向き。
@@ -23,7 +25,7 @@ float speed_from_counts(int32_t prev_count, int32_t now_count, uint32_t prev_ms,
                         uint32_t now_ms, int32_t um_per_count, int up_sign);
 
 // 目標の速さ [mm/s] と測った速さ（進行方向が正）からデューティ [‰] を出す（§4.1.2）。
-// 出力 = 前向き（目標 × 上昇・下降の係数）＋ Kp × 偏差 ＋ Ki × 偏差の積分。
+// 出力 = 前向き（下駄＋目標 × 上昇・下降の傾き。目標 0 以下なら 0）＋ Kp × 偏差 ＋ Ki × 偏差の積分。
 // 係数は %・mm/s の単位のまま、出力だけ 0.1 % 刻み（‰ の整数）で出す。
 // 0〜max_pct × 10 [‰]（上限は設定の motor_max_pct [%] から渡す）に丸める。
 // 丸めに当たっている間は積分を進めない。

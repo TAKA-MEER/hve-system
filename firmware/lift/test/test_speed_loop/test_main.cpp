@@ -6,13 +6,24 @@
 
 namespace {
 
-// 前向きだけの出力（目標 × 係数を四捨五入して ‰ にしたもの。update の戻り値と同じ単位）
+// 前向きだけの出力（下駄＋目標 × 係数を四捨五入して ‰ にしたもの。update の戻り値と同じ単位。
+// 目標 0 以下なら下駄も出ない）
 int feedforward_up(int speed) {
-  return static_cast<int>(LIFT_FF_UP_PCT_PER_MM_S * static_cast<float>(speed) * 10.0f + 0.5f);
+  if (speed <= 0) {
+    return 0;
+  }
+  return static_cast<int>(
+      (LIFT_FF_UP_OFFSET_PCT + LIFT_FF_UP_PCT_PER_MM_S * static_cast<float>(speed)) * 10.0f +
+      0.5f);
 }
 
 int feedforward_down(int speed) {
-  return static_cast<int>(LIFT_FF_DOWN_PCT_PER_MM_S * static_cast<float>(speed) * 10.0f + 0.5f);
+  if (speed <= 0) {
+    return 0;
+  }
+  return static_cast<int>(
+      (LIFT_FF_DOWN_OFFSET_PCT + LIFT_FF_DOWN_PCT_PER_MM_S * static_cast<float>(speed)) * 10.0f +
+      0.5f);
 }
 
 }  // namespace
@@ -66,7 +77,7 @@ void test_reset_clears_integral() {
   loop.reset();
   const int after = loop.update(40, 0.0f, LiftDir::UP, 0, LIFT_DUTY_ABS_MAX_PCT);
   const int expect = static_cast<int>(
-      (LIFT_FF_UP_PCT_PER_MM_S * 40.0f + LIFT_SPEED_KP * 40.0f) * 10.0f + 0.5f);
+      (LIFT_FF_UP_OFFSET_PCT + LIFT_FF_UP_PCT_PER_MM_S * 40.0f + LIFT_SPEED_KP * 40.0f) * 10.0f + 0.5f);
   TEST_ASSERT_EQUAL_INT(expect, after);
 }
 

@@ -876,15 +876,17 @@ void test_speed_loop_cap_is_ten_times_motor_max_pct() {
   TEST_ASSERT_LESS_OR_EQUAL_INT(50, ctrl.state().duty);
 }
 
-// (f2) 0.1 % 刻み（‰）の値がモータに出る。前向きは 26 × 0.4 = 10.4 %（104 ‰）。
+// (f2) 0.1 % 刻み（‰）の値がモータに出る。前向きは下駄 10 ＋ 26 × 0.15 = 13.9 %（139 ‰）。
 // エンコーダをちょうど目標の速さ（20 カウント / 20 ms）で進めると、ずらし窓の 2 本目の step 以降
 // 測った速さはちょうど 26.0 mm/s（20 × 26 / 20）で偏差 0 になる。最初の step だけ測った速さが 0 で、
-// その積分の残り（26 × 20 ms = 0.52 mm × Ki）を含めた値で安定する（前向き 0.4 × 26 = 10.4 % ＋ 0.52 × Ki。
-// 係数を変えても崩れないよう、期待値は定数から求める。Ki 1.0 で 10.92 % = 109 ‰）。
-// 整数 % の出力なら 11 % で、10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
+// その積分の残り（26 × 20 ms = 0.52 mm × Ki）を含めた値で安定する（前向き 13.9 % ＋ 0.52 × Ki。
+// 係数を変えても崩れないよう、期待値は定数から求める。Ki 1.5 で 14.68 % = 147 ‰）。
+// 整数 % の出力なら 15 % で、10 で割れる値にはならないため、0.1 % 単位の刻みが分かる。
 // 上の 2 つの試験で、目標 26 mm/s・最初の step の積分の残り 0.52 mm のときに落ち着く出力 [‰]
 static int settled_permille_26() {
-  return static_cast<int>((LIFT_FF_UP_PCT_PER_MM_S * 26.0f + LIFT_SPEED_KI * 0.52f) * 10.0f + 0.5f);
+  return static_cast<int>(
+      (LIFT_FF_UP_OFFSET_PCT + LIFT_FF_UP_PCT_PER_MM_S * 26.0f + LIFT_SPEED_KI * 0.52f) * 10.0f +
+      0.5f);
 }
 
 void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
@@ -908,7 +910,7 @@ void test_motor_duty_is_in_permille_with_0_1_percent_steps() {
   TEST_ASSERT_TRUE(duty % 10 != 0);  // 0.1 % 単位の刻み（10 ‰ 単位ならこの剰余は 0）
 }
 
-// (f5) state.duty は ‰ を四捨五入した整数 %（109 ‰ → 11 %）。‰ をそのまま出すと 109 になる。
+// (f5) state.duty は ‰ を四捨五入した整数 %（147 ‰ → 15 %）。‰ をそのまま出すと 147 になる。
 void test_state_duty_is_rounded_percent_not_permille() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -929,8 +931,8 @@ void test_state_duty_is_rounded_percent_not_permille() {
 }
 
 // (f9) 速さの上限 250（仮）で hold の speed 200 がそのまま SpeedLoop に渡る。
-// 上昇の前向きは 200 × 0.4 = 80 % で既定の上限 50 % を超えるので、モータは 500 ‰（50 %）に張りつく。
-// 上限が 100 に戻れば FF 40 % + P 4 % = 44 % = 440 ‰ になる。
+// 上昇の前向きは下駄 10 ＋ 200 × 0.15 = 40 % に、最初の step の比例（200 × Kp）が足されて
+// 48 % になる（積分は上限に当たるので進めない）。上限 50 % の半分（500 ‰）までは出ない。
 void test_hold_speed_200_passes_through_to_speed_loop() {
   FakeHal hal;
   LiftController ctrl(&hal, LIFT_TOP_MM);
@@ -939,7 +941,7 @@ void test_hold_speed_200_passes_through_to_speed_loop() {
   ctrl.on_hold(ui(1), up_hold(1, 200, 0), 0);
   const LiftState state = ctrl.step(0);
   TEST_ASSERT_EQUAL_INT(200, state.speed);
-  TEST_ASSERT_EQUAL_INT(500, hal.motor_duty());
+  TEST_ASSERT_EQUAL_INT(480, hal.motor_duty());
 }
 
 // (f6) ずらし窓: エンコーダの速さを窓の途中で変えると、測った速さは LIFT_SPEED_CTRL_MS ごとに
