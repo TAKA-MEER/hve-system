@@ -155,6 +155,10 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
 .primary:disabled{opacity:.4;cursor:not-allowed}
 .prov{padding:6px 10px;border-radius:var(--r);border:1px solid var(--warn);color:var(--warn-tx);font-size:12px}
 .prov b{color:var(--warn-tx)}
+/* 仮値の一覧はこの高さまでの画面では省く（設定画面がはみ出さないよう。実装画面と同じ） */
+@media (max-height:900px){
+  .prov{display:none}
+}
 /* 背の低い画面では説明を省いて詰める（設定画面がはみ出さないよう。
    4 項目＋上限で昇降部の画面より行が多いので、境目は 700px） */
 @media (max-height:700px){
