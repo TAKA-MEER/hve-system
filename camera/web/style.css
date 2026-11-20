@@ -60,6 +60,7 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .osd span.busy{background:var(--warn);color:#000;font-weight:700}
 .stopbar{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-weight:700;background:rgba(0,0,0,.75);border-top:3px solid var(--warn);color:var(--warn-tx);display:none;font-size:13px}
 .stopbar.ng{border-color:var(--ng);color:var(--ng-tx)}
+.stopbar.ok{border-color:var(--ok);color:#9be09c}
 .stopbar.top{bottom:auto;top:0;border-top:0;border-bottom:3px solid var(--warn)}
 .stopbar.show{display:block}
 .guidebtn{position:absolute;right:6px;top:6px;padding:2px 8px;border-radius:6px;border:1px solid var(--bd-hi);background:rgba(0,0,0,.6);font-size:12px;cursor:pointer;z-index:1}
@@ -115,6 +116,11 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 .pad .c{display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;color:var(--mut);background:var(--inset);border-radius:var(--r);font-variant-numeric:tabular-nums;overflow:hidden;white-space:nowrap}
 
 /* スライダー: 幅が狭いカードでは「ラベル 値」／「つまみ」の 2 行 */
+.goto{flex:none;display:flex;gap:4px;align-items:stretch}
+.goto input{flex:1 1 0;min-width:0;height:32px;padding:0 6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
+.gotobtn{min-height:32px;padding:0 6px;font-size:12px;white-space:nowrap;min-width:0}
+.gotobtn:disabled{opacity:.4;cursor:not-allowed}
+.gotobtn.danger{background:var(--ng);border-color:var(--ng);color:#fff;font-weight:700}
 .sub{flex:none;font-size:11px;color:var(--mut);margin-bottom:-4px}
 .slider{flex:none;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"l r o";align-items:center;gap:0 8px;font-size:12px}
 .slider label{grid-area:l;color:var(--mut);white-space:nowrap}
@@ -163,3 +169,5 @@ td input.bad{border-color:var(--ng)}
 }
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ok);color:#06230a;padding:6px 14px;border-radius:999px;font-weight:700;display:none;z-index:20}
 .toast.show{display:block}
+@container (max-width:190px){.gotobtn{white-space:normal;font-size:11px;line-height:1.2}}
+@container (max-width:300px){.slider input{height:18px}.card{gap:4px}.liftbtns{gap:4px}}

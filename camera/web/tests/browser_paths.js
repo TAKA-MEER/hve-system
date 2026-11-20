@@ -802,7 +802,8 @@ test('17 「機体の前を 0° に」で yaw_zero を送り、向きは原点�
 test('18 ARM_LINK は案内だけで確認のボタンも arm_confirm も無く、原点の前の腕の警告は link: true のときだけ出る', async (browser) => {
   const {page, errors, cleanup} = await openScreen(browser);
   const KNOWN_BUTTONS = new Set(['openSettings', 'snapBtn', 'toggleGuide', 'zIn', 'zLvl', 'zOut', 'bPower',
-    'snapClose', 'snapZIn', 'snapZLvl', 'snapZOut', 'yawZero', 'stCancel', 'stSave']);
+    'snapClose', 'snapZIn', 'snapZLvl', 'snapZOut', 'yawZero', 'stCancel', 'stSave',
+    'gotoTargetBtn', 'gotoBottomBtn', 'gotoStop']);
   try {
     // 前の試験（7 の io_lost）のあと、偽の UNO は天井の値を入れ直すまで行を返さず IO_LOST が残る。
     // IO_LOST は ARM_LINK より上に出るので、先に値を入れ直して行を戻す（順番に依らないように）
@@ -855,6 +856,81 @@ test('18 ARM_LINK は案内だけで確認のボタンも arm_confirm も無く�
     assert.deepEqual(errors, [], '画面に JavaScript のエラー');
   } finally {
     await postFake({arm: null, height_ok: true}).catch(() => {});
+    await cleanup();
+  }
+});
+
+/* --- 19. 目標の高さへで着いて送るのをやめる ---------------------------------- */
+test('19 「目標の高さへ」で昇降部が目標に着いて送るのをやめる', async (browser) => {
+  await allowUp(1200);
+  const stopCeiling = keepCeiling();
+  const {page, cleanup} = await openScreen(browser);
+  const watcher = observe();
+  await watcher.opened;
+  try {
+    await page.fill('#gotoTarget', '1230');
+    await page.click('#gotoTargetBtn');
+    const arrived = await watcher.waitFor(
+      (s) => s.lift_goto && s.lift_goto.status === 'ARRIVED', 15000, '目標に着く');
+    assert.equal(arrived.lift_goto.status, 'ARRIVED');
+    await page.waitForFunction(
+      () => document.getElementById('stopbar').textContent.includes('着きました')
+        || document.getElementById('stopbar').classList.contains('show'), null, {timeout: 3000});
+    const stopVisible = await page.evaluate(() => getComputedStyle(document.getElementById('gotoStop')).display !== 'none');
+    assert.equal(stopVisible, false, '着いたら停止ボタンが消える（送るのをやめた）');
+    const stopped = await watcher.waitFor((s) => s.lift.dir === 'stop', 3000, '着いたら止まる');
+    assert.equal(stopped.lift.dir, 'stop');
+  } finally {
+    watcher.close();
+    stopCeiling();
+    await cleanup();
+  }
+});
+
+/* --- 20. 下端へで下端に着いてやめる -------------------------------------------- */
+test('20 「下端へ」で下端に着いてやめる', async (browser) => {
+  await postFake({ceiling: {status: 'MEASURED', mm: 2600}, height_mm: 300, bottom: false});
+  const stopCeiling = keepCeiling();
+  const {page, cleanup} = await openScreen(browser);
+  const watcher = observe();
+  await watcher.opened;
+  try {
+    await page.click('#gotoBottomBtn');
+    await watcher.waitFor((s) => s.lift_goto && s.lift_goto.status === 'ARRIVED', 15000, '下端に着く');
+    // 下端に着くと下降は止まる。偽の昇降部は bottom=true のとき下降で止まる
+  } finally {
+    watcher.close();
+    stopCeiling();
+    await cleanup();
+  }
+});
+
+/* --- 21. 途中で別の画面が hold して取って代わる -------------------------------- */
+test('21 途中で別の画面が hold すると前の lift_goto は PREEMPTED になる', async (browser) => {
+  await postFake({ceiling: {status: 'MEASURED', mm: 2600}, height_mm: 1200, bottom: false});
+  const stopCeiling = keepCeiling();
+  const {page, cleanup} = await openScreen(browser);
+  const watcher = observe();
+  await watcher.opened;
+  try {
+    await page.fill('#gotoTarget', '1600');
+    await page.click('#gotoTargetBtn');
+    await watcher.waitFor((s) => s.lift_goto && s.lift_goto.status === 'MOVING', 5000, 'goto 開始');
+    // 別の画面が上昇の hold を押す
+    const other = observe();
+    await other.opened;
+    await other.close(); // watcher を経由して観察するだけではなく、直接メッセージも送る
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((res) => ws.addEventListener('open', res));
+    ws.send(JSON.stringify({t: 'hold', axis: 'lift_down', speed: 30}));
+    const preempt = await watcher.waitFor(
+      (s) => s.lift_goto && s.lift_goto.status === 'NOT_ARRIVED' && s.lift_goto.reason === 'PREEMPTED',
+      5000, 'hold に取って代わる');
+    assert.equal(preempt.lift_goto.reason, 'PREEMPTED');
+    ws.close();
+  } finally {
+    watcher.close();
+    stopCeiling();
     await cleanup();
   }
 });

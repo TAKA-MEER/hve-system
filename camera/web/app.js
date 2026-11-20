@@ -53,6 +53,10 @@ const REASON_TEXT = {
   IO_LOST: ['ng', 'Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません'],
   // 測定機構の #4e。**確認はこの画面ではできない**（ボタンを出さない。spec Spec-ui §0.2）
   ARM_LINK: ['ng', '測定機構と通信できません。昇降部の画面で確認してください'],
+  // 「目標の高さへ」「下端へ」（spec Spec-ui §1.7。WP-CAM-17）
+  ARRIVED: ['ok', '着きました'],
+  TARGET_RANGE: ['ng', '目標の高さが範囲の外です（止まりました）'],
+  PREEMPTED: ['warn', '別の操作に取って代わられました（止まりました）'],
 };
 
 /* 上端の閾値が未設定のあいだの表示（spec Spec-safety.md §2 #2a。昇降部の画面と同じ文言） */
@@ -71,6 +75,30 @@ function holdMessage(axis, speed) {
 /** 送る `release` の JSON */
 function releaseMessage() {
   return {t: 'release'};
+}
+
+/** 送る `lift_goto` の JSON（protocol §4.1）。`target` は目標の高さ、`bottom` は下端へ。 */
+function liftGotoMessage(id, mode, targetMm, speed) {
+  const message = {t: 'lift_goto', id: String(id), mode: String(mode), speed: Number(speed)};
+  if (mode === 'target') message.target_mm = Number(targetMm);
+  return message;
+}
+
+/** `lift_goto` の速さ。向きに応じて上昇・下降のスライダーの値を使う（spec §1.7）。「下端へ」は下降。 */
+function liftGotoSpeed(mode, targetMm, currentHeight, speeds) {
+  if (mode === 'bottom') return speedFor('lift_down', speeds);
+  const target = Number(targetMm);
+  const height = Number(currentHeight);
+  if (!isFinite(height)) return speedFor('lift_up', speeds);
+  return target >= height ? speedFor('lift_up', speeds) : speedFor('lift_down', speeds);
+}
+
+/** `lift_goto` を送り止めるべきか。自分の `id` で `MOVING` 以外、または `id` が自分のものでなくなった時（protocol §4.1）。 */
+function liftGotoFinished(liftGoto, ownId) {
+  if (!liftGoto || typeof liftGoto !== 'object') return true;
+  if (ownId === null || ownId === undefined || ownId === '') return true;
+  if (liftGoto.id !== ownId) return true;
+  return liftGoto.status !== 'MOVING';
 }
 
 /** 送る `zoom` の JSON。**ブラウザ側は拡大しない**（spec §1.5） */
@@ -346,6 +374,10 @@ let current_settings = null;// GET /api/settings の結果
 let current_speeds = null;  // 軸ごとのスライダーの値
 let hold_timer = null;      // `hold` を送り続けるタイマー
 let hold_axis = null;       // いま押している軸
+let goto_timer = null;      // `lift_goto` を送り続けるタイマー
+let goto_id = null;         // いま動かしている `lift_goto` の `id`
+let goto_mode = null;       // `target` か `bottom` か
+let goto_seen = false;      // 自分の `id` の `state.lift_goto` を見たか（古い記録で止めない）
 let video_port = null;      // 映像のポート（`state` から。静止画も同じポート）
 let video_probe_timer = null;
 let video_probe_failures = 0; // 確かめが続けて失敗した回数
@@ -388,6 +420,8 @@ function connect() {
   // 切れても繋ぎ直す（切るのは正常なので待たない。protocol §1）
   socket.addEventListener('close', () => {
     socket = null;
+    // WS が切れたら移動中をやめる（繋ぎ直しても送り直さない。protocol §4.1）
+    endGoto(false);
   });
 }
 
@@ -438,9 +472,56 @@ function sendHold() {
 function startHold(axis) {
   if (hold_axis === axis) return;
   endHold();
+  endGoto(false); // 上昇・下降のボタンは「目標の高さへ」と替わる（spec §1.7）
   hold_axis = axis;
   sendHold();
   hold_timer = setInterval(sendHold, ui_hold_period_ms);
+}
+
+/* --- 目標の高さへ・下端へ（spec §1.7。WP-CAM-17） --- */
+
+function makeGotoId() {
+  const buf = new Uint8Array(4);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(buf);
+  else for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+  return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 送る `lift_goto` を 1 回作る。速さは現在のスライダーから都度取る（動いている間に変えたら替わる） */
+function sendGoto() {
+  if (!goto_id) return;
+  const heights = last_state && last_state.lift ? last_state.lift.height_mm : null;
+  const input = $('gotoTarget');
+  const target = input && input.value !== '' ? Number(input.value) : null;
+  send(liftGotoMessage(goto_id, goto_mode, target, liftGotoSpeed(goto_mode, target, heights, current_speeds || {})));
+}
+
+/** 「目標の高さへ」または「下端へ」を押し始める。**1 回押すと着くまで送り続ける**（spec §1.7） */
+function startGoto(mode) {
+  if (mode === 'target') {
+    const raw = $('gotoTarget').value;
+    if (raw === '' || !Number.isFinite(Number(raw))) return;
+  }
+  endHold();
+  endGoto(false); // もう一方の「へ」ボタンは替わる
+  goto_id = makeGotoId();
+  goto_mode = mode;
+  goto_seen = false;
+  sendGoto();
+  goto_timer = setInterval(sendGoto, ui_hold_period_ms);
+}
+
+/** `lift_goto` をやめる。`sendRelease` が真なら `release` を送る（「停止」ボタン用） */
+function endGoto(sendRelease) {
+  if (goto_timer !== null) {
+    clearInterval(goto_timer);
+    goto_timer = null;
+  }
+  if (!goto_id) return;
+  goto_id = null;
+  goto_mode = null;
+  goto_seen = false;
+  if (sendRelease) send(releaseMessage());
 }
 
 /** 離した。`release` を送る（送らないとカメラ部は `hold_timeout_ms` まで動き続ける） */
@@ -668,10 +749,24 @@ function render() {
   $('buttonNote').className = note ? 'stopbar top show' : 'stopbar top';
   $('buttonNote').textContent = note || '';
 
-  const reason = reasonText(state.reason);
+  // 目標の高さへ・下端への着き／着かなかったは `state.lift_goto` から出す
+  if (state.lift_goto && state.lift_goto.id === goto_id) goto_seen = true;
+  if (goto_id && goto_seen && liftGotoFinished(state.lift_goto, goto_id)) endGoto(false);
+  $('gotoStop').style.display = goto_id ? '' : 'none';
+  $('gotoTargetBtn').disabled = lift.height_ok === false;
+  $('gotoBottomBtn').disabled = lift.bottom === true;
+
+  let reason = reasonText(state.reason);
+  const lg = state.lift_goto;
+  const lgText = lg && lg.status === 'ARRIVED' ? reasonText('ARRIVED') : null;
+  const lgPreText = lg && lg.status === 'NOT_ARRIVED' ? reasonText(lg.reason) : null;
+  // 着き／取って代わられたは `state.lift_goto` から出す。ただし止めた理由（state.reason）が
+  // それとは違う新しい理由（たとえば ARM_LINK）に変わっていたら、そちらを出す
+  const gotoReasons = ['ARRIVED', 'BOTTOM', 'CMD_STOP', 'NONE', null, undefined];
+  if ((lgText || lgPreText) && gotoReasons.includes(state.reason)) reason = lgText || lgPreText;
   const bar = $('stopbar');
   if (reason) {
-    bar.className = `stopbar show${reason.cls === 'ng' ? ' ng' : ''}`;
+    bar.className = `stopbar show${reason.cls === 'ng' ? ' ng' : reason.cls === 'ok' ? ' ok' : ''}`;
     bar.textContent = reason.text;
   } else {
     bar.className = 'stopbar';
@@ -720,6 +815,9 @@ function initApp() {
     });
   }
   bindHoldButtons();
+  $('gotoTargetBtn').addEventListener('click', () => startGoto('target'));
+  $('gotoBottomBtn').addEventListener('click', () => startGoto('bottom'));
+  $('gotoStop').addEventListener('click', () => endGoto(true));
 
   const zoom = (delta) => {
     const current = last_state ? Number(last_state.zoom) : 1;
@@ -780,9 +878,9 @@ function initApp() {
 
   // ページが隠れたとき（タブを切り替えた）と、ページを閉じたときに離す
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) endHold();
+    if (document.hidden) { endHold(); endGoto(false); }
   });
-  addEventListener('pagehide', endHold);
+  addEventListener('pagehide', () => { endHold(); endGoto(false); });
 
   loadSettings();
   connect();
@@ -796,6 +894,6 @@ if (typeof module === 'object' && module !== null) {
     holdMessage, releaseMessage, zoomMessage, touchMessage, powerText, yawZeroMessage, yawText, busyText, zoomTarget, snapPanLimit, clampPan, speedFor, sliderSpec,
     formatSpeed, streamUrl, reasonText, ceilingText, standaloneCeilingText, heightText, holdBlocked, stateStale,
     topDetectText, ownerText, armText, armHomeText, buttonNoteText, liftUiText, liftLink, snapshotUrl, liftStateText,
-    probeOutcome,
+    probeOutcome, liftGotoMessage, liftGotoSpeed, liftGotoFinished,
   };
 }

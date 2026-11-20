@@ -121,6 +121,9 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 
 /* スライダー: 幅が狭いカードでは「ラベル 値」／「つまみ」の 2 行 */
 .sub{flex:none;font-size:11px;color:var(--mut);margin-bottom:-4px}
+.goto{flex:none;display:flex;gap:4px;align-items:stretch}
+.goto input{flex:1 1 0;min-width:0;height:32px;padding:0 6px;border-radius:6px;border:1px solid var(--bd-hi);background:var(--inset);color:var(--tx);font:inherit;font-variant-numeric:tabular-nums}
+.gotobtn{min-height:32px;padding:0 6px;font-size:12px;white-space:nowrap;min-width:0}
 .slider{flex:none;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"l r o";align-items:center;gap:0 8px;font-size:12px}
 .slider label{grid-area:l;color:var(--mut);white-space:nowrap}
 .slider output{grid-area:o;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -128,6 +131,8 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 @container (max-width:300px){
   .slider{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l o" "r r"}
 }
+@container (max-width:190px){.gotobtn{white-space:normal;font-size:11px;line-height:1.2}}
+@container (max-width:300px){.slider input{height:18px}.card{gap:4px}.liftbtns{gap:4px}}
 input[type=range]{width:100%;margin:0;accent-color:var(--brand);height:26px}
 
 /* ---------- 設定画面 ---------- */
@@ -241,6 +246,12 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
       <div class="sub">速度</div>
       <div class="slider"><label for="sUp">上昇</label><input type="range" id="sUp"><output id="oUp"></output></div>
       <div class="slider"><label for="sDown">下降</label><input type="range" id="sDown"><output id="oDown"></output></div>
+      <div class="goto">
+        <input type="number" id="gotoTarget" min="0" step="1" inputmode="numeric" aria-label="目標の高さ（mm）" placeholder="目標 [mm]">
+        <button class="hbtn gotobtn" id="gotoTargetBtn">目標の高さへ</button>
+        <button class="hbtn gotobtn" id="gotoBottomBtn">下端へ</button>
+        <button class="hbtn gotobtn" id="gotoStop" style="display:none">停止</button>
+      </div>
     </section>
 
     <section class="card">
@@ -355,6 +366,9 @@ td input[type=checkbox]{width:auto;margin:0 6px 0 0;vertical-align:middle}
     AXIS_LIMIT:['warn','可動範囲の端です'],
     OWNER_GONE:['warn','操作していた画面が閉じたため停止しました'],
     IO_LOST:['ng','Arduino から応答がありません。ヨー・ピッチ・天井の測定が使えません'],
+    ARRIVED:['ok','着きました'],
+    TARGET_RANGE:['ng','目標の高さが範囲の外です（止まりました）'],
+    PREEMPTED:['warn','別の操作に取って代わられました（止まりました）'],
   };
 
   const $ = id => document.getElementById(id);

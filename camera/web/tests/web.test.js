@@ -15,6 +15,26 @@ test('送る hold は軸と速度だけを持つ（protocol §2.1）', () => {
   assert.deepEqual(app.holdMessage('yaw_left', 0), {t: 'hold', axis: 'yaw_left', speed: 0});
 });
 
+test('lift_goto の JSON・速さ・送り止め（WP-CAM-17）', () => {
+  assert.deepEqual(app.liftGotoMessage('k3f9a2', 'target', 1200, 80), {t: 'lift_goto', id: 'k3f9a2', mode: 'target', target_mm: 1200, speed: 80});
+  assert.deepEqual(app.liftGotoMessage('p81c0d', 'bottom', null, 100), {t: 'lift_goto', id: 'p81c0d', mode: 'bottom', speed: 100});
+  const speeds = {lift_up: 30, lift_down: 25, pitch: 10, yaw: 7};
+  assert.equal(app.liftGotoSpeed('target', 1200, 800, speeds), 30); // 上へは上昇の速さ
+  assert.equal(app.liftGotoSpeed('target', 500, 800, speeds), 25); // 下へは下降の速さ
+  assert.equal(app.liftGotoSpeed('bottom', null, 800, speeds), 25);
+  assert.equal(app.liftGotoFinished({id: 'a', status: 'MOVING'}, 'a'), false);
+  assert.equal(app.liftGotoFinished({id: 'a', status: 'ARRIVED'}, 'a'), true);
+  assert.equal(app.liftGotoFinished({id: 'a', status: 'NOT_ARRIVED'}, 'a'), true);
+  assert.equal(app.liftGotoFinished({id: 'b', status: 'MOVING'}, 'a'), true); // 別の端末が取った
+  assert.equal(app.liftGotoFinished(null, 'a'), true);
+});
+
+test('目標の高さへ・下端への停止理由の文言（WP-CAM-17）', () => {
+  assert.deepEqual(app.reasonText('ARRIVED'), {cls: 'ok', text: '着きました'});
+  assert.equal(app.reasonText('TARGET_RANGE').cls, 'ng');
+  assert.equal(app.reasonText('PREEMPTED').cls, 'warn');
+});
+
 test('release と zoom の JSON', () => {
   assert.deepEqual(app.releaseMessage(), {t: 'release'});
   assert.deepEqual(app.zoomMessage(1.5), {t: 'zoom', level: 1.5});
