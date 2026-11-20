@@ -736,7 +736,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 
 - 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§0.2・§1.7、[-protocol.md](DetailedDesign-protocol.md) §2.1・§4.1、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2・§3（`goto`）
 - 作るもの:
-  - 画面 `firmware/lift/web/`（`index.html`・`app.js`・`style.css`）: 高さの入力欄（mm の整数）・「目標の高さへ」「下端へ」・動いている間の「停止」。§4.1 のやめる条件を**純関数**（例 `gotoMessage`・`gotoSpeed`・`gotoFinished`・`bottomFinished`）にし、タイマーの処理はそれを呼ぶだけにする。高さが読めない間は「目標の高さへ」を薄く、下端なら「下端へ」を薄く。着いた・着かなかった（理由）を出す。`ui_goto_grace_ms` は `app.js` の定数
+  - 画面 `firmware/lift/web/`（`index.html`・`app.js`・`style.css`）: `reasonText` に `ARRIVED`・`TARGET_RANGE`・`PREEMPTED` の文言を足す（今は無い）。高さの入力欄（mm の整数）・「目標の高さへ」「下端へ」・動いている間の「停止」。§4.1 のやめる条件を**純関数**（例 `gotoMessage`・`gotoSpeed`・`gotoFinished`・`bottomFinished`）にし、タイマーの処理はそれを呼ぶだけにする。高さが読めない間は「目標の高さへ」を薄く、下端なら「下端へ」を薄く。着いた・着かなかった（理由）を出す。`ui_goto_grace_ms` は `app.js` の定数
   - 偽の昇降部 `tools/fake_lift_server.py`: `/ws/ui` の `goto` を受けるか確かめ、受けなければ足す（ファームと同じ）
   - **`docs/使い方.md`** の昇降部の画面の節
 - 受け入れ: `node --test firmware/lift/web/tests/web.test.js`・`.venv/bin/python -m pytest tools/tests`・スクロール検査（`firmware/lift/web/tests/` の検査）・`browser_paths.js`（偽の昇降部に対して「目標の高さへ」で着いて送るのをやめる・「下端へ」で下端に着いてやめる・途中で「停止」）が通る。**次の変異がそれぞれ赤**（**タイマーの呼び出し側で縛る**。純関数だけで縛らない。`browser_paths.js` か、タイマーを偽にした試験で）:
@@ -747,6 +747,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   5. 「停止」で `release` を送らない
   6. 下端へで、昇降部が止まった（`dir` が `stop`）のを見てもやめない
   7. 高さが読めない間に「目標の高さへ」を押せる
+  8. WS が切れても移動中のままにする（繋ぎ直したら送り直して動き出す）
+  9. 下端へで、`state.owner` が `ui` でなくなってもやめない（物理ボタン・上部モジュールに取られても「移動中」のまま）
 
 ### `WP-CAM-17` カメラモジュールに「目標の高さへ」「下端へ」
 
@@ -756,7 +758,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   - `camera/hve_camera/control.py`: `lift_goto` を持ち主の規則に載せる（`hold` と同じ・`press` の増やし方・途切れ）。`_step_lift` で `goto` か下降の `hold` を送る。終わった `id` を覚えて送らない。`state.lift_goto` を作る（§4.1 の表）。`params.toml` に `lift_goto_grace_ms`（`provisional` へ）
   - `camera/hve_camera/app.py`: WS の種類に `lift_goto`（`touch()` に数える）
   - 偽の昇降部 `camera/hve_camera/hw/fake_lift.py`: `goto` を受けて目標まで動かし `state.goto` を返す（`tools/fake_lift_server.py` と同じ振る舞い）
-  - 画面 `camera/web/`（`index.html`・`app.js`・`style.css`）: `WP-LIFTUI-07` と同じ部品・同じやめる条件（`state.lift_goto` の `id` で見る）。純関数の試験
+  - 画面 `camera/web/`（`index.html`・`app.js`・`style.css`）: `reasonText` に `ARRIVED`・`TARGET_RANGE`・`PREEMPTED` の文言を足す。`WP-LIFTUI-07` と同じ部品・同じやめる条件（`state.lift_goto` の `id` で見る）。純関数の試験
   - **モックアップ** `docs/plan/spec/mockup/index.html`（spec §4「片方を直したらもう片方も直す」）と、その `check_noscroll.js` が通ること
   - **`docs/使い方.md`** のカメラモジュールの画面の節
 - 受け入れ: `.venv38/bin/python -m pytest camera/tests`・`node --test camera/web/tests/web.test.js`・`camera/web/tests/check_noscroll_web.js`・`node docs/plan/spec/mockup/check_noscroll.js docs/plan/spec/mockup/index.html`・`camera/web/tests/browser_paths.js`（偽物のモードで「目標の高さへ」で着いてやめる・「下端へ」・途中で別の画面が `hold` して取って代わる）が通る。**次の変異がそれぞれ赤**（**`Control` を偽の `LiftPort` で回し、送られた命令の列で縛る**。純関数だけで縛らない）:
@@ -768,4 +770,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   6. 別の画面の `hold` に替わっても、前の `lift_goto` を `PREEMPTED` にしない
   7. 画面が `state.lift_goto.id` が自分のものでなくなってもやめない
   8. `lift_goto` を `touch()` に数えない
+  9. 昇降部と繋ぎ直したあと、前の `id` の `goto`／`hold` を送る（偽の `LiftPort` の接続を切り替えて縛る）
+  10. `hold_timeout_ms` で途切れたあと、同じ `id` が届いたら再開する
+  11. `mode: bottom` で、昇降部の `owner_name` が `module_name` でなくなっても `PREEMPTED` にしない
 

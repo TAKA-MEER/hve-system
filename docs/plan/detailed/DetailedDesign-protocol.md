@@ -117,8 +117,10 @@
 | ボタン | 送るもの | やめる条件（どれか） |
 | --- | --- | --- |
 | 目標の高さへ | `{"t":"goto","press":P,"target_mm":T,"speed":S}`（protocol-modules §2.2 と同じ形。`/ws/ui` の `goto` は今のファームが受け付ける。天井は載せない）。`press` は上昇・下降と同じ通し番号で、押し始めに 1 増やす。`S` は `T` がいまの高さより上なら上昇、下なら下降のスライダーの値 | `state.goto` の `press` が `P`・`target_mm` が `T` で `status` が `MOVING` 以外（着いた・着かなかった。理由を出す） |
-| 下端へ | 下降の `hold`（押している間と同じ形・同じ `press` の規則） | `state.bottom` が真（着いた）・**押し始めから `ui_goto_grace_ms`（仮 1000 ms）を過ぎて、`state.dir` が `stop` を 2 回続けて見た**（安全の判定・物理ボタン・別の画面で止まった。`state.reason` を出す） |
+| 下端へ | 下降の `hold`（押している間と同じ形・同じ `press` の規則） | `state.bottom` が真（着いた）・**押し始めから `ui_goto_grace_ms`（仮 1000 ms）を過ぎて、`state.dir` が `stop` を 2 回続けて見た、または `state.owner` が `ui` でない**（安全の判定で止まった・物理ボタンや上部モジュールに取って代わられた。`state.reason` を出す） |
 | 共通 | — | 「停止」・上昇・下降・もう一方のボタンを押した（`release` を送るか、そちらの命令に替わる）・WS が切れた |
+
+**WS が切れたら、画面は移動中をやめる（繋ぎ直しても送り直さない）。**昇降部は `press` を接続ごとに数えるので、新しい接続の最初の命令はどの `press` でも「新しい押し始め」になり、送り直すと人が何もしないまま動き出す（spec §1.7「止まったあと自分からは動き出さない」）。
 
 **カメラモジュールの画面（カメラモジュール経由）**: 画面 → カメラモジュールに新しい種類 `lift_goto` を足す。カメラモジュールが昇降部へ `goto`（天井を載せる。`hold` と同じ `_ceiling_triple`）か下降の `hold` に直す。
 
@@ -135,6 +137,8 @@
 | `mode: bottom` | 昇降部へ下降の `hold`（`speed`）。昇降部の `state.bottom` が真になったら送るのをやめて `release` |
 | 終わった `id` | 着いた・着かなかったあとに同じ `id` が来ても**送らない**（昇降部の「同じ `press` の `goto` は無視」と同じ考え） |
 | `release` | 今までどおり。動いている `lift_goto` も止める |
+| **繋ぎ直し・途切れ** | **昇降部との接続が切れたら、動いている `lift_goto` を `NOT_ARRIVED`・`LINK_LOST` にして終わった `id` に入れる**（繋ぎ直しても同じ `id` では送らない。新しい接続の最初の命令は昇降部で新しい押し始めになるため）。**画面の `lift_goto` が `hold_timeout_ms` 途切れたときも `NOT_ARRIVED`（`CMD_STOP` 相当）にして終わった `id` に入れる**（途切れたあと同じ `id` が届いても再開しない） |
+| 取って代わられた | 昇降部の `owner` が `module` で `owner_name` が `module_name` でなくなった、または `owner` が `module` 以外になった（押し始めから `lift_goto_grace_ms` 以降）→ `NOT_ARRIVED`・`PREEMPTED`（`mode: bottom` でも） |
 | **`state.lift_goto`** | `{"id","mode","target_mm","status","reason"}` か `null`。`status` は `MOVING` / `ARRIVED` / `NOT_ARRIVED`。`target` は昇降部の `state.goto`（`by` がカメラモジュールの `module_name`・`press` が自分の送ったもの）から写す。`bottom` は `state.bottom` で `ARRIVED`、`state.dir` が `stop` に替わったら（押し始めから `lift_goto_grace_ms`〈`params.toml`。仮 1000〉以降・2 周期続けて）`NOT_ARRIVED` と `state.reason`。**別の画面・別の操作元に替わったら、前の `id` は `NOT_ARRIVED`・`PREEMPTED`**。次の `lift_goto` まで残す |
 | 画面がやめる条件 | `state.lift_goto.id` が自分の `id` で `status` が `MOVING` 以外、**または `id` が自分のものでなくなった**（別の端末が取った） |
 
