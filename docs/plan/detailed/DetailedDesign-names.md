@@ -228,6 +228,15 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 `POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
 偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
 
+**目標の高さへ・下端へのボタン（2026-11-21。[-protocol.md](DetailedDesign-protocol.md) §4.1。`WP-LIFTUI-07`・`WP-CAM-17`）で足すもの**
+
+| 名前 | 中身 |
+| --- | --- |
+| カメラモジュールの画面の WS の `t` | **`lift_goto`**（`id`・`mode`: `target` / `bottom`・`target_mm`・`speed`） |
+| **`state.lift_goto`** | カメラモジュールの `state`。`id`・`mode`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason` か `null` |
+| **`LiftPort.send_goto`** | `camera/hve_camera/lift_link.py`。昇降部へ `goto`（天井は `send_hold` と同じ形） |
+| **`ui_goto_grace_ms`**（昇降部の画面）・**`lift_goto_grace_ms`**（カメラモジュールの `params.toml`） | 下端へで「昇降部が止まった」と見る前の猶予。どちらも 1000 ms（**仮**） |
+
 ## 5. パラメータと仮値
 
 **`仮` は根拠の無い仮置き。**実測で置き換えたら `仮` を外し、出どころを書く。

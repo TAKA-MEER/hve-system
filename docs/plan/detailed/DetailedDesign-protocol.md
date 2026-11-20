@@ -108,6 +108,36 @@
 | 画面の天井のバッジ | **判定（`reason`）があればそれで出す。無ければ自分で測った `status` で出す**（`MEASURED` → 距離・`TOO_NEAR` → 近すぎ・`NO_ECHO` → 範囲外・`READ_ERROR`／値が無い → 値なし）。**上昇ボタンを薄くするのは、昇降部と切れているときと、判定が `ok: false` のときだけ**（判定が無いだけでは薄くしない。上昇してよいかは昇降部が決める） |
 | `state.reason` | 旧版の選び方のうち、天井の理由は昇降部の `ceiling.reason` を使う。`IO_LOST`（Arduino から行が来ない）を `LINK_LOST` の次に足す |
 
+### 4.1 目標の高さへ・下端へのボタン（2026-11-21。spec [Spec-ui.md](../spec/Spec-ui.md) §1.7）
+
+**どちらの画面も、ボタンを 1 回押したら「移動中」の状態を持ち、`ui_hold_period_ms`（100 ms）ごとに命令を送り続ける。**止めるのは画面の役（昇降部・カメラモジュールは今までどおり途切れたら止まる）。
+
+**昇降部の画面（`/ws/ui` に直接）**:
+
+| ボタン | 送るもの | やめる条件（どれか） |
+| --- | --- | --- |
+| 目標の高さへ | `{"t":"goto","press":P,"target_mm":T,"speed":S}`（protocol-modules §2.2 と同じ形。`/ws/ui` の `goto` は今のファームが受け付ける。天井は載せない）。`press` は上昇・下降と同じ通し番号で、押し始めに 1 増やす。`S` は `T` がいまの高さより上なら上昇、下なら下降のスライダーの値 | `state.goto` の `press` が `P`・`target_mm` が `T` で `status` が `MOVING` 以外（着いた・着かなかった。理由を出す） |
+| 下端へ | 下降の `hold`（押している間と同じ形・同じ `press` の規則） | `state.bottom` が真（着いた）・**押し始めから `ui_goto_grace_ms`（仮 1000 ms）を過ぎて、`state.dir` が `stop` を 2 回続けて見た**（安全の判定・物理ボタン・別の画面で止まった。`state.reason` を出す） |
+| 共通 | — | 「停止」・上昇・下降・もう一方のボタンを押した（`release` を送るか、そちらの命令に替わる）・WS が切れた |
+
+**カメラモジュールの画面（カメラモジュール経由）**: 画面 → カメラモジュールに新しい種類 `lift_goto` を足す。カメラモジュールが昇降部へ `goto`（天井を載せる。`hold` と同じ `_ceiling_triple`）か下降の `hold` に直す。
+
+```json
+{"t":"lift_goto","id":"k3f9a2","mode":"target","target_mm":1200,"speed":80}
+{"t":"lift_goto","id":"p81c0d","mode":"bottom","speed":100}
+```
+
+| 項目 | 振る舞い |
+| --- | --- |
+| `id` | 画面が押し始めごとに作る文字列（端末どうしで重ならないよう乱数。1〜32 文字）。**新しい `id` ＝新しい押し始め**（昇降部への `press` を 1 増やす） |
+| 受け付け | `hold` と同じ持ち主の規則（最後の操作が勝つ。別の画面の `hold`・`lift_goto` に替わる）。`touch()` に数える。**途切れの扱いも `hold` と同じ**（`hold_timeout_ms` 来なければ止める） |
+| `mode: target` | 昇降部へ `goto`（`press`・`target_mm`・`speed`・`ceiling`） |
+| `mode: bottom` | 昇降部へ下降の `hold`（`speed`）。昇降部の `state.bottom` が真になったら送るのをやめて `release` |
+| 終わった `id` | 着いた・着かなかったあとに同じ `id` が来ても**送らない**（昇降部の「同じ `press` の `goto` は無視」と同じ考え） |
+| `release` | 今までどおり。動いている `lift_goto` も止める |
+| **`state.lift_goto`** | `{"id","mode","target_mm","status","reason"}` か `null`。`status` は `MOVING` / `ARRIVED` / `NOT_ARRIVED`。`target` は昇降部の `state.goto`（`by` がカメラモジュールの `module_name`・`press` が自分の送ったもの）から写す。`bottom` は `state.bottom` で `ARRIVED`、`state.dir` が `stop` に替わったら（押し始めから `lift_goto_grace_ms`〈`params.toml`。仮 1000〉以降・2 周期続けて）`NOT_ARRIVED` と `state.reason`。**別の画面・別の操作元に替わったら、前の `id` は `NOT_ARRIVED`・`PREEMPTED`**。次の `lift_goto` まで残す |
+| 画面がやめる条件 | `state.lift_goto.id` が自分の `id` で `status` が `MOVING` 以外、**または `id` が自分のものでなくなった**（別の端末が取った） |
+
 ## 5. UART（UnitV2 ⇔ Arduino）
 
 ASCII の 1 行 1 メッセージ。区切りは空白 1 つ、行末は `\n`。1 行は `IO_LINE_MAX` 文字以内。**読めない行は捨てる。**

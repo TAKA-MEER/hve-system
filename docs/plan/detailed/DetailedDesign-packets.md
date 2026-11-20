@@ -77,6 +77,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-VIDEO-05` | 10 | **`hve_video` の `/snapshot` に `X-Frame-Age-Ms`** | — | 不要（実機の確認は管理担当） |
 | `WP-CAM-14` | 10 | **カメラモジュールが ss-system に開く口**（`/ws/module`・`aim`・`state`・ヨーの角度と原点・`GET /api/snapshot`。[-protocol-ss.md](DetailedDesign-protocol-ss.md)） | IO-04・VIDEO-05（取り決め） | 不要（偽物のモード） |
 | `WP-UI-06` | 10 | カメラモジュールの画面に「機体の前を 0° にする」ボタン・ss が動かしている間の表示・ヨーの向き | CAM-14（取り決め） | 不要（偽物のモード） |
+| `WP-LIFTUI-07` | 16 | 昇降部の画面に「目標の高さへ」「下端へ」・停止ボタン（[-protocol.md](DetailedDesign-protocol.md) §4.1。spec Spec-ui §1.7） | LIFT-14 | 不要 |
+| `WP-CAM-17` | 16 | カメラモジュールに `lift_goto` の中継・`state.lift_goto`・画面の「目標の高さへ」「下端へ」・停止ボタン・モックアップ（[-protocol.md](DetailedDesign-protocol.md) §4.1） | LIFT-14 | 不要（偽物のモード） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -103,6 +105,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **段階 14（2026-11-19。昇降の速さの範囲と既定値。spec [Spec-ui.md](../spec/Spec-ui.md) §2）**: `WP-LIFT-20` だけ（昇降部のファーム・昇降部の画面・カメラモジュール・道具をまとめて 1 つ。値を揃えるだけなので分けない）。**互換**: 古い画面は 100 を超える値を入れさせないだけ。保存済みの設定（実機は上限 100・初期値 100）はそのまま読める。
 
 **段階 15（2026-11-19。速さの制御の上限の扱いと前向き。[DetailedDesign.md](DetailedDesign.md) §4.1.2）**: `WP-LIFT-21` だけ。昇降部のファームだけで、プロトコル・画面・カメラモジュールは変えない。
+
+**段階 16（2026-11-21。目標の高さへ・下端へのボタン。spec [Spec-ui.md](../spec/Spec-ui.md) §1.7・[-protocol.md](DetailedDesign-protocol.md) §4.1）**: `WP-LIFTUI-07` と `WP-CAM-17` は並べてよい。**昇降部のファームは変えない**（`/ws/ui` の `goto` は `WP-LIFT-14` で受け付けている）。**互換**: 古いカメラモジュールは `lift_goto` を知らない種類として捨てる（画面だけ新しいと何も動かないだけ）。**両方とも、高さの欄とボタンが増えるので背の低い画面のスクロール検査に気をつける。**
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -727,3 +731,41 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   5. 上昇と下降の下駄・傾きを取り違える
   6. 目標 0 でも下駄を出す
 - **実機で管理担当が確かめる**: 上限 50 %・上昇 200 mm/s で `speed_meas` が 200 付近に収まり、`duty` が 50 に張りつかない／下降 30・100・200 mm/s の揺れ（標準偏差）が前と比べて悪くならない
+
+### `WP-LIFTUI-07` 昇降部の画面に「目標の高さへ」「下端へ」
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§0.2・§1.7、[-protocol.md](DetailedDesign-protocol.md) §2.1・§4.1、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2・§3（`goto`）
+- 作るもの:
+  - 画面 `firmware/lift/web/`（`index.html`・`app.js`・`style.css`）: 高さの入力欄（mm の整数）・「目標の高さへ」「下端へ」・動いている間の「停止」。§4.1 のやめる条件を**純関数**（例 `gotoMessage`・`gotoSpeed`・`gotoFinished`・`bottomFinished`）にし、タイマーの処理はそれを呼ぶだけにする。高さが読めない間は「目標の高さへ」を薄く、下端なら「下端へ」を薄く。着いた・着かなかった（理由）を出す。`ui_goto_grace_ms` は `app.js` の定数
+  - 偽の昇降部 `tools/fake_lift_server.py`: `/ws/ui` の `goto` を受けるか確かめ、受けなければ足す（ファームと同じ）
+  - **`docs/使い方.md`** の昇降部の画面の節
+- 受け入れ: `node --test firmware/lift/web/tests/web.test.js`・`.venv/bin/python -m pytest tools/tests`・スクロール検査（`firmware/lift/web/tests/` の検査）・`browser_paths.js`（偽の昇降部に対して「目標の高さへ」で着いて送るのをやめる・「下端へ」で下端に着いてやめる・途中で「停止」）が通る。**次の変異がそれぞれ赤**（**タイマーの呼び出し側で縛る**。純関数だけで縛らない。`browser_paths.js` か、タイマーを偽にした試験で）:
+  1. 着いたあとも `goto` を送り続ける
+  2. 下端に着いたあとも下降を送り続ける
+  3. `goto` の `press` を押し始めで増やさない
+  4. 目標がいまより下なのに上昇のスライダーの速さを使う
+  5. 「停止」で `release` を送らない
+  6. 下端へで、昇降部が止まった（`dir` が `stop`）のを見てもやめない
+  7. 高さが読めない間に「目標の高さへ」を押せる
+
+### `WP-CAM-17` カメラモジュールに「目標の高さへ」「下端へ」
+
+- 読む節: spec [Spec-ui.md](../spec/Spec-ui.md) §0.1・§1.6・§1.7・§4（モックアップ）、[-protocol.md](DetailedDesign-protocol.md) §4・§4.1、[-protocol-modules.md](DetailedDesign-protocol-modules.md) §2.2・§3
+- 作るもの:
+  - `camera/hve_camera/lift_link.py`: `send_goto(press, target_mm, speed, ceiling…)`（天井の形は `send_hold` と同じ `_ceiling_body`）
+  - `camera/hve_camera/control.py`: `lift_goto` を持ち主の規則に載せる（`hold` と同じ・`press` の増やし方・途切れ）。`_step_lift` で `goto` か下降の `hold` を送る。終わった `id` を覚えて送らない。`state.lift_goto` を作る（§4.1 の表）。`params.toml` に `lift_goto_grace_ms`（`provisional` へ）
+  - `camera/hve_camera/app.py`: WS の種類に `lift_goto`（`touch()` に数える）
+  - 偽の昇降部 `camera/hve_camera/hw/fake_lift.py`: `goto` を受けて目標まで動かし `state.goto` を返す（`tools/fake_lift_server.py` と同じ振る舞い）
+  - 画面 `camera/web/`（`index.html`・`app.js`・`style.css`）: `WP-LIFTUI-07` と同じ部品・同じやめる条件（`state.lift_goto` の `id` で見る）。純関数の試験
+  - **モックアップ** `docs/plan/spec/mockup/index.html`（spec §4「片方を直したらもう片方も直す」）と、その `check_noscroll.js` が通ること
+  - **`docs/使い方.md`** のカメラモジュールの画面の節
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests`・`node --test camera/web/tests/web.test.js`・`camera/web/tests/check_noscroll_web.js`・`node docs/plan/spec/mockup/check_noscroll.js docs/plan/spec/mockup/index.html`・`camera/web/tests/browser_paths.js`（偽物のモードで「目標の高さへ」で着いてやめる・「下端へ」・途中で別の画面が `hold` して取って代わる）が通る。**次の変異がそれぞれ赤**（**`Control` を偽の `LiftPort` で回し、送られた命令の列で縛る**。純関数だけで縛らない）:
+  1. 昇降部へ送る `goto` に天井を載せない
+  2. 新しい `id` で `press` を増やさない
+  3. 着いた `id` が来ても `goto` を送る（終わった `id` を覚えない）
+  4. `lift_goto` が途切れても `goto` を送り続ける（`hold_timeout_ms`）
+  5. `mode: bottom` で下端に着いても下降を送り続ける
+  6. 別の画面の `hold` に替わっても、前の `lift_goto` を `PREEMPTED` にしない
+  7. 画面が `state.lift_goto.id` が自分のものでなくなってもやめない
+  8. `lift_goto` を `touch()` に数えない
+
