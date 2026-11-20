@@ -26,6 +26,7 @@ LIFT_SPEED_ABS_MAX_MM_S = 255
 LIFT_STATE_PERIOD_MS = 100
 CEILING_MARGIN_MM = 500  # 設定 `ceiling_margin_mm` の既定値（`CEILING_MARGIN_MM_DEFAULT` と同じ）
 CEILING_STALE_MS = 600
+LIFT_GOTO_TOL_MM = 10  # 目標に着いたとみなす幅（lift_core の LIFT_GOTO_TOL_MM と同じ）
 
 Clock = Callable[[], float]
 
@@ -58,6 +59,10 @@ class FakeLift(LiftPort):
         self._seen_press = 0
         self._cmd: Dict[str, Any] = {"dir": "stop", "speed": 0}
         self._cmd_at_ms = clock()
+        #: `goto`（WP-CAM-17）。最後の goto の記録（`state.goto`）。`by` は自分の名前。
+        self._goto: Optional[Dict[str, Any]] = None
+        self._goto_live = False
+        self._idle_reason = "CMD_STOP"
         self._ceiling: Dict[str, Any] = {"status": "MISSING", "mm": None, "age_ms": 0}
         self._run_dir: Optional[str] = None
         # 連続駆動の上限（#4b）。回していた間に目標の速さで進んだとみなした距離 [µm]
@@ -76,6 +81,7 @@ class FakeLift(LiftPort):
         #: 受けた `hold`・`release` の履歴（試験用）
         self.hold_history: List[Dict[str, Any]] = []
         self.release_history: List[Dict[str, Any]] = []
+        self.goto_history: List[Dict[str, Any]] = []
         #: 受けた `ceiling` の履歴（試験用）
         self.ceiling_history: List[Dict[str, Any]] = []
         #: ほかの上部モジュールが持ち主のふり（`(name, busy_label)`）。`None` なら演じない
@@ -95,6 +101,8 @@ class FakeLift(LiftPort):
         self._arm_rest: Dict[str, Any] = {"attached": None, "link": None, "confirm": None}
         #: `False` なら高さが読めない（原点の前）のふりをする
         self._height_ok = True
+        #: 繋ぎ直し回数（`link_epoch()`）。プロセス内の偽物なので、試験が `simulate_reconnect()` で増やす
+        self._epoch = 0
 
     # --- 外から偽の値を変える ---------------------------------------------------------------------
 
@@ -134,6 +142,10 @@ class FakeLift(LiftPort):
 
     def set_height_ok(self, ok: bool) -> None:
         self._height_ok = bool(ok)
+
+    def simulate_reconnect(self) -> None:
+        """繋ぎ直したことにする（`link_epoch()` を 1 増やす。state は途切れさせない）。"""
+        self._epoch += 1
 
     @property
     def height_mm(self) -> float:
@@ -199,12 +211,15 @@ class FakeLift(LiftPort):
         self._owner_press = press
         if press > self._seen_press:
             self._seen_press = press
+        if self._goto_live and self._goto is not None and press != self._goto["press"]:
+            # 持ち主が goto から hold に替わった（同じ持ち主の cmd 切替は CMD_STOP）
+            self._end_goto("CMD_STOP")
         if direction in ("up", "down") and direction == self._run_dir:
             pass  # 同じ方向のまま動き続けているので続けて数える
         else:
             self._run_dir = direction if direction in ("up", "down") else None
             self._run_travel_um = 0.0
-        self._cmd = {"dir": direction, "speed": int(speed)}
+        self._cmd = {"mode": "hold", "dir": direction, "speed": int(speed)}
         self._cmd_at_ms = now
         self._ceiling = {
             "status": ceiling_status,
@@ -217,8 +232,70 @@ class FakeLift(LiftPort):
         self.release_history.append({"press": int(press)})
         if self._owner_press is not None and int(press) == self._owner_press:
             self._owner_press = None
-            self._cmd = {"dir": "stop", "speed": 0}
+            self._cmd = {"mode": "hold", "dir": "stop", "speed": 0}
+            self._idle_reason = "CMD_STOP"
             self._cmd_at_ms = self._clock()
+            self._end_goto("CMD_STOP")
+
+    def _end_goto(self, reason: str) -> None:
+        """実行中の goto が着く前に終わった（NOT_ARRIVED と止めた理由）。"""
+        if self._goto_live and self._goto is not None:
+            self._goto["status"] = "NOT_ARRIVED"
+            self._goto["reason"] = reason
+        self._goto_live = False
+
+    async def send_goto(
+        self,
+        press: int,
+        target_mm: int,
+        speed: int,
+        ceiling_status: str,
+        ceiling_mm: Optional[int],
+        ceiling_age_ms: int,
+    ) -> None:
+        """`goto` を受ける（[-protocol-modules.md](../../../docs/plan/detailed/DetailedDesign-protocol-modules.md) §2.2）。
+        持ち主の規則は `hold` と同じ。同じ `press` の再送は時刻を更新するだけ（着いたあとの同じ press は無視）。"""
+        now = self._clock()
+        press = int(press)
+        target_mm = int(target_mm)
+        speed = int(speed)
+        self.goto_history.append(
+            {
+                "press": press,
+                "target_mm": target_mm,
+                "speed": speed,
+                "ceiling": {"status": ceiling_status, "mm": ceiling_mm, "age_ms": int(ceiling_age_ms)},
+            }
+        )
+        ceiling = {"status": ceiling_status, "mm": ceiling_mm, "age_ms": int(ceiling_age_ms)}
+        if self._goto_live and self._goto is not None and self._goto["press"] == press:
+            self._cmd = {"mode": "goto", "press": press, "target_mm": target_mm, "speed": speed, "block": self._cmd.get("block")}
+            self._cmd_at_ms = now
+            self._ceiling = dict(ceiling)
+            return
+        if self._owner_press is None:
+            if press <= self._seen_press:
+                return  # 止まったあとの古い `press` では持ち主になれない
+        elif press < self._owner_press:
+            return  # 取って代わられた側の押し続けは無視する
+        self._owner_press = press
+        if press > self._seen_press:
+            self._seen_press = press
+        if self._goto_live:
+            self._end_goto("PREEMPTED")
+        self._run_dir = None
+        self._run_travel_um = 0.0
+        block = None
+        if not self._height_ok:
+            block = "HEIGHT_UNKNOWN"
+        elif target_mm < 0 or target_mm > LIFT_TOP_MM:
+            block = "TARGET_RANGE"
+        self._cmd = {"mode": "goto", "press": press, "target_mm": target_mm, "speed": speed, "block": block}
+        self._cmd_at_ms = now
+        self._ceiling = dict(ceiling)
+        self._goto = {"by": "hve-cam", "press": press, "target_mm": target_mm,
+                      "status": "NOT_ARRIVED" if block else "MOVING", "reason": block or "NONE"}
+        self._goto_live = block is None
 
     async def send_ceiling(
         self,
@@ -234,6 +311,9 @@ class FakeLift(LiftPort):
         }
         self.ceiling_history.append(body)
         self._ceiling = dict(body)
+
+    def link_epoch(self) -> int:
+        return self._epoch
 
     def link_ok(self, now_ms: float, timeout_ms: float) -> bool:
         """プロセス内に線は無い。`state` を作り始めていれば繋がっている扱い。"""
@@ -259,18 +339,35 @@ class FakeLift(LiftPort):
         if self._arm_rest["link"] is False and self._arm_rest["confirm"] is not None:
             return "stop", 0, "ARM_LINK"
         direction = self._cmd.get("dir")
+        speed_raw = None
+        if self._cmd.get("mode") == "goto":
+            block = self._cmd.get("block")
+            if block:
+                return "stop", 0, block
+            diff = float(self._cmd.get("target_mm", 0)) - float(self._height_mm)
+            if abs(diff) <= LIFT_GOTO_TOL_MM:
+                # 着いたら止めて持ち主を離す。同じ `press` の goto は動き出さない
+                if self._goto is not None:
+                    self._goto["status"], self._goto["reason"] = "ARRIVED", "NONE"
+                self._goto_live = False
+                self._owner_press = None
+                self._idle_reason = "ARRIVED"
+                return "stop", 0, "ARRIVED"
+            direction = "up" if diff > 0 else "down"
         try:
-            speed = int(self._cmd.get("speed"))
+            speed_raw = int(self._cmd.get("speed"))
         except (TypeError, ValueError):
             return "stop", 0, "CMD_STOP"
         if direction not in ("up", "down", "stop"):
             return "stop", 0, "CMD_STOP"
-        speed = min(max(speed, 0), LIFT_SPEED_ABS_MAX_MM_S)
+        speed = min(max(speed_raw, 0), LIFT_SPEED_ABS_MAX_MM_S)
 
         if self._owner_press is None:
-            return "stop", 0, "CMD_STOP"
+            return "stop", 0, self._idle_reason
         if now - self._cmd_at_ms > LIFT_CMD_TIMEOUT_MS:
             self._owner_press = None
+            self._end_goto("CMD_TIMEOUT")
+            self._idle_reason = "CMD_TIMEOUT"
             return "stop", 0, "CMD_TIMEOUT"
         if direction == "stop" or speed == 0:
             return "stop", 0, "CMD_STOP"
@@ -299,6 +396,12 @@ class FakeLift(LiftPort):
         if self._turning:
             self._run_travel_um += self._run_speed_mm_s * dt_ms
         direction, speed, reason = self._decide(now)
+        if self._goto_live and self._goto is not None:
+            if reason == "NONE":
+                self._goto["status"] = "MOVING"
+            elif reason not in ("ARRIVED",):
+                self._goto["status"] = "NOT_ARRIVED"
+                self._goto["reason"] = reason
         self._turning = reason == "NONE" and direction in ("up", "down")
         self._run_speed_mm_s = speed
         if direction == "up":
@@ -374,7 +477,7 @@ class FakeLift(LiftPort):
             ),
             "homed": True,
             "modules": modules,
-            "goto": None,
+            "goto": dict(self._goto) if self._goto is not None else None,
             "arm": dict(self._arm_rest, out=self._arm_out),
             "ui_clients": 0,
             "provisional": ["CEILING_STALE_MS", "LIFT_MAX_RUN_PCT"],

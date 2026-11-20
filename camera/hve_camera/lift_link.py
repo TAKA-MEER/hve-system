@@ -84,6 +84,19 @@ class LiftPort(ABC):
         """昇降部へ `hold` を送る。`speed` は目標の速さ [mm/s] の整数。`ceiling_mm` は `MEASURED` のときだけ値が入る。"""
 
     @abstractmethod
+    async def send_goto(
+        self,
+        press: int,
+        target_mm: int,
+        speed: int,
+        ceiling_status: str,
+        ceiling_mm: Optional[int],
+        ceiling_age_ms: int,
+    ) -> None:
+        """昇降部へ `goto` を送る（protocol-modules §2.2）。`ceiling` の形は `hold` と同じ。
+        **WP-CAM-17**（[-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §4.1）。"""
+
+    @abstractmethod
     async def send_ceiling(
         self,
         ceiling_status: str,
@@ -99,6 +112,11 @@ class LiftPort(ABC):
     @abstractmethod
     def link_ok(self, now_ms: float, timeout_ms: float) -> bool:
         """昇降部から `state` が届いているなら `True`。**`False` の間が `LINK_LOST`。**"""
+
+    @abstractmethod
+    def link_epoch(self) -> int:
+        """繋ぎ直し回数。繋ぐたびに 1 増える（`Control` が繋ぎ直しを途切れとして判定するために使う。
+        protocol §4.1 の「繋ぎ直しても同じ `id` では送らない」）。同じ接続の間は変わらない。"""
 
     @abstractmethod
     def latest_state(self) -> Optional[Dict[str, Any]]:
@@ -136,6 +154,8 @@ class LiftLink(LiftPort):
         self._stopping = False
         self._state: Optional[Dict[str, Any]] = None
         self._state_at_ms: Optional[float] = None
+        #: 繋ぎ直し回数（`link_epoch()`）。接続が繋がった直後に 1 増やす
+        self._epoch = 0
         #: 繋いだ先のホスト（`state.lift.lift_ip` 用。画面に昇降部へのリンクを出す）
         self._remote_host: Optional[str] = None
 
@@ -192,6 +212,29 @@ class LiftLink(LiftPort):
         with contextlib.suppress(Exception):
             await ws.send_str(json.dumps(message))
 
+    async def send_goto(
+        self,
+        press: int,
+        target_mm: int,
+        speed: int,
+        ceiling_status: str,
+        ceiling_mm: Optional[int],
+        ceiling_age_ms: int,
+    ) -> None:
+        """`goto` を送る（protocol-modules §2.2）。**繋がっていなければ捨てる**（昇降部は途絶えで止まる）。"""
+        ws = self._ws
+        if ws is None or ws.closed:
+            return
+        message = {
+            "t": "goto",
+            "press": int(press),
+            "target_mm": int(target_mm),
+            "speed": int(speed),
+            "ceiling": self._ceiling_body(ceiling_status, ceiling_mm, ceiling_age_ms),
+        }
+        with contextlib.suppress(Exception):
+            await ws.send_str(json.dumps(message))
+
     async def send_ceiling(
         self,
         ceiling_status: str,
@@ -230,6 +273,9 @@ class LiftLink(LiftPort):
             return
         with contextlib.suppress(Exception):
             await ws.send_str(json.dumps({"t": "release", "press": int(press)}))
+
+    def link_epoch(self) -> int:
+        return self._epoch
 
     def link_ok(self, now_ms: float, timeout_ms: float) -> bool:
         if self._state is None or self._state_at_ms is None:
@@ -305,6 +351,8 @@ class LiftLink(LiftPort):
             self._ws = ws
             self._remote_host = _host_of(url)
             log.info("昇降部 %s に繋がった", url)
+            # 繋がった直後に 1 増やす（同じ press の `goto` の再送を Control が途切れとして止める）
+            self._epoch += 1
             with contextlib.suppress(Exception):
                 await ws.send_str(self._hello())
             loop = asyncio.get_event_loop()

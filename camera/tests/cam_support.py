@@ -65,6 +65,7 @@ PARAMS: dict[str, Any] = {
     "aim_cmd_timeout_ms": 600,
     "aim_yaw_tol_deg": 1,
     "module_ws_max_conn": 4,
+    "lift_goto_grace_ms": 1000,
     "snapshot_min_interval_ms": 200,
     "snapshot_wake_wait_ms": 3000,
     "provisional": ["hold_timeout_ms", "lift_cmd_period_ms"],
