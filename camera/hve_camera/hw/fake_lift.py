@@ -101,6 +101,8 @@ class FakeLift(LiftPort):
         self._arm_rest: Dict[str, Any] = {"attached": None, "link": None, "confirm": None}
         #: `False` なら高さが読めない（原点の前）のふりをする
         self._height_ok = True
+        #: 繋ぎ直し回数（`link_epoch()`）。プロセス内の偽物なので、試験が `simulate_reconnect()` で増やす
+        self._epoch = 0
 
     # --- 外から偽の値を変える ---------------------------------------------------------------------
 
@@ -140,6 +142,10 @@ class FakeLift(LiftPort):
 
     def set_height_ok(self, ok: bool) -> None:
         self._height_ok = bool(ok)
+
+    def simulate_reconnect(self) -> None:
+        """繋ぎ直したことにする（`link_epoch()` を 1 増やす。state は途切れさせない）。"""
+        self._epoch += 1
 
     @property
     def height_mm(self) -> float:
@@ -305,6 +311,9 @@ class FakeLift(LiftPort):
         }
         self.ceiling_history.append(body)
         self._ceiling = dict(body)
+
+    def link_epoch(self) -> int:
+        return self._epoch
 
     def link_ok(self, now_ms: float, timeout_ms: float) -> bool:
         """プロセス内に線は無い。`state` を作り始めていれば繋がっている扱い。"""

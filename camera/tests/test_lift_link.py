@@ -218,6 +218,31 @@ async def test_silent_peer_is_dropped_and_reconnected_with_hello() -> None:
         await esp32.stop()
 
 
+async def test_link_epoch_increases_on_reconnect() -> None:
+    """繋ぎ直し回数（`link_epoch()`）は繋ぐたびに 1 増える（protocol §4.1）。
+
+    `Control` はこの番号の変化で「繋ぎ直した」を検知し、同じ `press` の `goto` の再送を止める。
+    番号を増やさなければ（前に戻す）赤になる。
+    """
+    clock = ManualClock()
+    esp32 = FakeEsp32(clock)
+    url = await esp32.start()
+    lift = LiftLink(url, clock, state_timeout_ms=300)
+    try:
+        await lift.start()
+        await wait_until(lambda: len(esp32.hello_history) >= 1)
+        first = lift.link_epoch()
+        assert first >= 1
+        assert lift.link_epoch() == first, "同じ接続の間は変わらない"
+        esp32.silent = True  # 閉じずに黙る（繋ぎ直しする）
+        await wait_until(lambda: len(esp32.hello_history) >= 2, timeout=5.0)
+        await wait_until(lambda: lift.link_epoch() > first, timeout=5.0)
+        assert lift.link_epoch() >= first + 1
+    finally:
+        await lift.close()
+        await esp32.stop()
+
+
 def _live_state_dicts(exclude: Any) -> int:
     """プロセス内のどこにあっても（インスタンス・モジュール変数・クロージャ）、生きている `state` の dict の数。
 

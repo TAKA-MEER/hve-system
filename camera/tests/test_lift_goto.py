@@ -161,24 +161,49 @@ async def test_other_screen_hold_marks_preempted() -> None:
 
 
 async def test_link_loss_finishes_and_no_resume_on_reconnect() -> None:
-    """変異 9: 接続が切れたら `LINK_LOST` で終わらせ、繋ぎ直しても同じ `id` を送らない"""
+    """変異 9: 繋ぎ直したら `LINK_LOST` で終わらせ、繋ぎ直しても同じ `id` を送らない。
+
+    本番の経路（`LiftLink` は繋ぎ直すたびに番号を増やす）と同じ受け口で縛る:
+    `state` を途切れさせずに番号だけ 1 増やす（繋ぎ直しが 600 ms 以内に済む場合の代わり）。
+    """
     rig = Rig()
     await rig.prime()
     rig.lift.set_height_mm(500)
-    for _ in range(8):
-        rig.loop.lift_goto("g1", "target", 990, 30)
-        rig.clock.advance(100)
-        await rig.loop.step()
+    rig.loop.lift_goto("g1", "target", 990, 30)
+    await rig.step()  # 状態は新鮮なまま（古くしない）
     count = len(rig.lift.goto_history)
-    state = rig.loop.build_state(1)
+    rig.lift.simulate_reconnect()  # state は送り続けているのに、接続だけ切り替わる
+    rig.loop.lift_goto("g1", "target", 990, 30)
+    state = await rig.step()
     assert state["lift_goto"] == {"id": "g1", "mode": "target", "target_mm": 990,
                                   "status": "NOT_ARRIVED", "reason": "LINK_LOST"}, state["lift_goto"]
-    # 繋ぎ直し（新しい接続）を Control に渡し直す。同じ id は送らない
-    rig.loop._lift = rig.lift  # noqa: SLF001
-    rig.loop._lift_obj_prev = None  # noqa: SLF001
+    assert len(rig.lift.goto_history) == count, "繋ぎ直したのに前の id の goto を送った"
+    # 繋ぎ直したあとも同じ id が届いても送らない
     rig.loop.lift_goto("g1", "target", 990, 30)
     await rig.step()
     assert len(rig.lift.goto_history) == count
+    # 新しい id は送ってよい（繋ぎ直し自体は新しい命令を禁じない。新しい `press` で来る）
+    prev_press = rig.lift.goto_history[-1]["press"]
+    rig.loop.lift_goto("g2", "target", 990, 30)
+    await rig.step()
+    assert len(rig.lift.goto_history) == count + 1
+    assert rig.lift.goto_history[-1]["press"] != prev_press
+
+
+async def test_reconnect_stops_descending_hold_to_bottom() -> None:
+    """変異 9 の兄弟: 繋ぎ直したら「下端へ」の下降 `hold` も送らず `LINK_LOST` になる"""
+    rig = Rig()
+    await rig.prime()
+    rig.lift.set_height_mm(500)
+    rig.loop.lift_goto("g1", "bottom", None, 30)
+    await rig.step()  # 下降の `hold` を送っている
+    holds = len(rig.lift.hold_history)
+    assert holds > 0, "下降の hold を送っていない"
+    rig.lift.simulate_reconnect()  # state は途切れず、接続だけ切り替わる
+    rig.loop.lift_goto("g1", "bottom", None, 30)
+    state = await rig.step()
+    assert state["lift_goto"]["status"] == "NOT_ARRIVED" and state["lift_goto"]["reason"] == "LINK_LOST"
+    assert len(rig.lift.hold_history) == holds, "繋ぎ直したのに前の下降 hold を送った"
 
 
 async def test_bottom_preempted_when_owner_name_changes() -> None:

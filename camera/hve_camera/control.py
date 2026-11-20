@@ -135,8 +135,7 @@ class ControlLoop:
         self._goto_record: Optional[dict] = None
         #: 終わった `id`（着いた・着かなかったあとは送らない。WP-CAM-17 §4.1）
         self._finished_goto_ids: set = set()
-        #: 前の `step()` で見た昇降部の接続（繋ぎ直しを途切れとして拾うため）
-        self._lift_obj_prev: Any = None
+        # (予約: 当時の番号は `lift_goto` の中に持つ)
         self._bottom_stop_count = 0
         #: 送っている `hold` の向きと、そのときの画面
         self._press_dir = "stop"
@@ -218,7 +217,8 @@ class ControlLoop:
         self._press += 1
         self._press_owner = owner
         self._goto = {"id": id, "mode": mode, "target_mm": target, "speed": float(speed),
-                      "owner": owner, "at_ms": now, "started_ms": now, "press": self._press}
+                      "owner": owner, "at_ms": now, "started_ms": now, "press": self._press,
+                      "epoch": self._lift.link_epoch()}
         self._goto_record = {"id": id, "mode": mode, "target_mm": target, "status": "MOVING", "reason": "NONE"}
         self._owner = owner
         self._bottom_stop_count = 0
@@ -364,8 +364,9 @@ class ControlLoop:
         goto = self._active_goto(now)
         if goto is not None:
             raw = self._lift.latest_state() or {}
-            # 繋ぎ直し（接続の切り替わり・`state` の途絶え）→ 終わらせる。再開しない
-            if self._lift_obj_prev is not None and self._lift is not self._lift_obj_prev:
+            # 繋ぎ直し（接続番号の変化）・`state` の途絶え → 終わらせる。再開しない
+            # （同じ press の命令を新しい接続で送ると、昇降部は新しい押し始めとして動き出す）
+            if self._lift.link_epoch() != self._goto["epoch"]:
                 self._finish_goto("NOT_ARRIVED", "LINK_LOST")
             else:
                 received = self._lift.state_received_at_ms()
@@ -396,7 +397,6 @@ class ControlLoop:
                 if self._goto is not None and after_grace and owner is not None:
                     if owner != "module" or raw.get("owner_name") != self._params.get("module_name", "hve-cam"):
                         self._finish_goto("NOT_ARRIVED", "PREEMPTED")
-        self._lift_obj_prev = self._lift
         if self._goto is not None:
             status, mm, age_ms = self._ceiling_triple(now)
             if self._goto["mode"] == "target":
