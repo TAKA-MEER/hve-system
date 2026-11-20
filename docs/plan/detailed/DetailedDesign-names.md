@@ -235,6 +235,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | カメラモジュールの画面の WS の `t` | **`lift_goto`**（`id`・`mode`: `target` / `bottom`・`target_mm`・`speed`） |
 | **`state.lift_goto`** | カメラモジュールの `state`。`id`・`mode`・`target_mm`・`status`（`MOVING` / `ARRIVED` / `NOT_ARRIVED`）・`reason` か `null` |
 | **`LiftPort.send_goto`** | `camera/hve_camera/lift_link.py`。昇降部へ `goto`（天井は `send_hold` と同じ形） |
+| **`LiftPort.link_epoch`** | 昇降部へ繋がるたびに 1 増える番号。`lift_goto` の間に変わったら `NOT_ARRIVED`・`LINK_LOST`（同じオブジェクトのまま繋ぎ直すので、繋ぎ直しはこれで見る。`WP-CAM-17` の差し戻しで足した） |
 | **`ui_goto_grace_ms`**（昇降部の画面）・**`lift_goto_grace_ms`**（カメラモジュールの `params.toml`） | 下端へで「昇降部が止まった」と見る前の猶予。どちらも 1000 ms（**仮**） |
 
 ## 5. パラメータと仮値
