@@ -984,6 +984,31 @@ async def test_ws_over_the_connection_limit_is_closed_without_closing_the_old(ai
         await ws.close()
 
 
+def test_ui_goto_arrives_on_fake_lift():
+    """偽の昇降部は `/ws/ui` の `goto` を受ける（昇降部の画面の「目標の高さへ」）。
+
+    ファームの MainController が `goto` を両方の WS で受け付けるのと同じ。
+    画面（`/ws/ui`）の `goto` に天井は載せないので、単体の操作として上下する
+    （`WP-LIFTUI-07`。パケットの「受けなければ足す」を確かめた）。
+    """
+    lift = FakeLift()
+    lift.height_mm = 800
+    conn = lift.add_conn("ui")
+    lift.step(1000)
+    now = 1000
+    lift.on_goto(conn, "ui", fake.decode_goto(goto_msg(target=830), now), now)
+    state = lift.step(now + 50)
+    assert state["dir"] == "up" and state["goto"]["status"] == "MOVING"
+    for _ in range(40):
+        now += 100
+        lift.on_goto(conn, "ui", fake.decode_goto(goto_msg(target=830), now), now)
+        state = lift.step(now)
+        if state["goto"]["status"] == "ARRIVED":
+            break
+    assert state["goto"]["status"] == "ARRIVED"
+    assert state["owner"] is None  # 着いた周期で持ち主を離す（§2.2）
+
+
 async def test_ws_goto_over_websocket(aiohttp_client, tmp_path):
     lift = FakeLift()
     lift.height_mm = 800
@@ -994,6 +1019,18 @@ async def test_ws_goto_over_websocket(aiohttp_client, tmp_path):
     state = await recv_state(ws, lambda s: s.get("goto") is not None)
     assert state["goto"]["by"] == "ss" and state["dir"] == "up"
     assert state["modules"][0]["busy_label"] == "画像認識で操作中"
+    await ws.close()
+
+
+async def test_ws_goto_over_ui_websocket(aiohttp_client, tmp_path):
+    """端から端: `/ws/ui` に connect して `goto` を送ると上部として動く。"""
+    lift = FakeLift()
+    lift.height_mm = 800
+    client = await aiohttp_client(fake.make_app(tmp_path, lift))
+    ws = await client.ws_connect("/ws/ui")
+    await ws.send_str(json.dumps(goto_msg(target=1200)))
+    state = await recv_state(ws, lambda s: s.get("goto") is not None)
+    assert state["dir"] == "up" and state["owner"] == "ui"
     await ws.close()
 
 
