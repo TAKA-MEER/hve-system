@@ -47,6 +47,7 @@ EXPECTED = {
     "aim_cmd_timeout_ms": 600,
     "aim_yaw_tol_deg": 1,
     "module_ws_max_conn": 4,
+    "lift_goto_grace_ms": 1000,
     "snapshot_min_interval_ms": 200,
     "idle_save_ms": 1800000,
     "ap_absent_ms": 60000,
@@ -81,6 +82,7 @@ EXPECTED = {
         "aim_cmd_timeout_ms",
         "aim_yaw_tol_deg",
         "module_ws_max_conn",
+        "lift_goto_grace_ms",
     ],
 }
 

@@ -471,10 +471,16 @@ class CameraApp:
 
         kind = data.get("t")
         # **操作の入口だけが `touch()` を呼ぶ**（画面を開く・映像の接続・状態を読むだけでは呼ばない）
-        if kind in ("hold", "release", "zoom", "touch", "yaw_zero"):
+        if kind in ("hold", "release", "zoom", "touch", "yaw_zero", "lift_goto"):
             await self._touch()
         if kind == "touch":
             return  # 静止画のボタンなど。`hve_camera` に操作を知らせるだけ
+        if kind == "lift_goto":
+            if self.control.lift_goto(data.get("id"), data.get("mode"), data.get("target_mm"), data.get("speed"), owner=ws):
+                # 画面が押したら取って代わる（ss の `aim` は `PREEMPTED`）
+                await self.port.preempt_by_ui()
+                self._owner = ws
+            return
         if kind == "hold":
             if self.control.hold(data.get("axis"), data.get("speed"), owner=ws):
                 # 画面が押したら取って代わる（ss の `aim` は `PREEMPTED`）

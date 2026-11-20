@@ -5,6 +5,8 @@
 
 # 画面からの操作が途絶えてから「押していない」扱いになるまでの時間
 hold_timeout_ms = 400            # 仮
+# 「下端へ」「取って代わられた」で止まったと見る前の猶予（DetailedDesign-names.md。WP-CAM-17）
+lift_goto_grace_ms = 1000         # 仮
 # 昇降を動かしている間、昇降部へ hold を送る周期（止まっている間は送らない。protocol §1）
 lift_cmd_period_ms = 100         # 仮
 # 昇降部からの state が途絶えてから LINK_LOST になるまでの時間
@@ -114,4 +116,5 @@ provisional = [
   "aim_cmd_timeout_ms",
   "aim_yaw_tol_deg",
   "module_ws_max_conn",
+  "lift_goto_grace_ms",
 ]

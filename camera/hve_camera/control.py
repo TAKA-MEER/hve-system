@@ -129,6 +129,15 @@ class ControlLoop:
         self._press = 0
         #: 今 `hold` を送っている最中か（離したら `release` を送るため）
         self._lift_sending = False
+        #: 動いている `lift_goto`（`id`・`mode`・`target_mm`・`speed`・`owner`・`at`）。無ければ `None`
+        self._goto: Optional[dict] = None
+        #: 最後の `lift_goto` の状態（`state.lift_goto`）。次の `lift_goto` まで残す
+        self._goto_record: Optional[dict] = None
+        #: 終わった `id`（着いた・着かなかったあとは送らない。WP-CAM-17 §4.1）
+        self._finished_goto_ids: set = set()
+        #: 前の `step()` で見た昇降部の接続（繋ぎ直しを途切れとして拾うため）
+        self._lift_obj_prev: Any = None
+        self._bottom_stop_count = 0
         #: 送っている `hold` の向きと、そのときの画面
         self._press_dir = "stop"
         self._press_owner: Any = None
@@ -159,14 +168,85 @@ class ControlLoop:
         if isinstance(speed, bool) or not isinstance(speed, (int, float)):
             log.warning("hold の speed が数値でないので無視した: %r", speed)
             return False
+        if self._goto is not None:
+            self._finish_goto("NOT_ARRIVED", "PREEMPTED")
         self._axis = axis
         self._speed = float(speed)
         self._hold_at_ms = self._clock()
         self._owner = owner
         return True
 
+    def lift_goto(
+        self, id: str, mode: str, target_mm: Any, speed: Any, owner: Any = None
+    ) -> bool:
+        """画面の「目標の高さへ」「下端へ」を受ける（[-protocol.md](../../docs/plan/detailed/DetailedDesign-protocol.md) §4.1）。
+
+        `id` は画面が押し始めごとに作る文字列。新規 `id` ＝新しい押し始め（`press` を 1 増やす）。
+        同じ `id` の再送は速さ・目標を更新するだけ。**最後に届いた操作が勝つ**（`hold` と同じ）。
+        終わった `id` は受け取らない（送らない）。知らない `mode`・数値でない速さ・目標は無視する。
+        """
+        if not isinstance(id, str) or not id or len(id) > 32:
+            log.warning("lift_goto の id が見当違いなので無視した: %r", id)
+            return False
+        if id in self._finished_goto_ids:
+            return False
+        if mode not in ("target", "bottom"):
+            log.warning("知らない mode の lift_goto は無視した: %r", mode)
+            return False
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)):
+            log.warning("lift_goto の speed が数値でないので無視した: %r", speed)
+            return False
+        now = self._clock()
+        if mode == "target":
+            if isinstance(target_mm, bool) or not isinstance(target_mm, (int, float)):
+                log.warning("lift_goto の target_mm が数値でないので無視した: %r", target_mm)
+                return False
+            target = int(round(float(target_mm)))
+        else:
+            target = None
+        if self._goto is not None and self._goto["id"] == id and self._goto.get("mode") == mode and self._goto["owner"] is owner:
+            self._goto["speed"] = float(speed)
+            self._goto["target_mm"] = target
+            self._goto["at_ms"] = now
+            return True
+        if self._goto is not None:
+            self._finish_goto("NOT_ARRIVED", "PREEMPTED")
+        # 別の操作を蹴る: hold を離す
+        self._axis = None
+        self._speed = 0.0
+        self._hold_at_ms = None
+        self._press += 1
+        self._press_owner = owner
+        self._goto = {"id": id, "mode": mode, "target_mm": target, "speed": float(speed),
+                      "owner": owner, "at_ms": now, "started_ms": now, "press": self._press}
+        self._goto_record = {"id": id, "mode": mode, "target_mm": target, "status": "MOVING", "reason": "NONE"}
+        self._owner = owner
+        self._bottom_stop_count = 0
+        return True
+
+    def _finish_goto(self, status: str, reason: str) -> None:
+        """動いている `lift_goto` を終わらせる（`state.lift_goto` に残し、`id` を終わったものに入れる）。"""
+        if self._goto is None:
+            return
+        self._finished_goto_ids.add(self._goto["id"])
+        if self._goto_record is not None:
+            self._goto_record = dict(self._goto_record, status=status, reason=reason)
+        self._goto = None
+        self._bottom_stop_count = 0
+
+    def _active_goto(self, now_ms: float):
+        """動いている `lift_goto`（途切れていれば終わらせて `None`）。"""
+        if self._goto is None:
+            return None
+        if (now_ms - self._goto["at_ms"]) > float(self._params["hold_timeout_ms"]):
+            self._finish_goto("NOT_ARRIVED", "CMD_STOP")
+            return None
+        return self._goto
+
     def release(self) -> None:
         """押していない状態に戻す。**理由も出さない**（画面は `NONE` に戻る）。"""
+        if self._goto is not None:
+            self._finish_goto("NOT_ARRIVED", "CMD_STOP")
         self._axis = None
         self._speed = 0.0
         self._hold_at_ms = None
@@ -279,7 +359,58 @@ class ControlLoop:
     async def _step_lift(
         self, axis: Optional[str], holding: bool, speed: float, now: float
     ) -> None:
-        """昇降の `hold`・`release` を送る。`press` は押し始めごとに 1 増やす。"""
+        """昇降の `hold`・`release` を送る。`press` は押し始めごとに 1 増やす。
+        `lift_goto` が動いていれば `goto`／下降の `hold` を送る（§4.1）。"""
+        goto = self._active_goto(now)
+        if goto is not None:
+            raw = self._lift.latest_state() or {}
+            # 繋ぎ直し（接続の切り替わり・`state` の途絶え）→ 終わらせる。再開しない
+            if self._lift_obj_prev is not None and self._lift is not self._lift_obj_prev:
+                self._finish_goto("NOT_ARRIVED", "LINK_LOST")
+            else:
+                received = self._lift.state_received_at_ms()
+                stale = received is None or (now - received) > float(self._params["lift_state_timeout_ms"])
+                if stale and received is not None:
+                    self._finish_goto("NOT_ARRIVED", "LINK_LOST")
+            if goto is not None and self._goto is not None:
+                grace = float(self._params.get("lift_goto_grace_ms", 1000))
+                after_grace = (now - self._goto["started_ms"]) >= grace
+                owner = raw.get("owner")
+                if self._goto["mode"] == "target":
+                    lift_goto_state = raw.get("goto") if isinstance(raw.get("goto"), dict) else {}
+                    if (lift_goto_state.get("by") == self._params.get("module_name", "hve-cam")
+                            and lift_goto_state.get("press") == self._goto["press"]
+                            and lift_goto_state.get("status") in ("ARRIVED", "NOT_ARRIVED")):
+                        status = lift_goto_state.get("status")
+                        reason = lift_goto_state.get("reason") or "NONE"
+                        self._finish_goto(status, reason)
+                elif self._goto["mode"] == "bottom":
+                    if raw.get("bottom") is True:
+                        self._finish_goto("ARRIVED", "NONE")
+                    elif after_grace and raw.get("dir") == "stop":
+                        self._bottom_stop_count += 1
+                        if self._bottom_stop_count >= 2:
+                            self._finish_goto("NOT_ARRIVED", raw.get("reason") or "NONE")
+                    else:
+                        self._bottom_stop_count = 0
+                if self._goto is not None and after_grace and owner is not None:
+                    if owner != "module" or raw.get("owner_name") != self._params.get("module_name", "hve-cam"):
+                        self._finish_goto("NOT_ARRIVED", "PREEMPTED")
+        self._lift_obj_prev = self._lift
+        if self._goto is not None:
+            status, mm, age_ms = self._ceiling_triple(now)
+            if self._goto["mode"] == "target":
+                speed_mm_s = int(round(self._clamped_goto_speed(self._goto["speed"], "target")))
+                await self._lift.send_goto(
+                    self._goto["press"], int(self._goto["target_mm"]), speed_mm_s, status, mm, age_ms
+                )
+            else:
+                speed_mm_s = int(round(self._clamped_goto_speed(self._goto["speed"], "bottom")))
+                await self._lift.send_hold("down", speed_mm_s, self._goto["press"], status, mm, age_ms)
+            self._lift_sending = True
+            self._press_dir = "down" if self._goto["mode"] == "bottom" else "stop"
+            self._press_owner = self._goto["owner"]
+            return
         direction = _LIFT_DIRS.get(axis) if holding else None
         if direction is None:
             if self._lift_sending:
@@ -306,6 +437,15 @@ class ControlLoop:
         )
         self._lift_sending = True
         self._press_dir = direction
+
+    def _clamped_goto_speed(self, speed: float, mode: str) -> float:
+        """`lift_goto` の速さを昇降の設定に丸める。target は上昇・下降の両枠の和。"""
+        if mode == "bottom":
+            bounds = self._settings["lift_down"]
+            return clamp_speed(speed, bounds)
+        low = min(float(self._settings["lift_up"]["min"]), float(self._settings["lift_down"]["min"]))
+        high = max(float(self._settings["lift_up"]["max"]), float(self._settings["lift_down"]["max"]))
+        return min(max(speed, low), high)
 
     def _ceiling_triple(self, now_ms: float) -> tuple:
         """`hold` に載せる天井の `(状態, mm, 古さ)`。読み値が無ければ `READ_ERROR`。"""
@@ -433,6 +573,8 @@ class ControlLoop:
             "zoom": self._zoom,
             # 画面は映像（hve_video）の URL を組み立てるのにこのポートが要る（protocol §2.4）
             "video_port": int(self._params["video_port"]),
+            #: 「目標の高さへ」「下端へ」の最後の状態（§4.1）。無いときは `None`
+            "lift_goto": dict(self._goto_record) if self._goto_record is not None else None,
             "active_axis": self._active_axis(now)[0],
             "reason": self._screen_reason(
                 now, link_ok, raw.get("reason"), lift_ceiling
