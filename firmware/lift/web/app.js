@@ -24,6 +24,7 @@
 const ui_hold_period_ms = 100;    // `hold` を送り続ける周期
 const ui_state_timeout_ms = 1000; // `state` がこの時間届かないと「接続切れ」
 const ui_tick_ms = 500;           // 画面が見直す周期
+const ui_goto_grace_ms = 1000;    // 下端へで「昇降部が止まった」と見る前の猶予（仮。names §5.2）
 const lift_gauge_full_mm = 1800;  // 高さのゲージの満量
 
 /* 設定できる項目。名前・単位・絶対的な範囲（protocol §3 の検証に対応） */
@@ -65,6 +66,9 @@ const REASON_TEXT = {
   CMD_TIMEOUT: ['warn', '操作が途絶えたため停止しました'],
   OWNER_GONE: ['warn', '操作していた画面が閉じられたため停止しました'],
   ARM_LINK: ['ng', '測定機構と通信できないため停止しています（腕を確かめて、確認に答えてください）'],
+  ARRIVED: ['ok', '着きました'],
+  TARGET_RANGE: ['warn', '目標の高さが範囲の外のため動けません'],
+  PREEMPTED: ['warn', '別の操作に取って代わられたため止まりました'],
 };
 
 /* --- DOM に触れない部分（Node の試験で見る） --- */
@@ -77,6 +81,47 @@ function holdMessage(press, dir, speed) {
 /** 送る `release` の JSON */
 function releaseMessage(press) {
   return {t: 'release', press: Number(press)};
+}
+
+/**
+ * 送る `goto` の JSON（protocol-modules §2.2。画面 `/ws/ui` の `goto` に天井は載せない）。
+ * `press` は上昇・下降と同じ通し番号で、押し始めに 1 増やす
+ */
+function gotoMessage(press, target_mm, speed) {
+  return {t: 'goto', press: Number(press), target_mm: Number(target_mm), speed: Number(speed)};
+}
+
+/**
+ * 目標の高さへの速さ。目標がいまの高さより上なら上昇、下なら下降のスライダーの値（spec §1.7）。
+ * 速さを動かしている間に変えたら送り直しのたびに（`gotoTick`）新しい値で送る
+ */
+function gotoSpeed(target_mm, height_mm, speeds) {
+  const up = target_mm >= height_mm;
+  const value = Number(up ? speeds.up : speeds.down);
+  return isFinite(value) ? value : 0;
+}
+
+/** `state.goto` が自分の押したもの（`press`・`target_mm` が一致）で動き終わったか（§4.1） */
+function gotoFinished(state, press, target_mm) {
+  const g = state && state.goto;
+  if (!g) return false;
+  return Number(g.press) === Number(press) && Number(g.target_mm) === Number(target_mm)
+    && g.status !== 'MOVING';
+}
+
+/**
+ * 下端への下降の送り続けをやめるか（§4.1）。下端に着いた・猶予後、昇降部が止まった
+ * （`dir` が `stop` を 2 回続けて見た）・持ち主が `ui` でない（取って代わられた）をやめる。
+ * @returns {{finished: boolean, streak: number}} streak は `stop` を続けて見た回数
+ */
+function bottomFinished(state, started_at_ms, now_ms, stop_streak, grace_ms) {
+  let streak = Number(stop_streak) || 0;
+  if (!state) return {finished: false, streak};
+  if (state.bottom === true) return {finished: true, streak};
+  if (now_ms - started_at_ms < Number(grace_ms)) return {finished: false, streak};
+  if (state.owner !== 'ui') return {finished: true, streak};
+  streak = state.dir === 'stop' ? streak + 1 : 0;
+  return {finished: streak >= 2, streak};
 }
 
 /**
@@ -361,6 +406,13 @@ let last_dir = 'stop';      // 直前に押していた向き（`press` を増�
 let sliders = null;
 let outs = null;
 let arm_confirm_stop = null;// いま出している確認ダイアログの番号（出ていなければ null）
+let goto_mode = null;       // 'target' | 'bottom' | null（「目標の高さへ」・「下端へ」の移動中）
+let goto_press = 0;         // 移動中の `press`（`hold` と同じ通し番号）
+let goto_target = null;     // 目標の高さ [mm]（target のときだけ）
+let goto_since = 0;         // 押し始めた時刻（猶予の起算点）
+let goto_timer = null;      // 命令を送り続けるタイマー
+let goto_streak = 0;        // 下端への送り続けで `dir` が `stop` を続けて見た回数
+let goto_bar = '';          // 移動の結果の文言（着きました・着かなかった）
 
 /* 画面の設定の下書き。閉じる操作では元に戻さない（保存しない） */
 let settings_draft = null;
@@ -401,6 +453,8 @@ function connect() {
   // 切れても繋ぎ直す（切るのは正常なので待たない。protocol §1）
   socket.addEventListener('close', () => {
     socket = null;
+    // WS が切れたら移動中をやめる。繋ぎ直しても送り直さない（spec §1.7）
+    if (goto_mode) clearGoto();
   });
 }
 
@@ -452,6 +506,7 @@ function sendHold() {
 function startHold(dir) {
   if (hold_dir === dir) return;
   endHold();
+  endGoto();  // 「目標の高さへ」・「下端へ」の送り続けをやめて、こちらに替わる（spec §1.7）
   if (isNewPress(last_dir, dir)) press_seq += 1;
   last_dir = dir;
   hold_dir = dir;
@@ -471,6 +526,103 @@ function endHold() {
   hold_dir = null;
   last_dir = 'stop';
   send(releaseMessage(press));
+}
+
+/* --- 目標の高さへ・下端へ（spec §1.7・protocol §4.1） --- */
+
+/** 移動中をやめる（`release` は送らない。自然に終わったとき・WS が切れたとき） */
+function clearGoto() {
+  if (goto_timer !== null) {
+    clearInterval(goto_timer);
+    goto_timer = null;
+  }
+  goto_mode = null;
+  goto_target = null;
+  goto_streak = 0;
+  last_dir = 'stop';
+  render();
+}
+
+/** 「停止」ボタン。`release` を送って止める（送らないと昇降部は `LIFT_CMD_TIMEOUT_MS` まで動く） */
+function endGoto() {
+  if (!goto_mode) return;
+  const press = goto_press;
+  goto_bar = '';
+  clearGoto();
+  send(releaseMessage(press));
+}
+
+/** タイマーの 1 回分。終わりを `gotoFinished`・`bottomFinished` で見て、送るのをやめる */
+function gotoTick() {
+  if (!goto_mode || !last_state) return;
+  if (goto_mode === 'target') {
+    if (gotoFinished(last_state, goto_press, goto_target)) {
+      const g = last_state.goto || {};
+      goto_bar = g.status === 'ARRIVED'
+        ? `着きました（目標 ${goto_target} mm）`
+        : `着かなかった${gotoReasonText(g.reason)}`;
+      clearGoto();
+      return;
+    }
+    const height = last_state.height_ok === false ? 0 : Number(last_state.height_mm) || 0;
+    send(gotoMessage(goto_press, goto_target, gotoSpeed(goto_target, height, {
+      up: speedOf('up'),
+      down: speedOf('down'),
+    })));
+    return;
+  }
+  const {finished, streak} = bottomFinished(last_state, goto_since, nowMs(), goto_streak, ui_goto_grace_ms);
+  goto_streak = streak;
+  if (finished) {
+    goto_bar = last_state.bottom === true
+      ? '着きました（下端）'
+      : `着かなかった${gotoReasonText(last_state.reason)}`;
+    clearGoto();
+    return;
+  }
+  send(holdMessage(goto_press, 'down', speedOf('down')));
+}
+
+/** 着かなかったときの理由の文言 */
+function gotoReasonText(reason) {
+  const found = reasonText(reason);
+  return found ? `（${found.text}）` : '';
+}
+
+/** 「目標の高さへ」。押し始めで `press` を 1 増やし（`hold` と同じ通し番号）、`goto` を送り続ける */
+function startTarget() {
+  const input = document.getElementById('gHeight');
+  const value = Number(input && input.value);
+  if (!input || input.value === '' || !isFinite(value) || !Number.isInteger(value)) return;
+  endHold();
+  endGoto();
+  press_seq += 1;
+  goto_mode = 'target';
+  goto_press = press_seq;
+  goto_target = value;
+  goto_since = nowMs();
+  goto_streak = 0;
+  goto_bar = '';
+  last_dir = 'stop';
+  gotoTick();
+  goto_timer = setInterval(gotoTick, ui_hold_period_ms);
+  render();
+}
+
+/** 「下端へ」。下降の `hold` を、下端に着くまで送り続ける。原点を取る前でも使える */
+function startBottom() {
+  endHold();
+  endGoto();
+  press_seq += 1;
+  goto_mode = 'bottom';
+  goto_press = press_seq;
+  goto_target = null;
+  goto_since = nowMs();
+  goto_streak = 0;
+  goto_bar = '';
+  gotoTick();
+  goto_timer = setInterval(gotoTick, ui_hold_period_ms);
+  render();
 }
 
 function bindHoldButtons() {
@@ -545,6 +697,29 @@ function render() {
   }
 
   $('liftState').textContent = moveText(state.dir, state.speed, state.speed_meas, state.bottom);
+
+  // 「目標の高さへ」・「下端へ」・停止（spec §1.7）
+  const btnTargetEl = $('btnTarget');
+  const btnBottomEl = $('btnBottom');
+  const btnStopEl = $('btnStop');
+  if (btnTargetEl) {
+    // 高さが読めない（原点を取る前を含む）間は押せない
+    btnTargetEl.disabled = state.height_ok === false;
+    btnTargetEl.textContent = goto_mode === 'target' ? '目標の高さへ（移動中）' : '目標の高さへ';
+  }
+  if (btnBottomEl) {
+    // すでに下端なら押せない（原点を取る前でも使える）
+    btnBottomEl.disabled = state.bottom === true;
+    btnBottomEl.textContent = goto_mode === 'bottom' ? '下端へ（移動中）' : '下端へ';
+  }
+  if (btnStopEl) btnStopEl.style.display = goto_mode ? '' : 'none';
+  const barEl = $('gotoBar');
+  if (barEl) {
+    barEl.className = goto_bar || goto_mode ? 'stopbar show ng' : 'stopbar';
+    barEl.textContent = goto_mode
+      ? (goto_mode === 'target' ? `目標の高さへ移動中（${goto_target} mm）` : '下端へ移動中')
+      : goto_bar;
+  }
 
   // 高さのゲージ
   const height = state.height_ok === false ? 0 : Number(state.height_mm) || 0;
@@ -722,6 +897,13 @@ function initApp() {
   }
   bindHoldButtons();
 
+  const btnTarget = $('btnTarget');
+  if (btnTarget) btnTarget.addEventListener('click', startTarget);
+  const btnBottom = $('btnBottom');
+  if (btnBottom) btnBottom.addEventListener('click', startBottom);
+  const btnStop = $('btnStop');
+  if (btnStop) btnStop.addEventListener('click', endGoto);
+
   $('openSettings').addEventListener('click', () => {
     openSettingsOverlay(current_settings || {}, (last_state && last_state.provisional) || []);
   });
@@ -740,9 +922,9 @@ function initApp() {
 
   // ページが隠れたとき（タブを切り替えた）と、ページを閉じたときに離す
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) endHold();
+    if (document.hidden) { endHold(); endGoto(); }
   });
-  addEventListener('pagehide', endHold);
+  addEventListener('pagehide', () => { endHold(); endGoto(); });
 
   loadSettings();
   connect();
@@ -753,7 +935,8 @@ if (typeof document !== 'undefined') initApp();
 
 if (typeof module === 'object' && module !== null) {
   module.exports = {
-    holdMessage, releaseMessage, isNewPress, sliderSpec,
+    holdMessage, releaseMessage, gotoMessage, gotoSpeed, gotoFinished, bottomFinished,
+    isNewPress, sliderSpec, ui_goto_grace_ms,
     formatSpeed, reasonText, ceilingText, heightText, ownerText, buttonNoteText, moveText, stateStale,
     ownerBusyLabel, modulesText, armNoticeText, armHomeWarnText, armConfirmView, armConfirmMessage, armStatusText,
     validateSettingsDraft, settingsErrorText, SETTING_AXES, SETTING_MOTOR, SETTING_CEILING, SETTING_CEILING_MARGIN, MOTOR_NOTE,

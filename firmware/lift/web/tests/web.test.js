@@ -21,6 +21,56 @@ test('送る release は press だけを持つ（protocol §2.1）', () => {
   assert.deepEqual(app.releaseMessage('4'), {t: 'release', press: 4});
 });
 
+test('送る goto は press・目標・速さだけを持つ（protocol-modules §2.2。画面に天井は載せない）', () => {
+  assert.deepEqual(app.gotoMessage(5, 1200, 40), {t: 'goto', press: 5, target_mm: 1200, speed: 40});
+  assert.deepEqual(app.gotoMessage('6', '300', '25'), {t: 'goto', press: 6, target_mm: 300, speed: 25});
+  assert.ok(!('ceiling' in app.gotoMessage(1, 100, 10)));
+});
+
+test('目標の高さへの速さは目標の向きのスライダーの値（spec §1.7）', () => {
+  const speeds = {up: 100, down: 40};
+  assert.equal(app.gotoSpeed(1200, 800, speeds), 100); // 上なら上昇のスライダー
+  assert.equal(app.gotoSpeed(300, 800, speeds), 40);  // 下なら下降のスライダー
+  assert.equal(app.gotoSpeed(800, 800, speeds), 100); // 同じ高さは上昇の値（昇降部は着いたとみなす）
+});
+
+test('目標の高さへは、自分の goto が MOVING 以外になったら終わる（§4.1）', () => {
+  const st = (got) => ({goto: got});
+  assert.equal(app.gotoFinished(st({press: 3, target_mm: 1200, status: 'MOVING'}), 3, 1200), false);
+  assert.equal(app.gotoFinished(st({press: 3, target_mm: 1200, status: 'ARRIVED'}), 3, 1200), true);
+  assert.equal(app.gotoFinished(st({press: 3, target_mm: 1200, status: 'NOT_ARRIVED'}), 3, 1200), true);
+  // 別の press・別の目標は自分のものではない。無い・欠けているときも終わらない
+  assert.equal(app.gotoFinished(st({press: 4, target_mm: 1200, status: 'ARRIVED'}), 3, 1200), false);
+  assert.equal(app.gotoFinished(st({press: 3, target_mm: 900, status: 'ARRIVED'}), 3, 1200), false);
+  assert.equal(app.gotoFinished(st(null), 3, 1200), false);
+  assert.equal(app.gotoFinished(null, 3, 1200), false);
+});
+
+test('下端へは着いたら・猶予後に止まったら・取られたら終わる（§4.1）', () => {
+  const GRACE = app.ui_goto_grace_ms;
+  assert.equal(GRACE, 1000);
+  const st = (over) => ({bottom: false, dir: 'down', owner: 'ui', reason: 'NONE', ...over});
+  // 下端に着いたらすぐ終わる（猶予の前でも）
+  assert.deepEqual(app.bottomFinished(st({bottom: true}), 0, 100, 0, GRACE), {finished: true, streak: 0});
+  // 猶予の間は止まって見えても終わらない（動き出しの遅れを見誤らない）
+  assert.deepEqual(app.bottomFinished(st({dir: 'stop'}), 0, GRACE - 1, 0, GRACE), {finished: false, streak: 0});
+  // 猶予後に `stop` を 2 回続けて見たら終わる。回し途中なら数え直す
+  assert.deepEqual(app.bottomFinished(st({dir: 'stop'}), 0, GRACE, 1, GRACE), {finished: true, streak: 2});
+  assert.deepEqual(app.bottomFinished(st({dir: 'stop'}), 0, GRACE, 0, GRACE), {finished: false, streak: 1});
+  assert.deepEqual(app.bottomFinished(st({dir: 'down'}), 0, GRACE, 7, GRACE), {finished: false, streak: 0});
+  // 猶予後に持ち主が `ui` でない（取って代わられた）ならすぐ終わる
+  assert.deepEqual(app.bottomFinished(st({dir: 'stop', owner: 'module'}), 0, GRACE, 0, GRACE), {finished: true, streak: 0});
+  assert.deepEqual(app.bottomFinished(st({owner: null}), 0, GRACE + 500, 5, GRACE), {finished: true, streak: 5});
+  // 状態が無いときは終わらない（送り続け）
+  assert.deepEqual(app.bottomFinished(null, 0, GRACE + 500, 0, GRACE), {finished: false, streak: 0});
+});
+
+test('止めた理由に着いた・目標は範囲外・取って代わられたの文言を追加する（WP-LIFTUI-07）', () => {
+  assert.deepEqual(app.reasonText('ARRIVED'), {cls: 'ok', text: '着きました'});
+  assert.equal(app.reasonText('TARGET_RANGE').cls, 'warn');
+  assert.equal(app.reasonText('PREEMPTED').cls, 'warn');
+});
+
 test('press は押し始め（違う向き・up と down の入れ替え）だけ増やす（§3.3）', () => {
   assert.equal(app.isNewPress('stop', 'up'), true);    // 押し始め
   assert.equal(app.isNewPress('stop', 'down'), true);  // 押し始め

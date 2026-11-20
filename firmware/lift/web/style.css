@@ -83,6 +83,17 @@ main{flex:1;min-height:0;display:grid;gap:var(--gap);padding:var(--gap);
 }
 input[type=range]{width:100%;margin:0;accent-color:var(--brand);height:26px}
 
+/* 目標の高さへ・下端へ・停止（Spec-ui §1.7）。ボタンは 32×32 以上（§0.1） */
+.gotrow{flex:none;display:flex;align-items:center;gap:6px}
+.gotrow label{flex:none;color:var(--mut);font-size:12px;white-space:nowrap}
+.gotrow input{flex:1 1 auto;min-width:0;padding:4px 6px;border-radius:6px;border:1px solid var(--bd-hi);
+  background:var(--inset);color:var(--tx);font:inherit;font-size:12px;font-variant-numeric:tabular-nums;min-height:32px}
+.gotoBtn{flex:none;min-height:32px;padding:4px 10px;border-radius:var(--r);border:1px solid var(--bd-hi);
+  background:var(--ctrl);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.gotoBtn:hover{background:var(--ctrl-hi)}
+.gotoBtn:disabled{opacity:.45;cursor:not-allowed}
+@media (max-width:480px){ .gotrow label{display:none} }
+
 /* ---------- 設定画面 ---------- */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:8px;z-index:10}
 .overlay.show{display:flex}

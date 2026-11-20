@@ -95,7 +95,8 @@ const MEASURE = () => {
       bad.push(`overflow ${el.tagName}.${el.id || el.className} ${el.scrollWidth}x${el.scrollHeight}>${el.clientWidth}x${el.clientHeight}`);
     }
   }
-  const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings')];
+  const must = [...document.querySelectorAll('.hold, input[type=range], #openSettings, .gotoBtn, #gHeight')]
+    .filter((el) => getComputedStyle(el).display !== 'none');
   for (const overlay of document.querySelectorAll('.overlay.show')) {
     must.push(...overlay.querySelectorAll('input, button'));
   }
@@ -110,7 +111,7 @@ const MEASURE = () => {
       const bc = box.getBoundingClientRect();
       if (rc.bottom > bc.bottom + 0.5 || rc.right > bc.right + 0.5) bad.push('clipped ' + name);
     }
-    if (el.classList.contains('hold') && (rc.height < 32 || rc.width < 32)) {
+    if ((el.classList.contains('hold') || el.classList.contains('gotoBtn')) && (rc.height < 32 || rc.width < 32)) {
       bad.push(`small ${name} ${rc.width | 0}x${rc.height | 0}`);
     }
   }
