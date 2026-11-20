@@ -223,6 +223,237 @@ test('3 押したままページを閉じると向こう側から見て止まる
   }
 });
 
+/* --- 10. 目標の高さへで着いて送るのをやめる ---------------------------------- */
+test('10 目標の高さへで着いて、送るのをやめる', async (browser) => {
+  await postFake({height_mm: 800, bottom: false, height_ok: true, ceiling: null, arm: {out: null}});
+  const tap = await tapUiMessages(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  try {
+    await tap.page.fill('#gHeight', '830');
+    await tap.page.click('#btnTarget');
+    // 着くまで動く（800 → 830。fake の速さは初期値 100 mm/s）
+    await watcher.waitFor((s) => s.goto && s.goto.status === 'MOVING' && s.owner === 'ui', 2000, '移動する');
+    const arrived = await watcher.waitFor((s) => s.goto && s.goto.status === 'ARRIVED', 4000, '着く');
+    assert.equal(arrived.goto.target_mm, 830);
+    // 着いたら送るのをやめる（しばらく待っても追加で送られない）
+    const sentBefore = (await tap.sent()).filter((m) => m && m.t === 'goto').length;
+    await tap.page.waitForTimeout(3 * HOLD_MS);
+    const sentAfter = (await tap.sent()).filter((m) => m && m.t === 'goto').length;
+    assert.equal(sentAfter, sentBefore, `着いたあとも goto を送り続けている（${sentBefore} → ${sentAfter}）`);
+    // 画面にも「着きました」と出る
+    await tap.page.waitForFunction(
+      () => document.getElementById('gotoBar').textContent.includes('着きました'), null, {timeout: 3000});
+  } finally {
+    watcher.close();
+    await tap.cleanup();
+  }
+});
+
+/* --- 11. 下端へで下端に着いてやめる ------------------------------------------ */
+test('11 下端へで下端に着いて、下降の送り続けをやめる', async (browser) => {
+  await postFake({height_mm: 200, bottom: false, height_ok: true, ceiling: null, arm: {out: null}});
+  const tap = await tapUiMessages(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  try {
+    await tap.page.click('#btnBottom');
+    await watcher.waitFor((s) => s.owner === 'ui' && s.dir === 'down', 2500, '下降する');
+    // 下端に着いたことを偽物の下端スイッチ（`bottom`）に知らせる
+    await postFake({bottom: true});
+    await watcher.waitFor((s) => s.bottom === true, 5000, '下端に着く');
+    // 着いたら下降を送り続けていないこと
+    const heldBefore = (await tap.sent()).filter((m) => m && m.t === 'hold' && m.dir === 'down').length;
+    await tap.page.waitForTimeout(3 * HOLD_MS);
+    const heldAfter = (await tap.sent()).filter((m) => m && m.t === 'hold' && m.dir === 'down').length;
+    assert.equal(heldAfter, heldBefore, `下端に着いたあとも下降を送り続けている（${heldBefore} → ${heldAfter}）`);
+    await tap.page.waitForFunction(
+      () => document.getElementById('gotoBar').textContent.includes('着きました'), null, {timeout: 3000});
+    // 別の押し始めで press が違うこと（下端スイッチを離してから）
+    await postFake({bottom: false, height_mm: 300});
+    await tap.page.fill('#gHeight', '100');
+    await tap.page.click('#btnTarget');
+    await watcher.waitFor((s) => s.goto && s.goto.status === 'MOVING', 2000, '目標へ動く');
+    const gotos = (await tap.sent()).filter((m) => m && m.t === 'goto');
+    assert.ok(gotos.length >= 1);
+    const holds = (await tap.sent()).filter((m) => m && m.t === 'hold' && m.dir === 'down');
+    assert.ok(holds.length >= 1);
+    assert.notEqual(gotos[0].press, holds[0].press, '押し始めで press が増えていない');
+  } finally {
+    watcher.close();
+    await tap.cleanup();
+  }
+});
+
+/* --- 12. 途中で停止 ----------------------------------------------------------- */
+test('12 途中で「停止」を押すと release で止まる', async (browser) => {
+  await postFake({height_mm: 800, bottom: false, height_ok: true, ceiling: null, arm: {out: null}});
+  const tap = await tapUiMessages(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  try {
+    await tap.page.fill('#gHeight', '1400');
+    await tap.page.click('#btnTarget');
+    await watcher.waitFor((s) => s.goto && s.goto.status === 'MOVING' && s.dir === 'up', 2000, '移動する');
+    await tap.page.click('#btnStop');
+    // release が送られてすぐ止まる（CMD_TIMEOUT まで動かない。変異 5 の縛り）
+    const stopped = await watcher.waitFor((s) => s.dir === 'stop', TIMEOUT_MS - 2 * STATE_MS, '止まる');
+    assert.notEqual(stopped.reason, 'CMD_TIMEOUT', '停止を押したのに CMD_TIMEOUT で止まった（release を送っていない）');
+    const releases = (await tap.sent()).filter((m) => m && m.t === 'release');
+    assert.ok(releases.length >= 1, '停止で release が送られていない');
+  } finally {
+    watcher.close();
+    await tap.cleanup();
+  }
+});
+
+/* --- 13. 高さが読めない間は目標の高さへを押せない ----------------------------- */
+test('13 高さが読めない間は「目標の高さへ」を押せない', async (browser) => {
+  await postFake({height_mm: 800, bottom: false, height_ok: false, ceiling: null, arm: {out: null}});
+  const {page, cleanup} = await openScreen(browser);
+  try {
+    await page.waitForFunction(
+      () => document.getElementById('btnTarget').disabled === true, null, {timeout: 3000});
+    // 下端へは原点を取る前でも使える
+    assert.equal(await page.locator('#btnBottom').isEnabled(), true, '高さが読めなくても下端へは押せる');
+  } finally {
+    await postFake({height_ok: true});
+    await cleanup();
+  }
+});
+
+/* --- 14. 目標が下向きなら下降のスライダーの速さで送る -------------------------- */
+test('14 目標が下なら下降の速さで送る', async (browser) => {
+  await postFake({height_mm: 800, bottom: false, height_ok: true, ceiling: null, arm: {out: null}});
+  const tap = await tapUiMessages(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  try {
+    // 上昇・下降のスライダーの値を別々にし、向きの取り違えを検出できるようにする
+    await tap.page.evaluate(() => {
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        el.value = String(value);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+      };
+      set('sUp', 40);
+      set('sDown', 100);
+    });
+    await tap.page.fill('#gHeight', '600');
+    await tap.page.click('#btnTarget');
+    await watcher.waitFor((s) => s.goto && s.goto.status === 'MOVING' && s.dir === 'down', 2000, '下降で動く');
+    const gotos = (await tap.sent()).filter((m) => m && m.t === 'goto');
+    assert.ok(gotos.length >= 1);
+    const last = gotos[gotos.length - 1];
+    assert.equal(last.speed, 100, '目標が下なのに下降のスライダーの速さ（100）を送っていない');
+  } finally {
+    watcher.close();
+    await tap.cleanup();
+  }
+});
+
+/* --- 15. 下端へで止まったら止める（安全の判定） ---------------------------------- */
+test('15 下端へで昇降部が止まったら、リトライを止めて「停止」ボタンが消える', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, height_ok: true, stall: true, ceiling: null, arm: {out: null}});
+  const tap = await tapUiMessages(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  try {
+    await tap.page.click('#btnBottom');
+    // stall が真の間は ENCODER_STALL で止まる。猶予のあと stop を見て（2 回目）止まる
+    await watcher.waitFor((s) => s.reason === 'ENCODER_STALL' && s.dir === 'stop', 4000, '止まる');
+    await tap.page.waitForFunction(
+      () => document.getElementById('btnStop').style.display === 'none' &&
+            document.getElementById('gotoBar').textContent.includes('着かなかった'), null, {timeout: 4000});
+  } finally {
+    watcher.close();
+    await postFake({stall: false});
+    await tap.cleanup();
+  }
+});
+
+/* --- 16. 下端へが取って代わられたら終わる -------------------------------------- */
+test('16 下端へで上部モジュールが持ち主になったら移動が終わる', async (browser) => {
+  await postFake({height_mm: 1200, bottom: false, height_ok: true, ceiling: null, arm: {out: null}});
+  const tap = await tapUiMessages(browser);
+  const watcher = observeModule();
+  await watcher.opened;
+  let module = null;
+  try {
+    await tap.page.click('#btnBottom');
+    await watcher.waitFor((s) => s.owner === 'ui' && s.dir === 'down', 2500, '下降する');
+    // 別の接続（上部モジュール）が新しい press で持ち主になる
+    module = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://${new URL(BASE).host}/ws/module`);
+      ws.addEventListener('error', reject);
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({t: 'hello', name: 'preempt', ceiling_sensor: false}));
+        const hold = JSON.stringify({t: 'hold', press: 99, dir: 'down', speed: 40});
+        ws.timer = setInterval(() => ws.send(hold), 100);
+        resolve(ws);
+      });
+    });
+    // 画面は移動を終わらせて（停止ボタンが消える。「取って代わられた」の理由を出す）
+    await tap.page.waitForFunction(
+      () => document.getElementById('btnStop').style.display === 'none', null, {timeout: 5000});
+    const bar = await tap.page.evaluate(() => document.getElementById('gotoBar').textContent);
+    assert.match(bar, /着かなかった|取って代わられた/, `取られた理由が出ていない（${bar}）`);
+  } finally {
+    if (module) { clearInterval(module.timer); module.close(); }
+    watcher.close();
+    await tap.cleanup();
+  }
+});
+
+/* --- 17. WS が切れたら移動中をやめる（繋ぎ直しても送り直さない） ------------------ */
+test('17 WS が切れたら移動中をやめる（繋ぎ直しても送り直さない）', async (browser) => {
+  await postFake({height_mm: 800, bottom: false, height_ok: true, ceiling: null, arm: {out: null}});
+  const page = await browser.newPage({viewport: VIEWPORT});
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.__sent = [];
+    window.__socks = [];
+    const Orig = window.WebSocket;
+    window.WebSocket = function (...args) {
+      const ws = new Orig(...args);
+      window.__socks.push(ws);
+      const origSend = ws.send.bind(ws);
+      ws.send = (data) => { window.__sent.push(String(data)); return origSend(data); };
+      return ws;
+    };
+    window.WebSocket.prototype = Orig.prototype;
+    for (const key of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) window.WebSocket[key] = Orig[key];
+  });
+  await page.goto(BASE + '/');
+  await page.waitForFunction(
+    () => document.getElementById('stHeight').textContent.trim() !== '—', null, {timeout: 5000});
+  try {
+    await page.fill('#gHeight', '1400');
+    await page.click('#btnTarget');
+    await page.waitForTimeout(3 * HOLD_MS);
+    const countAfterStart = await page.evaluate(() =>
+      (window.__sent || []).filter((s) => { try { return JSON.parse(s).t === 'goto'; } catch { return false; } }).length);
+    assert.ok(countAfterStart >= 2, 'goto が送り続けられていない');
+    // 画面の WS を切る。移動中は消え、再接続しても送り直さない
+    await page.evaluate(() => { const s = window.__socks[window.__socks.length - 1]; if (s) s.close(); });
+    await page.waitForFunction(
+      () => document.getElementById('btnStop').style.display === 'none', null, {timeout: 3000});
+    await page.waitForTimeout(6 * HOLD_MS);
+    const counts = await page.evaluate(() =>
+      (window.__sent || []).filter((s) => { try { return JSON.parse(s).t === 'goto'; } catch { return false; } }).length);
+    const reOpened = await page.evaluate(() => window.__socks.length);
+    assert.ok(reOpened >= 2, 'WS が繋ぎ直されていない');
+    // 繋ぎ直した新しい接続が送っているのは何も無い（送り直さない）
+    const countLast = await page.evaluate(() =>
+      (window.__sent || []).filter((s) => { try { return JSON.parse(s).t === 'goto'; } catch { return false; } }).length);
+    assert.equal(countLast, countAfterStart, '切れたあと、新しい接続で goto を送り直している');
+    assert.deepEqual(errors, [], '画面に JavaScript のエラー');
+  } finally {
+    await page.close().catch(() => {});
+  }
+});
+
 /* --- 4. 不正値は保存しない ---------------------------------------------------- */
 test('4 下限 > 上限は保存されない（PUT を出さない・サーバーの値も変わらない）', async (browser) => {
   const before = await (await fetch(`${BASE}/api/settings`)).json();

@@ -34,6 +34,14 @@
     <div class="sub">速度</div>
     <div class="slider"><label for="sUp">上昇</label><input type="range" id="sUp"><output id="oUp"></output></div>
     <div class="slider"><label for="sDown">下降</label><input type="range" id="sDown"><output id="oDown"></output></div>
+    <div class="gotrow">
+      <label for="gHeight">目標の高さ</label>
+      <input type="number" id="gHeight" step="1" min="0" inputmode="numeric" placeholder="mm">
+      <button class="gotoBtn" id="btnTarget">目標の高さへ</button>
+      <button class="gotoBtn" id="btnBottom">下端へ</button>
+      <button class="gotoBtn" id="btnStop" style="display:none">停止</button>
+    </div>
+    <div class="stopbar" id="gotoBar"></div>
   </section>
 
   <section class="card">
