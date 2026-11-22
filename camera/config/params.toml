@@ -42,6 +42,7 @@ video_out_height = 480           # 仮（H-A8）
 video_fps = 10                   # 仮（H-A8）
 video_jpeg_quality = 80          # 仮（H-A8）
 video_send_timeout_ms = 5000     # 仮（1 枚の書き込みがこれを超えた接続を捨てる。無線の一時的な途切れで切らない長さ）
+video_frame_url_timeout_ms = 5000  # 仮（--frame-url の 1 回の要求を待つ上限。DetailedDesign.md §4.8）
 snapshot_wake_wait_ms = 3000     # 仮（取り込みを止めている間の静止画の要求で、新しい 1 枚を待つ上限）
 # 設定の保存先。ピッチ・ヨーの 2 軸だけを保存する（昇降は昇降部へ中継）
 settings_path = "/home/m5stack/hve_data/settings.json"
@@ -104,6 +105,7 @@ provisional = [
   "video_fps",
   "video_jpeg_quality",
   "video_send_timeout_ms",
+  "video_frame_url_timeout_ms",
   "snapshot_wake_wait_ms",
   "io_cmd_period_ms",
   "io_lost_ms",
