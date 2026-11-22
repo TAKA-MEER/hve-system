@@ -494,12 +494,7 @@ class CameraApp:
                 self.control.release()
             return
         if kind == "yaw_zero":
-            # ヨーの原点合わせは人だけ（`/ws/module` からは受けない）。ss が持ち主の間なら `PREEMPTED`
-            if self.yaw.zero():
-                self.control.mark_motion()
-                await self.port.preempt_by_ui()
-            else:
-                log.warning("ヨーの累計がまだ来ていないので原点を合わせられない")
+            await self._do_yaw_zero()
             return
         if kind == "zoom":
             await self.control.set_zoom(data.get("level"))
@@ -511,6 +506,21 @@ class CameraApp:
         if self._owner is not None:
             self._owner = None
             self.control.release()
+
+    async def _do_yaw_zero(self) -> bool:
+        """ヨーの原点合わせ（画面の WS の `yaw_zero` と `POST /api/fake` の `yaw_zero` で共有）。
+
+        原点合わせ・`mark_motion`・ss が持ち主なら `PREEMPTED` を 1 か所にまとめる
+        （どちらかが欠けたらシミュレーションで見え方がずれる）。
+        累計がまだ来ていなければ何もせず `False`（`POST /api/fake` は 400 にする）。
+        """
+        # ヨーの原点合わせは人だけ（`/ws/module` からは受けない）。ss が持ち主の間なら `PREEMPTED`
+        if self.yaw.zero():
+            self.control.mark_motion()
+            await self.port.preempt_by_ui()
+            return True
+        log.warning("ヨーの累計がまだ来ていないので原点を合わせられない")
+        return False
 
     # --- ss-system の口 ---------------------------------------------------------------------------
 
@@ -734,15 +744,21 @@ class CameraApp:
         if not isinstance(data, dict):
             return web.json_response({"errors": ["オブジェクトでない"]}, status=400)
 
-        errors = self._apply_fake(data)
+        errors = await self._apply_fake(data)
         if errors:
             return web.json_response({"errors": errors}, status=400)
         return web.json_response({"ok": True})
 
-    def _apply_fake(self, data: Mapping[str, Any]) -> list[str]:
+    async def _apply_fake(self, data: Mapping[str, Any]) -> list[str]:
         """偽の値を `HardwareBase` と昇降部に入れる。**理由の一覧**を返す（空なら全部入った）。"""
         errors: list[str] = []
 
+        if "yaw_zero" in data:
+            value = data["yaw_zero"]
+            if value is not True:
+                errors.append("yaw_zero: true のときだけ")
+            elif not await self._do_yaw_zero():
+                errors.append("yaw_zero: ヨーの累計がまだ無い")
         if "ceiling" in data:
             errors += self._apply_fake_ceiling(data["ceiling"])
         if "io_lost" in data:
@@ -863,13 +879,20 @@ class CameraApp:
         return None
 
     def _apply_fake_ceiling(self, value: Any) -> list[str]:
-        """天井の偽の値。**指定しなかったものは動かさない。**"""
+        """天井の偽の値。**指定しなかったものは動かさない。**
+
+        `steady: true` なら 1 回分でなく、`ceiling_read_stale_ms` の間測り続け（POST のたびに期限を延ばす）。
+        `steady` が無ければ今までどおり 1 回分。`stale: true` は今までどおり止める。
+        """
         if not isinstance(value, dict):
             return ["ceiling: オブジェクトでない"]
 
         if value.get("stale") is True:
             self._hw.freeze_ceiling()
             return []
+
+        if "steady" in value and not isinstance(value["steady"], bool):
+            return ["ceiling.steady: 真偽値でない"]
 
         status = value.get("status")
         if status is None:
@@ -883,10 +906,16 @@ class CameraApp:
                 return ["ceiling.mm: MEASURED には mm が要る"]
             if distance < 0:
                 return ["ceiling.mm: 0 未満はだめ"]
-            self._hw.set_ceiling(status, int(distance))
+            distance_mm: Any = int(distance)
+        else:
+            distance_mm = None
+
+        if value.get("steady") is True:
+            until_ms = self._clock() + float(self._params["ceiling_read_stale_ms"])
+            self._hw.set_steady_ceiling(status, distance_mm, until_ms=until_ms)
             return []
 
-        self._hw.set_ceiling(status)
+        self._hw.set_ceiling(status, distance_mm)
         return []
 
 
