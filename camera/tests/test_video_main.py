@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from hve_video import __main__ as video_main
+from hve_video import sources
 
 
 def test_main_runs_the_app_with_aiohttp_3_6_run_app_and_releases_the_source(monkeypatch):
@@ -29,3 +30,41 @@ def test_main_runs_the_app_with_aiohttp_3_6_run_app_and_releases_the_source(monk
     for handler in app.on_shutdown:  # 配信の停止 → 取り込みの解放の順
         loop.run_until_complete(handler(app))
     assert pipeline.next_frame() is None  # 解放されて取り込みが止まる
+
+
+def test_frame_url_without_fake_does_not_start(monkeypatch):
+    """`--fake` なしの `--frame-url` は起動しない（本番で外の絵を取り違えない）。"""
+    import pytest
+
+    ran = []
+    monkeypatch.setattr(web, "run_app", lambda app, **kwargs: ran.append(app))
+    with pytest.raises(SystemExit) as caught:
+        video_main.main(["--frame-url", "http://drawing.invalid/frame"])
+    assert caught.value.code == 2
+    assert ran == []
+
+
+def test_frame_url_with_fake_wires_the_url_source(monkeypatch):
+    """`--fake --frame-url` は外の URL から取り込む（偽の画像列ではない）。"""
+    made = []
+
+    class Recorded:
+        def __init__(self, url, fps, timeout_ms):
+            made.append((url, fps, timeout_ms))
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(sources, "UrlFrameSource", Recorded)
+    captured = []
+
+    def run_app_3_6(app, *, port=8080):
+        captured.append((app, port))
+
+    monkeypatch.setattr(web, "run_app", run_app_3_6)
+    assert video_main.main(
+        ["--fake", "--frame-url", "http://drawing.invalid/frame", "--port", "18081"]
+    ) == 0
+    assert made == [("http://drawing.invalid/frame", 10, 5000)]
+    app, port = captured[0]
+    assert port == 18081
