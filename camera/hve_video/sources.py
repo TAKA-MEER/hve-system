@@ -6,6 +6,7 @@ import logging
 import subprocess
 import threading
 import time
+import urllib.request
 
 import cv2
 import numpy as np
@@ -379,14 +380,206 @@ class MjpegPipeSource:
         self._reader.join(timeout=3.0)
 
 
+class UrlFrameSource:
+    """外の URL から JPEG を 1 枚ずつ取り込む取り込み元（偽物のモードだけ。DetailedDesign.md §4.8）。
+
+    fk-system の描画サービス（1 枚 0.3〜3 秒かかる）が「要求を受けた時点の向きと高さで描いた
+    1280×720 の JPEG」を返す。**前の要求が終わるまで次を出さない。**次の要求は「前の要求を出してから
+    `1 / capture_fps` 秒」と「前の応答が返った時」の遅い方。
+    **1 枚の時刻は要求を出した時刻**（単調時計。返ってきた時刻ではない）。待つ上限を超えた・200 以外・
+    JPEG に展開できない本体は、その回は 1 枚にせず、前の 1 枚とその時刻を残す（古さが伸びる）。
+    取り込みを止めている間は要求を出さない。取得と時計は差し替えられる（試験用）。
+    """
+
+    def __init__(
+        self,
+        url: str,
+        capture_fps: int = 10,
+        timeout_ms: float = 5000,
+        *,
+        clock=time.monotonic,
+        fetch=None,
+        read_timeout: float = READ_TIMEOUT_S,
+    ):
+        self._url = str(url)
+        self._interval = 1.0 / float(capture_fps) if capture_fps else 0.0
+        self._timeout = float(timeout_ms) / 1000.0
+        self._clock = clock  # 単調時計（秒）。1 枚の時刻と経過の計算に使う
+        self._fetch = fetch if fetch is not None else _fetch_url
+        self._read_timeout = float(read_timeout)
+        self._cond = threading.Condition()
+        self._latest: bytes | None = None  # 最後に取り込んだ 1 枚（外の JPEG のまま）
+        self._latest_at = 0.0  # `_latest` の要求を出した時刻（`clock()`）
+        self._sequence = 0  # 取り込んだ枚数
+        self._taken = 0  # `read()` が取った枚数の印
+        self._closed = False
+        self._capturing = True  # False の間は要求を出さない
+        self._failure_logged = False  # 連続する失敗の記録は 1 回だけ出す
+        self._reader = threading.Thread(target=self._run, name="url-frame-fetch", daemon=True)
+        self._reader.start()
+
+    def _run(self) -> None:
+        """要求を 1 本ずつ出し、成功した 1 枚だけを最新の 1 枚として持つ。"""
+        next_at: float | None = None  # 次の要求を出してよい実時刻（`time.monotonic()`。間隔と前の応答の遅い方）
+        while not self._closed:
+            with self._cond:
+                while not self._closed and not self._capturing:
+                    self._cond.wait()
+                if self._closed:
+                    break
+                while next_at is not None and not self._closed and self._capturing:
+                    remaining = next_at - time.monotonic()
+                    if remaining <= 0.0:
+                        break
+                    self._cond.wait(remaining)
+                if self._closed:
+                    break
+                if not self._capturing:
+                    continue
+            request_at = self._clock()  # 1 枚の時刻（刻印用。間隔の待ちは実時刻で測る）
+            request_monotonic = time.monotonic()
+            try:
+                status, body = self._fetch(self._url, self._timeout)
+            except Exception as error:  # 上限超え・通信の失敗など。1 枚にしない
+                status, body = None, None
+                fetch_error: Exception | None = error
+            else:
+                fetch_error = None
+            response_monotonic = time.monotonic()
+            next_at = max(request_monotonic + self._interval, response_monotonic)
+            ok = (
+                status == 200
+                and body
+                and cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+                is not None
+            )
+            if ok:
+                with self._cond:
+                    if self._capturing and not self._closed:
+                        self._latest = body
+                        self._latest_at = request_at  # 返ってきた時刻ではない（§4.8）
+                        self._sequence += 1
+                        self._cond.notify_all()
+                self._failure_logged = False
+            elif not self._failure_logged:
+                # 連続する失敗の記録は 1 回だけ。成功したら次にまた出せるよう戻す
+                self._failure_logged = True
+                if fetch_error is not None:
+                    log.warning("外の絵の取得に失敗した（%s）", fetch_error)
+                elif status != 200:
+                    log.warning("外の絵の取得が %s を返した（前の 1 枚を残す）", status)
+                else:
+                    log.warning("外の絵が JPEG に展開できない（前の 1 枚を残す）")
+
+    @property
+    def capturing(self) -> bool:
+        return self._capturing
+
+    def set_capturing(self, on: bool) -> None:
+        """取り込みを止める・戻す。止めると**最後の 1 枚を捨てる**（古い 1 枚を返さない）。"""
+        on = bool(on)
+        with self._cond:
+            if on == self._capturing:
+                return
+            self._capturing = on
+            if not on:
+                self._latest = None
+                self._taken = self._sequence
+            self._cond.notify_all()
+
+    def latest_jpeg(self) -> bytes | None:
+        """最後に取り込んだ JPEG をそのまま返す。まだ 1 枚も無ければ（止めて捨てたあとも）`None`。"""
+        with self._cond:
+            return self._latest
+
+    def wait_latest_jpeg(self, timeout: float) -> bytes | None:
+        """最後の JPEG を返す。無ければ新しい 1 枚が来るまで最大 `timeout` 秒待つ。来なければ `None`。"""
+        deadline = time.monotonic() + float(timeout)
+        with self._cond:
+            while self._latest is None and not self._closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._cond.wait(remaining)
+            return self._latest
+
+    def latest_jpeg_stamped(self) -> tuple[bytes, int] | None:
+        """`latest_jpeg()` と、その 1 枚の要求を出してからの経過 ms（返す時点。整数）。"""
+        with self._cond:
+            if self._latest is None:
+                return None
+            return self._latest, age_ms(self._latest_at, self._clock())
+
+    def wait_latest_jpeg_stamped(self, timeout: float) -> tuple[bytes, int] | None:
+        """`wait_latest_jpeg()` と、返す 1 枚の要求を出してからの経過 ms。"""
+        deadline = time.monotonic() + float(timeout)
+        with self._cond:
+            while self._latest is None and not self._closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._cond.wait(remaining)
+            if self._latest is None:
+                return None
+            return self._latest, age_ms(self._latest_at, self._clock())
+
+    def read(self) -> np.ndarray | None:
+        """**最新の** 1 枚を展開して返す。新しい 1 枚が来るまで待ち、上限を超えたら `None`。"""
+        deadline = time.monotonic() + self._read_timeout
+        while True:
+            with self._cond:
+                if not self._capturing:
+                    return None  # 止めている間は取らない
+                while (
+                    self._sequence == self._taken
+                    and not self._closed
+                    and self._capturing
+                ):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0.0:
+                        return None
+                    self._cond.wait(remaining)
+                if self._closed or not self._capturing or self._latest is None:
+                    return None
+                jpeg = self._latest
+                self._taken = self._sequence
+            frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is not None:
+                return frame
+            log.warning("展開できない 1 枚を捨てた（%d バイト）", len(jpeg))
+
+    def release(self) -> None:
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+        self._reader.join(timeout=3.0)
+
+
+def _fetch_url(url: str, timeout: float) -> tuple[int, bytes]:
+    """`url` を `GET` して `(状態, 本体)` を返す（Python 3.8・依存を増やさない）。"""
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.status, response.read()
+
+
 def open_source(
     fake: bool,
     capture_width: int,
     capture_height: int,
     capture_fps: int = 10,
     device: str = "/dev/video0",
-) -> FakeSource | MjpegPipeSource:
-    """`fake` なら偽の画像列、そうでなければ実物のカメラ（`v4l2-ctl` の子プロセス）を作る。"""
+    frame_url: str | None = None,
+    frame_url_timeout_ms: float = 5000,
+) -> FakeSource | MjpegPipeSource | UrlFrameSource:
+    """`fake` なら偽の画像列、そうでなければ実物のカメラ（`v4l2-ctl` の子プロセス）を作る。
+
+    `fake` と `frame_url` が揃ったときだけ、外の URL から 1 枚ずつ取り込む（`UrlFrameSource`）。
+    `frame_url` を付けたまま偽物でなければ、本番で外の絵を取り違えるので作らない。
+    """
+    if frame_url is not None:
+        if not fake:
+            raise ValueError("--frame-url は偽物のモード（--fake）と一緒にだけ使える")
+        return UrlFrameSource(frame_url, capture_fps, frame_url_timeout_ms)
     if fake:
         return FakeSource(capture_width, capture_height)
     return MjpegPipeSource(capture_width, capture_height, capture_fps, device)

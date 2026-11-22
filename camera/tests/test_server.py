@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import struct
+import threading
 from unittest import mock
 
 import aiohttp
@@ -18,6 +19,7 @@ from aiohttp import streams
 from aiohttp.test_utils import TestServer, make_mocked_request
 
 from hve_video import server as video_server
+from hve_video import sources
 from hve_video.pipeline import VideoPipeline
 from hve_video.sources import FakeSource
 
@@ -960,3 +962,55 @@ async def test_capture_off_during_a_snapshot_wake_does_not_cut_the_wake_short(ai
     response = await task
     assert response.status == 200
     assert await until(lambda: spawner.live == 0)
+
+
+# --- 外の URL から取り込む偽物（WP-VIDEO-06。WSL で回す） ---------------------------
+
+
+class UrlClock:
+    """動かせる単調時計（秒）。"""
+
+    def __init__(self, now: float = 1000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_snapshot_frame_age_is_counted_from_the_request_time(aiohttp_client):
+    """`/snapshot` の `X-Frame-Age-Ms` は要求を出した時刻から数える（返ってきた時刻ではない）。
+
+    描画に 2 秒かかって応答が返る。要求時刻（1000）から数えれば 2000、応答時刻（1002）
+    から数えれば 0 になる。
+    """
+    clock = UrlClock(1000.0)
+    gate = threading.Event()
+    calls = [0]
+
+    def fetch(url, timeout):
+        calls[0] += 1
+        if calls[0] == 1:
+            clock.now += 2.0  # 描画に 2 秒かかった
+            return 200, jpeg_gray(90)
+        gate.wait(timeout=5.0)  # 2 回目以降は止める（時刻が進まないように）
+        return 200, jpeg_gray(91)
+
+    source = sources.UrlFrameSource(
+        "http://drawing.invalid/frame", 10, 5000, clock=clock, fetch=fetch
+    )
+    try:
+        pipeline = VideoPipeline(
+            source, zoom=1.0, zoom_max=ZOOM_MAX, zoom_step=ZOOM_STEP,
+            out_height=OUT_HEIGHT, jpeg_quality=JPEG_QUALITY,
+        )
+        client = await aiohttp_client(
+            video_server.create_app(pipeline, VIDEO_FPS, SEND_TIMEOUT_MS)
+        )
+        assert await until(lambda: source.latest_jpeg() is not None)
+        response = await client.get("/snapshot")
+        assert response.status == 200
+        assert await response.read() == jpeg_gray(90)
+        assert response.headers["X-Frame-Age-Ms"] == "2000"
+    finally:
+        gate.set()
+        source.release()

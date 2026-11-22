@@ -32,12 +32,20 @@ def main(argv: list[str] | None = None) -> int:
         help="偽の画像列を使う（実物のカメラは使わない。偽物と実機の結果を取り違えないこと）",
     )
     parser.add_argument(
+        "--frame-url",
+        default=None,
+        metavar="URL",
+        help="外の URL から JPEG を 1 枚ずつ取り込む（偽物のモードだけ。--fake と一緒に使う）",
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=DEFAULT_PORT,
         help=f"待ち受けるポート（既定 {DEFAULT_PORT}）",
     )
     args = parser.parse_args(argv)
+    if args.frame_url is not None and not args.fake:
+        parser.error("--frame-url は偽物のモード（--fake）と一緒にだけ使える")
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -53,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         params["video_capture_height"],
         params["video_capture_fps"],
         params["video_device"],
+        frame_url=args.frame_url,
+        frame_url_timeout_ms=params["video_frame_url_timeout_ms"],
     )
     pipeline = VideoPipeline(
         source,
