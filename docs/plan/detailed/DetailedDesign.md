@@ -341,6 +341,26 @@ MJPEG の `<img>` は配信が止まっても `error` が来ず最後の 1 枚�
 | `pio test -e native` | 昇降部・Arduino の純ロジック | 旧版と同じ |
 | node | 両方の画面の純関数・スクロールの検査 | 旧版と同じ |
 
+### 4.8 偽物のモードを外とつなぐ（fk-system のシミュレーション。2026-11-22）
+
+fk-system は、自律測定の一連を実機なしで確かめるシミュレーションで、**hve の偽物をそのまま使う**（fk の `docs/plan/spec/Spec-sim.md`・`detailed/DetailedDesign-sim.md` §5）。fk が自前の偽物を作らないのは、持ち主・止め方・天井の写しがずれないようにするため。
+構成は ss（本物）・`tools/fake_lift_server.py`・`python3 -m hve_camera --fake`・`python3 -m hve_video --fake` と、絵を描く fk の描画サービス。**どれも偽物のモードだけの変更で、本物の経路（UnitV2・ESP32）は変えない。**
+2026-11-22 に fk-system の申し送りを受け、同日に形を fk が確かめた。
+
+| 項目 | 決め方 | 理由 |
+| --- | --- | --- |
+| **外の偽の昇降部へつなぐ** | `python3 -m hve_camera --fake --lift HOST:PORT`。ハードウェアは偽物（`FakeHardware`）のまま、昇降部は中の偽物（`hw/fake_lift.py`）の代わりに本番と同じ `LiftLink` でつなぐ。`--lift` は `params` の `lift_host`・`lift_port` を上書きする（`/ws/module` と設定 API の両方がそこへ行く）。`--lift` が無ければ今までどおり中の偽物。`--fake` なしの `--lift` は起動しない（本番の昇降部の見つけ方は §4.6 のまま） | 中の偽物と ss がつなぐ偽物で高さが食い違う |
+| **天井を与え続ける** | カメラモジュールの `POST /api/fake` の `ceiling` に **`steady: true`** を足す。その読み値を、POST から **`ceiling_read_stale_ms`** の間、測るたびに新しく測ったことにして返す。過ぎたら返さない（読み値が古くなり、昇降部へは `READ_ERROR` で届く）。POST のたびに期限は延びる。`steady` なしは今までどおり 1 回分。`stale: true` は今までどおり止める。起動時の「十分遠い」（`FAKE_CEILING_MM`）は期限なしのまま（人が画面で動かせるように） | v2 の天井の距離計はカメラモジュールにあり、昇降部はカメラから届く値で判定する。カメラの偽物に入れれば本物と同じ道を通る。描画サービスが止まったら本物の距離計が止まったのと同じく古くなる |
+| **ヨーの原点を合わせたことにする** | カメラモジュールの `POST /api/fake` に **`yaw_zero: true`**。画面の WS の `yaw_zero` と同じ処理（原点合わせ・`mark_motion`・ss が持ち主なら `PREEMPTED`）を呼ぶ。ヨーの累計がまだ無ければ 400（理由つき）。画面のボタンの道は残す | シミュレーションを人の手なしの試験で通す。ss の `aim` は原点の前は `YAW_UNKNOWN` |
+| **絵を外から取り込む** | `python3 -m hve_video --fake --frame-url URL`。偽の画像列（`FakeSource`）の代わりに、その URL から JPEG を 1 枚ずつ `GET` する取り込み元（`UrlFrameSource`）を使う。切り出し・倍率・`/stream`・`/snapshot`・`/capture` は今のまま | 描画サービスが `/snapshot` に直接答えると、配信・倍率・省電力・静止画の待ちを fk が写すことになる |
+| 取り込みの間隔 | **前の要求が終わるまで次を出さない。**次の要求は、前の要求を出してから `1 / video_capture_fps` 秒たつか、前の応答が返ったときの遅い方 | 描画は CPU で 1 枚 0.3〜3 s かかる（fk の `FK-E1`） |
+| 1 枚の時刻 | **要求を出した時刻**（単調時計）。返ってきた時刻ではない。`X-Frame-Age-Ms` はここから数える | 描画サービスは要求を受けた時点の向きと高さで描く。ss は `X-Still-Ms` と `X-Frame-Age-Ms` で「止まってから撮った 1 枚」かを見る |
+| 待つ上限 | `video_frame_url_timeout_ms`（仮 5000）。**遅いだけでは失敗にしない**。上限を超えた・200 以外・JPEG に展開できないときは、その回は 1 枚にしない（前の 1 枚とその時刻を残すので、古さが伸びる＝実物のカメラが止まったときと同じ）。失敗の記録は続くあいだ 1 回だけ出す | 重い場面では数秒かかる |
+| 省電力 | `/capture` で取り込みを止めている間は要求を出さない（実物と同じ）。静止画の要求の起こし待ち（`snapshot_wake_wait_ms`）も今のまま | — |
+| `--fake` なしの `--frame-url` | 起動しない | 本番で外の絵を取り違えない |
+
+**読む側（変更なし）**: 描画サービスは命令を出さず、カメラモジュールの `/ws/module`（向き: `pitch_deg`〈報告する目標角〉・`yaw_deg`・`yaw_zeroed`）と昇降部の `/ws/module`（高さ）に `role: observe` でつないで読む（[-protocol-ss.md](DetailedDesign-protocol-ss.md) §1〜§3・[-protocol-modules.md](DetailedDesign-protocol-modules.md)）。`observe` も接続の上限（`module_ws_max_conn`・`LIFT_MODULE_MAX_CONN`）に数える。
+
 ## 5. 段階と作業パケット
 
 **各段階の終わりに必ず「動くもの」が残る。**一覧・受け入れ条件は [-packets.md](DetailedDesign-packets.md)。

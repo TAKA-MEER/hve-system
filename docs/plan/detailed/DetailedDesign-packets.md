@@ -79,6 +79,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-UI-06` | 10 | カメラモジュールの画面に「機体の前を 0° にする」ボタン・ss が動かしている間の表示・ヨーの向き | CAM-14（取り決め） | 不要（偽物のモード） |
 | `WP-LIFTUI-07` | 16 | 昇降部の画面に「目標の高さへ」「下端へ」・停止ボタン（[-protocol.md](DetailedDesign-protocol.md) §4.1。spec Spec-ui §1.7） | LIFT-14 | 不要 |
 | `WP-CAM-17` | 16 | カメラモジュールに `lift_goto` の中継・`state.lift_goto`・画面の「目標の高さへ」「下端へ」・停止ボタン・モックアップ（[-protocol.md](DetailedDesign-protocol.md) §4.1） | LIFT-14 | 不要（偽物のモード） |
+| `WP-CAM-18` | 17 | カメラモジュールの偽物のモードを外とつなぐ: `--lift HOST:PORT`・`POST /api/fake` の `ceiling.steady`・`yaw_zero`（[DetailedDesign.md](DetailedDesign.md) §4.8） | — | 不要（偽物のモード） |
+| `WP-VIDEO-06` | 17 | `hve_video` の偽物のモードに `--frame-url`（外から 1 枚ずつ取り込む。§4.8） | — | 不要（偽物のモード） |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -107,6 +109,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **段階 15（2026-11-19。速さの制御の上限の扱いと前向き。[DetailedDesign.md](DetailedDesign.md) §4.1.2）**: `WP-LIFT-21` だけ。昇降部のファームだけで、プロトコル・画面・カメラモジュールは変えない。
 
 **段階 16（2026-11-21。目標の高さへ・下端へのボタン。spec [Spec-ui.md](../spec/Spec-ui.md) §1.7・[-protocol.md](DetailedDesign-protocol.md) §4.1）**: `WP-LIFTUI-07` と `WP-CAM-17` は並べてよい。**昇降部のファームは変えない**（`/ws/ui` の `goto` は `WP-LIFT-14` で受け付けている）。**互換**: 古いカメラモジュールは `lift_goto` を知らない種類として捨てる（画面だけ新しいと何も動かないだけ）。**両方とも、高さの欄とボタンが増えるので背の低い画面のスクロール検査に気をつける。**
+
+**段階 17（2026-11-22。偽物のモードを外とつなぐ。fk-system のシミュレーション。[DetailedDesign.md](DetailedDesign.md) §4.8。同日に fk-system が形を確かめた）**: `WP-CAM-18` と `WP-VIDEO-06` は並べてよい。**偽物のモードだけの変更で、本物の経路・取り決めは変えない**（UnitV2・ESP32 への配備は要らない）。入ったら fk-system に知らせる。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -774,3 +778,41 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   10. `hold_timeout_ms` で途切れたあと、同じ `id` が届いたら再開する
   11. `mode: bottom` で、昇降部の `owner_name` が `module_name` でなくなっても `PREEMPTED` にしない
 
+### `WP-CAM-18` カメラモジュールの偽物のモードを外とつなぐ
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.3・§4.6・§4.8、[-names.md](DetailedDesign-names.md) §4（`POST /api/fake`）、[-protocol-ss.md](DetailedDesign-protocol-ss.md) §3（`state` の欄）
+- 作るもの:
+  - `camera/hve_camera/__main__.py`: `--lift HOST:PORT`（`--fake` と一緒のときだけ。形が違う・`--fake` なしは argparse の誤りで起動しない）。ハードウェアは `FakeHardware`、昇降部は `LiftLink`（`params` の `lift_host`・`lift_port` を上書き。電源・設定の保存先は今の偽物のモードのまま）。**`main()` の組み立てを試験から呼べる関数に分ける**（例 `build_runtime(args, params, clock)` が `hw`・`lift`・`params` などを返す。`web.run_app` は呼ばない）
+  - `camera/hve_camera/hw/fake_hw.py`: `set_steady_ceiling(status, distance_mm=None, until_ms=None)`。`until_ms` を過ぎたら `read_ceiling()` は `None`
+  - `camera/hve_camera/app.py`: `_apply_fake_ceiling` に `steady`（真偽値。真なら `until_ms = 今 + ceiling_read_stale_ms` で `set_steady_ceiling`。真偽値でなければ 400）。`_apply_fake` に `yaw_zero`（`true` だけ。画面の WS の `yaw_zero` と**同じ関数**を呼ぶように切り出す。累計が無ければ理由つき 400）
+  - **`docs/使い方.md`** の偽物のモードの節（`--lift`・`steady`・`yaw_zero`）
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests`（Windows では CLAUDE.md の「環境の癖」の除外と `main` との比較。`test_server.py` は WSL）。**次の変異がそれぞれ赤**（**呼び出し側で縛る**: `build_runtime` の戻り・`POST /api/fake` を通したアプリ・`LiftLink` に送られた天井）:
+  1. `--lift` を付けても中の `FakeLift` を使う
+  2. `--lift` で `lift_port` を上書きしない（設定 API の取り先が違う）
+  3. `--fake` なしの `--lift` で起動する
+  4. `steady` の読み値が期限を過ぎても返り続ける
+  5. `steady` の POST で期限を延ばさない（2 回目の POST のあとも最初の期限で切れる）
+  6. 期限が切れてから `ceiling_read_stale_ms` を過ぎても、昇降部へ送る天井が `READ_ERROR` にならない（偽の昇降部の口に送られた `ceiling` で縛る）
+  7. `steady` なしの `ceiling` が 1 回分でなくなる
+  8. 起動時の `FAKE_CEILING_MM` に期限が付く
+  9. `yaw_zero` で原点を合わせない／ss の持ち主を `PREEMPTED` にしない／`mark_motion` を呼ばない（3 件）
+  10. `yaw_zero: false` や文字列を受け付ける
+
+### `WP-VIDEO-06` `hve_video` の偽物のモードに `--frame-url`
+
+- 読む節: [DetailedDesign.md](DetailedDesign.md) §4.4・§4.8、[-names.md](DetailedDesign-names.md) §4
+- 作るもの:
+  - `camera/hve_video/sources.py`: `UrlFrameSource`（`MjpegPipeSource` と同じ口: `read`・`latest_jpeg_stamped`・`wait_latest_jpeg_stamped`・`set_capture` などパイプラインが呼ぶもの全部）。読み取りスレッドで `urllib.request` により `GET`（**Python 3.8・依存を増やさない**）。§4.8 の表（重ねない・間隔・**時刻は要求を出した時刻**・上限・失敗のとき前の 1 枚と時刻を残す・取り込みを止めている間は要求しない・失敗の記録は続くあいだ 1 回）。時計と取得の関数は差し替えられるようにする（試験用）
+  - `open_source(..., frame_url=None)`・`camera/hve_video/__main__.py` の `--frame-url`（`--fake` なしは起動しない）
+  - `camera/config/params.toml`・`hve_camera/params.py` の一覧に `video_frame_url_timeout_ms`（5000・仮）
+  - **`docs/使い方.md`** の偽物のモードの節
+- 受け入れ: `.venv38/bin/python -m pytest camera/tests`（同上。**`/snapshot` の `X-Frame-Age-Ms` まで通す試験は `test_server.py` に置き、WSL で回す**）。試験は手元に立てた HTTP サーバ（遅らせる・200 以外・壊れた本体を返せる）か差し替えた取得関数で。**次の変異がそれぞれ赤**:
+  1. 前の要求が終わる前に次を出す（同時に 2 本以上）
+  2. 1 枚の時刻を返ってきた時刻にする
+  3. 上限より短い遅れ（例 2 s）を失敗にする
+  4. 上限を超えても待ち続ける
+  5. 失敗した回に時刻だけ新しくする（古さが伸びない）
+  6. 200 以外・展開できない本体を 1 枚にする
+  7. `set_capture(False)` の間も要求を出す
+  8. `--fake` なしの `--frame-url` で起動する
+  9. `/snapshot` の `X-Frame-Age-Ms` が要求の時刻から数えていない（`create_app` を通して縛る）

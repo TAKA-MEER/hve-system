@@ -228,6 +228,17 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 `POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
 偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
 
+**偽物のモードを外とつなぐ（2026-11-22。fk-system のシミュレーション。[DetailedDesign.md](DetailedDesign.md) §4.8。`WP-CAM-18`・`WP-VIDEO-06`）で足すもの**
+
+| 名前 | 中身 |
+| --- | --- |
+| `python3 -m hve_camera` の **`--lift HOST:PORT`** | `--fake` と一緒にだけ使える。`params` の `lift_host`・`lift_port` を上書きし、中の `FakeLift` の代わりに `LiftLink` でつなぐ |
+| カメラモジュールの `POST /api/fake` の **`ceiling.steady`** | 真偽値。真なら `ceiling_read_stale_ms` の間、読み値を出し続ける（POST のたびに延びる） |
+| `FakeHardware.set_steady_ceiling(…, until_ms=None)` | `until_ms` を過ぎたら読み値を返さない。`None` は期限なし（起動時の `FAKE_CEILING_MM`） |
+| カメラモジュールの `POST /api/fake` の **`yaw_zero`** | `true` だけ受ける。画面の WS の `yaw_zero` と同じ処理。累計がまだ無ければ 400 |
+| `python3 -m hve_video` の **`--frame-url URL`** | `--fake` と一緒にだけ使える。`UrlFrameSource`（`camera/hve_video/sources.py`）で取り込む |
+| **`video_frame_url_timeout_ms`** | 5000（**仮**。`params.toml`・`provisional` へ）。`--frame-url` の 1 回の要求を待つ上限 |
+
 **目標の高さへ・下端へのボタン（2026-11-21。[-protocol.md](DetailedDesign-protocol.md) §4.1。`WP-LIFTUI-07`・`WP-CAM-17`）で足すもの**
 
 | 名前 | 中身 |
