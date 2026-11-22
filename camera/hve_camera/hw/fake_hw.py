@@ -39,7 +39,9 @@ class FakeHardware(HardwareBase):
         #: 測った読み値の履歴
         self.ceiling_history: list[CeilingReading] = []
         #: 差し込みが無いとき毎回返す「いつもの読み値」（偽物のモードの起動用。試験は使わない）
+        #: `:attr:`_steady_until_ms` は期限（`None` なら期限なし。起動時の `FAKE_CEILING_MM`）
         self._steady: tuple[CeilingStatus, int | None] | None = None
+        self._steady_until_ms: float | None = None
         #: `True` の間は行が来ない（`POST /api/fake` の `io_lost`。`IO_LOST` を再現する）
         self._io_lost = False
         #: 外し忘れの省電力の段階と、そのとき渡されたピッチの角度（履歴つき）
@@ -84,18 +86,25 @@ class FakeHardware(HardwareBase):
         """天井の「次の測定値」を差し込む。`read_ceiling()` を呼ぶと 1 回分だけ返る。"""
         self._pending = CeilingReading(CeilingStatus(status), distance_mm)
 
-    def set_steady_ceiling(self, status: CeilingStatus | str, distance_mm: int | None = None) -> None:
+    def set_steady_ceiling(
+        self, status: CeilingStatus | str, distance_mm: int | None = None, until_ms: float | None = None
+    ) -> None:
         """**差し込みが無いとき、毎回この読み値を新しく測ったことにして返す。**
 
         偽物のモードを立ち上げただけで上昇できるようにする（1 回分の差し込みだと
         `ceiling_stale_ms` で古くなって「天井 値なし」に戻る）。`freeze_ceiling()` で止まる。
+        `until_ms` を渡せば、その時刻を過ぎたら値を返さない（読み値が古くなり、昇降部へは
+        `READ_ERROR` で届く。`None` は期限なし。外の描画サービスが与え続けるための期限は
+        `POST /api/fake` の `ceiling.steady` が付ける）。
         """
         self._steady = (CeilingStatus(status), distance_mm)
+        self._steady_until_ms = until_ms
 
     def freeze_ceiling(self) -> None:
         """以降新しい測定値を返さない（読み値が止まった・古い状態。spec §2 #4 を再現する）。"""
         self._pending = None
         self._steady = None
+        self._steady_until_ms = None
 
     def set_io_lost(self, lost: bool) -> None:
         """Arduino から行が来ない状態にする・戻す（`POST /api/fake` の `io_lost`）。"""
@@ -103,6 +112,7 @@ class FakeHardware(HardwareBase):
         if lost:
             self._pending = None
             self._steady = None
+            self._steady_until_ms = None
 
     # --- HardwareBase -------------------------------------------------------------------------
 
@@ -114,6 +124,8 @@ class FakeHardware(HardwareBase):
             status, distance_mm = self._pending.status, self._pending.distance_mm
             self._pending = None
         elif self._steady is not None:
+            if self._steady_until_ms is not None and self._clock() > self._steady_until_ms:
+                return None  # 期限切れ（与え続ける側が止まった）。呼び出し側が最後の読み値を古く見る
             status, distance_mm = self._steady
         else:
             return None

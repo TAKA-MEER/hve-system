@@ -448,11 +448,18 @@ class ControlLoop:
         return min(max(speed, low), high)
 
     def _ceiling_triple(self, now_ms: float) -> tuple:
-        """`hold` に載せる天井の `(状態, mm, 古さ)`。読み値が無ければ `READ_ERROR`。"""
+        """`hold` に載せる天井の `(状態, mm, 古さ)`。読み値が無ければ `READ_ERROR`。
+
+        古さが `ceiling_read_stale_ms` を超えた読み値も `READ_ERROR` にする
+        （protocol §5 の 4 状態の直し方と同じ。昇降部は `age_ms` も見るが、`READ_ERROR` なら
+        古さの扱いを待たずに止める。天井が止まって古くなったとき「十分遠い」を送り続けない）。
+        """
         reading = self._ceiling
         if reading is None or reading.at_ms is None:
             return "READ_ERROR", None, 0
         age_ms = max(0, int(now_ms - reading.at_ms))
+        if age_ms > float(self._params["ceiling_read_stale_ms"]):
+            return "READ_ERROR", None, age_ms
         if reading.status is CeilingStatus.MEASURED:
             return "MEASURED", reading.distance_mm, age_ms
         return reading.status.value, None, age_ms
