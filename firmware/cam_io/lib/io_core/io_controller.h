@@ -16,7 +16,7 @@
 constexpr uint32_t IO_CMD_TIMEOUT_MS = 300;
 // ヨーの速さの上限 [半ステップ毎秒]（axis_speed_abs_max_dps と揃える。60 deg/s 相当）
 constexpr int32_t YAW_HSPS_ABS_MAX = 680;
-// ピッチの可動範囲 [°]（仮。UnitV2 側の ±45 より広い 2 つ目の守り）
+// ピッチの可動範囲 [°]（仮。UnitV2 側の -60〜45 を下回らない 2 つ目の守り）
 constexpr int PITCH_MIN_DEG = -60;
 constexpr int PITCH_MAX_DEG = 60;
 // 起動時・再起動時に向く角度 [°]（正面・水平。サーボの性質で一気に動く）

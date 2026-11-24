@@ -21,7 +21,7 @@ yaw_steps_per_rev = 4096         # 資料により 4076 とも。実測で確定
 srf02_min_range_mm = 150         # SRF02 のデータシート
 srf02_max_range_mm = 6000        # SRF02 のデータシート
 # ピッチの可動範囲
-pitch_min_deg = -45              # 仮（H-V5・H-X5。MG996R で見直す）
+pitch_min_deg = -60              # 見下ろし 60°（H-V5。2026-11-25 ss の要求。実機で届くかは未確認）
 pitch_max_deg = 45               # 仮（H-V5・H-X5。MG996R で見直す）
 # ピッチの遊びの片寄せ（DetailedDesign.md §4.3.1。spec Spec-ui.md §1.3）。向きと量は実機で決める（H-V17）
 pitch_approach_sign = -1         # 仮（H-V17。-1 は値が減る向きで近づく。ss の実測で最もそろった向き）

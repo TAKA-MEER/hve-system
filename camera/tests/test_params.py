@@ -14,7 +14,7 @@ EXPECTED = {
     "yaw_steps_per_rev": 4096,
     "srf02_min_range_mm": 150,
     "srf02_max_range_mm": 6000,
-    "pitch_min_deg": -45,
+    "pitch_min_deg": -60,
     "pitch_max_deg": 45,
     "pitch_approach_sign": -1,
     "pitch_backlash_deg": 3,

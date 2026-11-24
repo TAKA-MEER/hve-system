@@ -327,7 +327,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`ceiling_read_stale_ms`** | 600 | **仮**（これより古い天井の読み値は `READ_ERROR` として送る。昇降部の `CEILING_STALE_MS` と揃える） |
 | **`uno_clock_window`** | 20 | **仮**（`C` 行が約 70 ms ごとなので約 1.4 秒分） |
 | `srf02_min_range_mm` / `srf02_max_range_mm` | 150 / 6000 | 旧版（SRF02 のデータシート） |
-| `pitch_min_deg` / `pitch_max_deg` | -45 / 45 | **仮**（`H-V5`・`H-X5`。MG996R で見直す） |
+| `pitch_min_deg` / `pitch_max_deg` | -60 / 45 | 下は見下ろし 60°（`H-V5`。2026-11-25 ss の要求。実機で届くかは未確認）。上は**仮**（`H-X5`） |
 | `axis_speed_abs_max_dps` | 60 | 旧版（28BYJ-48 の実用の上限の下側） |
 | `yaw_steps_per_rev` | 4096 | 旧版（半ステップ） |
 | `video_capture_width` / `video_capture_height` | 1280 / 720 | spec `H-V10`（カメラの MJPEG の最大。[-hardware.md](DetailedDesign-hardware.md) §2.1.1） |
@@ -368,7 +368,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | `IO_LINE_MAX` | `io_codec.h` | 32 | `M 65535 -1800 -680` が 20 文字（`R 65535` は 7 文字） |
 | `IO_CMD_TIMEOUT_MS` | `io_controller.h` | 300 | **仮**（`io_cmd_period_ms` の 6 倍） |
 | `YAW_HSPS_ABS_MAX` | `io_controller.h` | 680 | 60 deg/s × 4096 ÷ 360 ≒ 683（`axis_speed_abs_max_dps` と揃える） |
-| `PITCH_MIN_DEG` / `PITCH_MAX_DEG` | `io_controller.h` | -60 / 60 | **仮**。**UnitV2 側（±45）より広い 2 つ目の守り**。機構に当たらない範囲を実機で決める（`H-X5`） |
+| `PITCH_MIN_DEG` / `PITCH_MAX_DEG` | `io_controller.h` | -60 / 60 | **仮**。**UnitV2 側（-60〜45）を下回らない 2 つ目の守り**（下側は 2026-11-25 から同じ -60）。機構に当たらない範囲を実機で決める（`H-X5`） |
 | `PITCH_INITIAL_DEG` | `io_controller.h` | 0 | 旧版の考え方（正面・水平。起動時・再起動時に跳ぶ先） |
 | `SERVO_PULSE_CENTER_US` / `SERVO_US_PER_DEG` | `config.h` | 1500 / 10 | **仮**（MG996R のデータシートで確かめる） |
 | `SERVO_PITCH_UP_SIGN` | `config.h` | -1 | 実機（2026-10-27。+1 ではピッチの上下が逆だった。パルスを減らすと上を向く） |
