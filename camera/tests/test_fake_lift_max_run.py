@@ -76,3 +76,73 @@ async def test_ceiling_verdict_uses_the_margin_setting() -> None:
         assert lift.latest_state()["ceiling"]["reason"] == expected, (margin, mm)
         assert (lift.latest_state()["reason"] == "CEILING_NEAR") == (expected == "CEILING_NEAR")
     assert "CEILING_MARGIN_MM" not in lift.latest_state()["provisional"]
+
+
+async def _drive_down(lift, clock, until_ms, speed=100):
+    """`hold` の下降を送り続けながら `state` を読む。"""
+    state = None
+    while clock.now_ms < until_ms:
+        await lift.send_hold(direction="down", speed=speed, press=1, ceiling_status="MEASURED",
+                             ceiling_mm=3000, ceiling_age_ms=0)
+        clock.advance(100)
+        lift._step(clock.now_ms)
+        state = lift.latest_state()
+    return state
+
+
+async def test_down_to_zero_sets_bottom_and_stops_with_bottom() -> None:
+    clock = ManualClock(1000.0)
+    lift = FakeLift(clock)
+    lift.set_height_mm(100)
+    lift.set_height_ok(False)
+    state = await _drive_down(lift, clock, 2000)
+    assert state["height_mm"] == 0
+    assert state["bottom"] is True
+    assert state["height_ok"] is True
+    # 次の周期: 下降は BOTTOM で止まる
+    await lift.send_hold(direction="down", speed=100, press=1, ceiling_status="MEASURED",
+                         ceiling_mm=3000, ceiling_age_ms=0)
+    clock.advance(100)
+    lift._step(clock.now_ms)
+    stopped = lift.latest_state()
+    assert stopped["dir"] == "stop"
+    assert stopped["reason"] == "BOTTOM"
+    assert stopped["height_mm"] == 0
+
+
+async def test_up_leaving_zero_clears_bottom() -> None:
+    clock = ManualClock(1000.0)
+    lift = FakeLift(clock)
+    lift.set_height_mm(0)
+    lift.set_bottom(True)
+    await lift.send_hold(direction="up", speed=100, press=1, ceiling_status="MEASURED",
+                         ceiling_mm=3000, ceiling_age_ms=0)
+    clock.advance(100)
+    lift._step(clock.now_ms)
+    state = lift.latest_state()
+    assert state["height_mm"] == 10
+    assert state["bottom"] is False
+
+
+async def test_idle_backdoor_bottom_is_not_recomputed() -> None:
+    clock = ManualClock(1000.0)
+    lift = FakeLift(clock)
+    lift.set_height_mm(500)
+    lift.set_bottom(True)
+    clock.advance(100)
+    lift._step(clock.now_ms)
+    assert lift.latest_state()["bottom"] is True
+    lift.set_height_mm(0)
+    lift.set_bottom(False)
+    clock.advance(100)
+    lift._step(clock.now_ms)
+    assert lift.latest_state()["bottom"] is False
+
+
+async def test_down_past_zero_in_one_step_is_clamped_to_zero() -> None:
+    clock = ManualClock(1000.0)
+    lift = FakeLift(clock)
+    lift.set_height_mm(5)
+    state = await _drive_down(lift, clock, 1100)
+    assert state["height_mm"] == 0
+    assert state["bottom"] is True

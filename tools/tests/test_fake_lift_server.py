@@ -1126,3 +1126,79 @@ def test_margin_applies_to_the_ceiling_shown_without_an_owner():
 
 def test_provisional_no_longer_has_ceiling_margin_mm():
     assert "CEILING_MARGIN_MM" not in fake.PROVISIONAL
+
+
+def _hold_down_and_step(lift, conn, start_ms, until_ms, speed=100):
+    """`hold` の下降を送り続けながら `state` を読む（変異を縛る経路）。"""
+    state = None
+    for now in range(start_ms, until_ms + 1, 100):
+        hold = decode_hold(hold_text(direction="down", speed=speed, ceiling=FAR), now)
+        assert hold is not None
+        lift.on_hold(conn, "module", hold, now)
+        state = lift.step(now)
+    return state
+
+
+def test_down_to_zero_sets_bottom_and_stops_with_bottom():
+    """下降で 0 に着いたら `bottom` を立て、次の周期は `BOTTOM` で止まる。"""
+    lift = FakeLift()
+    lift.height_mm = 100
+    lift.bottom = False
+    lift.homed = False
+    lift.height_ok = False
+    conn = module_conn(lift)
+    lift.step(1000)
+    state = _hold_down_and_step(lift, conn, 1000, 2000)
+    assert state["height_mm"] == 0
+    assert state["bottom"] is True
+    assert state["homed"] is True
+    assert state["height_ok"] is True
+    # 次の周期: 下降は BOTTOM で止まる
+    hold = decode_hold(hold_text(direction="down", speed=100, ceiling=FAR), 2000)
+    assert hold is not None
+    lift.on_hold(conn, "module", hold, 2000)
+    stopped = lift.step(2100)
+    assert stopped["dir"] == "stop"
+    assert stopped["reason"] == "BOTTOM"
+    assert stopped["height_mm"] == 0
+
+
+def test_up_leaving_zero_clears_bottom():
+    """上昇で 0 を離れたら `bottom` を下ろす。"""
+    lift = FakeLift()
+    lift.height_mm = 0
+    lift.bottom = True
+    conn = module_conn(lift)
+    lift.step(1000)
+    hold = decode_hold(hold_text(direction="up", speed=100, ceiling=FAR), 1000)
+    assert hold is not None
+    lift.on_hold(conn, "module", hold, 1000)
+    state = lift.step(1100)
+    assert state["height_mm"] == 10
+    assert state["bottom"] is False
+
+
+def test_idle_backdoor_bottom_is_not_recomputed():
+    """動いていない間の裏口の `bottom` は高さから計算し直さない。"""
+    lift = FakeLift()
+    lift.height_mm = 500
+    lift.bottom = True  # 裏口で立てたもの
+    state = lift.step(2000)
+    assert state["bottom"] is True
+    assert state["height_mm"] == 500
+    lift.height_mm = 0
+    lift.bottom = False
+    state = lift.step(2100)
+    assert state["bottom"] is False
+
+
+def test_down_past_zero_in_one_step_is_clamped_to_zero():
+    """1 周期で 0 を越える下降（5 mm から 100 mm/s）でも高さは負にならない。"""
+    lift = FakeLift()
+    lift.height_mm = 5
+    lift.bottom = False
+    conn = module_conn(lift)
+    lift.step(1000)
+    state = _hold_down_and_step(lift, conn, 1000, 1100)
+    assert state["height_mm"] == 0
+    assert state["bottom"] is True
