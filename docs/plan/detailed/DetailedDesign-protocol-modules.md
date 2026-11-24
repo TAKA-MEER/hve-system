@@ -1,7 +1,7 @@
 # 通信 — 上部モジュールの複数対応（案）
 
 [DetailedDesign-protocol.md](DetailedDesign-protocol.md) §2（昇降部の WS）を、spec の 2026-11-01 以降の決まりに合わせて広げる案。
-**状態: 2026-11-05 に fk-system・ss-system が確かめ済み（§6）。作業パケットは `WP-LIFT-13`・`WP-LIFT-14`・`WP-LIFTUI-03`・`WP-CAM-10`（[-packets.md](DetailedDesign-packets.md)）。新しい名前は [-names.md](DetailedDesign-names.md) へ移した。実装はまだ。**いまの実物は [-protocol.md](DetailedDesign-protocol.md) §2.1・§2.2 のまま（上部モジュールは 1 台の前提）。
+**状態: 2026-11-05 に fk-system・ss-system が確かめ済み（§6）。作業パケットは `WP-LIFT-13`・`WP-LIFT-14`・`WP-LIFTUI-03`・`WP-CAM-10`（[-packets.md](DetailedDesign-packets.md)）。新しい名前は [-names.md](DetailedDesign-names.md) へ移した。**実装済み**（`WP-LIFT-13`・`WP-LIFTUI-03`・`WP-CAM-10` は 2026-11-06、`WP-LIFT-14` は 2026-11-16 にマージ。[ImplementationPlan.md](../ImplementationPlan.md) §6 の行 8）。**
 
 - 口の名前と形は本システムが書き、fk-system・ss-system が確かめる（spec [Spec-module.md](../spec/Spec-module.md) §1。2026-11-05 ユーザー決定）。
 - 入力は spec [Spec-module.md](../spec/Spec-module.md) §1〜§5（複数の上部モジュール・状態を読むだけの接続・目標の高さへの移動・どの上部モジュールが操作しているか・測定機構）と [Spec-safety.md](../spec/Spec-safety.md) §2。

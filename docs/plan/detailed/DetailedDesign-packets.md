@@ -81,6 +81,7 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 | `WP-CAM-17` | 16 | カメラモジュールに `lift_goto` の中継・`state.lift_goto`・画面の「目標の高さへ」「下端へ」・停止ボタン・モックアップ（[-protocol.md](DetailedDesign-protocol.md) §4.1） | LIFT-14 | 不要（偽物のモード） |
 | `WP-CAM-18` | 17 | カメラモジュールの偽物のモードを外とつなぐ: `--lift HOST:PORT`・`POST /api/fake` の `ceiling.steady`・`yaw_zero`（[DetailedDesign.md](DetailedDesign.md) §4.8） | — | 不要（偽物のモード） |
 | `WP-VIDEO-06` | 17 | `hve_video` の偽物のモードに `--frame-url`（外から 1 枚ずつ取り込む。§4.8） | — | 不要（偽物のモード） |
+| `WP-LIFTUI-08` | 17 | **偽の昇降部 2 つが下端を自分で立てる**（下降で高さ 0 → `bottom`・`BOTTOM`・原点。2026-11-24 fk-system の申し送り） | — | 不要 |
 
 **段階 5（2026-10-15 の設計変更）**: `WP-LIFTUI-02` と `WP-CAM-06` は取り決め（[-protocol.md](DetailedDesign-protocol.md) §2）が書いてあるので `WP-LIFT-06` と並べて進められる。**ただし `hold` の `duty` → `speed` は互換が無いので、3 つ揃えてから実機に入れる。**
 `WP-MEAS-01`（ストローク）で `LIFT_UM_PER_COUNT`（設計値は `WP-LIFT-09` で入れる）・速さの制御の係数・`LIFT_TOP_MM` を決める。
@@ -111,6 +112,8 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
 **段階 16（2026-11-21。目標の高さへ・下端へのボタン。spec [Spec-ui.md](../spec/Spec-ui.md) §1.7・[-protocol.md](DetailedDesign-protocol.md) §4.1）**: `WP-LIFTUI-07` と `WP-CAM-17` は並べてよい。**昇降部のファームは変えない**（`/ws/ui` の `goto` は `WP-LIFT-14` で受け付けている）。**互換**: 古いカメラモジュールは `lift_goto` を知らない種類として捨てる（画面だけ新しいと何も動かないだけ）。**両方とも、高さの欄とボタンが増えるので背の低い画面のスクロール検査に気をつける。**
 
 **段階 17（2026-11-22。偽物のモードを外とつなぐ。fk-system のシミュレーション。[DetailedDesign.md](DetailedDesign.md) §4.8。同日に fk-system が形を確かめた）**: `WP-CAM-18` と `WP-VIDEO-06` は並べてよい。**偽物のモードだけの変更で、本物の経路・取り決めは変えない**（UnitV2・ESP32 への配備は要らない）。入ったら fk-system に知らせる。
+
+**段階 17（2026-11-24。fk-system の申し送り: fk は偽の昇降部を相手に下げ終われない）**: `WP-LIFTUI-08` だけ。道具と偽物だけで、ファーム・画面・プロトコルは変えない。マージしたら fk の実装管理担当に知らせる。
 
 **`WP-MEAS-06` と `WP-LIFT-03` は並べて進められる**（昇降部は UnitV2 の調査に依らない）。
 **`WP-CAM-04` は `WP-MEAS-06` の 1（サービスを止めて口を開ける）・2（STA）・5（依存）が通ってから始める。**通らなければ旧版の Python を載せる前提が崩れるので、設計を見直す。
@@ -816,3 +819,20 @@ node firmware/lift/web/tests/web.test.js   # 昇降部の画面の純関数
   7. `set_capture(False)` の間も要求を出す
   8. `--fake` なしの `--frame-url` で起動する
   9. `/snapshot` の `X-Frame-Age-Ms` が要求の時刻から数えていない（`create_app` を通して縛る）
+
+### `WP-LIFTUI-08` 偽の昇降部が下端を自分で立てる
+
+- 背景（2026-11-24 fk-system の申し送り）: `tools/fake_lift_server.py` は高さを 0 で止めるが `bottom` を立てない（`POST /api/fake` でしか変わらない）。fk は下端に着いたかを `state.bottom` で見る（protocol-modules §2.1）ので、偽物を相手に下げ終われない。カメラモジュールの `camera/hve_camera/hw/fake_lift.py` は高さがマイナスまで下がり、`bottom` も立たない
+- 読む節: spec [Spec-safety.md](../spec/Spec-safety.md) §1.2（高さの原点は下端のリミットスイッチ）・§2 の下端の行、[-protocol.md](DetailedDesign-protocol.md) §2.2（`bottom`・`homed`・`height_ok`）、[-names.md](DetailedDesign-names.md) §4 の `POST /api/fake` の段落
+- 作るもの（2 つの偽物で同じ振る舞いにする）:
+  - 下降で高さが 0 以下になったら、高さを 0 に丸め、`bottom` を真にし、次の周期から下降は `BOTTOM` で止める（今の `bottom` のときの止め方をそのまま使う）。原点を取ったことにする（`homed`・`height_ok` を真。実物は下端で原点を取る）
+  - 上昇で高さが 0 より上になったら `bottom` を偽にする
+  - `POST /api/fake` の `bottom`・`height_mm` は今までどおり効く（裏口で立てた `bottom` を、動いていない間に勝手に戻さない。直すのは動いて高さが変わったときだけ）
+  - 偽物の冒頭の説明（docstring）と、`docs/使い方.md` に偽物の下端の扱いが書いてあれば直す
+- 受け入れ: `.venv/bin/python -m pytest tools/tests`・`.venv38/bin/python -m pytest camera/tests`・`node firmware/lift/web/tests/browser_paths.js`（4 は前から落ちる）・`camera/web/tests/browser_paths.js`（3・9 は前から落ちる）が、新しい落ちなしで通る。次の変異がそれぞれ赤（**`hold` の下降を送り続けて `state` を読む試験で縛る**。2 つの偽物それぞれで）:
+  1. 0 に着いても `bottom` を立てない
+  2. `bottom` が立っても下降を止めない（`BOTTOM` にならない）
+  3. 0 に丸めない（マイナスになる。カメラの偽物）
+  4. 上昇で 0 を離れても `bottom` を下ろさない
+  5. 動いていない間に、裏口で立てた `bottom` を高さから計算し直して消す
+

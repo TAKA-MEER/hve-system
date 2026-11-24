@@ -226,7 +226,7 @@ UART の行は `M` / `C` / `B` / **`R`**（2026-11-10。[-power.md](DetailedDesi
 | **`state.lift.ceiling_standalone`**・**`standaloneCeilingText`** | カメラモジュール（`WP-CAM-11`）。前者は昇降部の `ceiling.standalone` をそのまま載せる（無ければ `null`）。後者は `camera/web/app.js` の純関数で、持ち主が `ui`・`button` で `SETTING_OFF`／`NO_SOURCE` のときだけ天井のバッジの文言を返す |
 
 `POST /api/fake`（カメラモジュールの偽物のモードだけ）は旧版の形に、`io_lost`（真偽値。偽の Arduino が行を止める）を足す。
-偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。
+偽の昇降部（`tools/fake_lift_server.py`・`hw/fake_lift.py`）は `POST /api/fake` で `height_mm`・`bottom` を変えられる。**2026-11-24 から（`WP-LIFTUI-08`）、下降で高さが 0 に着いたら自分で `bottom` を立てて `BOTTOM` で止まり、上昇で 0 を離れたら下ろす**（実物の下端スイッチの真似。fk-system の申し送り）。
 
 **偽物のモードを外とつなぐ（2026-11-22。fk-system のシミュレーション。[DetailedDesign.md](DetailedDesign.md) §4.8。`WP-CAM-18`・`WP-VIDEO-06`）で足すもの**
 
