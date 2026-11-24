@@ -31,6 +31,10 @@
 - 型の違う `ceiling` は `hold`・`goto` を捨てず `MISSING` として受け取る
 - `goto` は目標の高さまで動かし、着いたら `state.goto.status` を `ARRIVED` にする。
   着いたあと同じ `press` では動き出さない。安全の判定は `hold` と同じ
+- **下端は自分で立てる（実物の下端スイッチの真似）**: 下降で高さが 0 に着いたら高さを 0 に丸め、
+  `bottom` を立てて `homed`・`height_ok` を真にし、次の周期から下降は `BOTTOM` で止める。
+  上昇で 0 を離れたら `bottom` を下ろす。`POST /api/fake` で裏口に立てた `bottom` は、
+  動いていない間は高さから計算し直さない（直すのは動いて高さが変わったときだけ）
 - **測定機構（アームの制御器。`role: arm`。DetailedDesign-protocol-arm.md）**: `role: arm` の接続は
   1 本だけ（新しい方が古い方を閉じる。最後に受けた `out` と時刻は引き継ぐ）。`arm`（`out`: 真偽値か
   `null`。欠け・型違いは `null`）を `LIFT_ARM_LINK_TIMEOUT_MS` 受けないか、接続が閉じたら通信できない。
@@ -714,6 +718,14 @@ class FakeLift:
             # 偽の高さは速さ [mm/s] × 経過時間で動かす
             sign = 1 if out_dir == "up" else -1
             self.height_mm = max(0.0, float(self.height_mm) + sign * cmd_speed * elapsed / 1000)
+            if out_dir == "down" and float(self.height_mm) <= 0.0:
+                # 下端スイッチの真似: 0 に丸め、原点を取ったことにする
+                self.height_mm = 0.0
+                self.bottom = True
+                self.homed = True
+                self.height_ok = True
+            elif out_dir == "up" and float(self.height_mm) > 0.0:
+                self.bottom = False
         if reason == "NONE" and not self.height_ok:
             # W-1 の間は昇降部は上昇を止めないので、偽物も止めない。表示だけ
             reason = "HEIGHT_UNKNOWN"
