@@ -406,8 +406,15 @@ class FakeLift(LiftPort):
         self._run_speed_mm_s = speed
         if direction == "up":
             self._height_mm += speed * dt_s
+            if self._height_mm > 0.0:
+                self._bottom = False
         elif direction == "down":
             self._height_mm -= speed * dt_s
+            if self._height_mm <= 0.0:
+                # 下端スイッチの真似: 0 に丸め、原点を取ったことにする
+                self._height_mm = 0.0
+                self._bottom = True
+                self._height_ok = True
         self._height_at_ms = now
 
         ok, ceiling_reason = fake_ceiling_verdict(
